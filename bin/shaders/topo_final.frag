@@ -144,7 +144,10 @@ float hexGrid(vec2 p) {
     float hexBoundary = m_hexSize * 0.866025;
    
     float distToLine = abs(distToEdge - hexBoundary);
-    float smoothing = fwidth(distToEdge) * 1.0;
+    
+    // Stable line width: use a small fixed fraction of hex size for consistent fidelity
+    float lineWidth = m_hexSize * 0.012;
+    float smoothing = lineWidth;
    
     return smoothstep(smoothing, 0.0, distToLine);
 }
