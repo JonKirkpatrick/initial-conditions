@@ -1,0 +1,15 @@
+# Build outputs
+/bin/sfmlgame
+
+# Compiler intermediates
+/src/*.o
+/src/*.d
+/src/imgui/*.o
+/src/imgui/*.d
+
+# Common local build leftovers
+*.o
+*.d
+*.obj
+*.exe
+*.out
