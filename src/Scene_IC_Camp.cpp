@@ -36,6 +36,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     );
     m_bakeTexture = sf::RenderTexture({bakeSize.x, bakeSize.y});
     m_bakeTexture.setSmooth(false);
+    m_topdownTexture = sf::RenderTexture({m_topdownTextureSize, m_topdownTextureSize});
+    m_topdownTexture.setSmooth(false);
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
     m_gridColor = Theme::color("cerulean");
     m_cameraConfig.VIEWPORT_WIDTH = game.window().getSize().x;
@@ -44,6 +46,10 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnCamera();
     spawnPlayer();
         initializeTerrainLayers();
+    m_topdownMaxHeight = 1.f;
+    for (const auto& layer : m_terrainLayers) {
+        m_topdownMaxHeight += layer.topoHeight;
+    }
     buildHud();
     updateHUDData();
     updateSunPosition();
@@ -620,11 +626,33 @@ void Scene_IC_Camp::sRender() {
     renderWorld();
     runBakePass();
     runFinalPass();
+    runTopDownPass();
     sf::Sprite finalSprite(m_renderTexture.getTexture());
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.draw(finalSprite);
     m_hud->render(m_game.window(), false);
+
+    if (m_showTopDownViewer) {
+        sf::Vector2u size = window.getSize();
+        const float panelSize = 220.f;
+        const float pad = 12.f;
+        sf::Vector2f panelPos(pad, size.y - panelSize - pad);
+
+        sf::RectangleShape panel(sf::Vector2f(panelSize, panelSize));
+        panel.setPosition(panelPos);
+        panel.setFillColor(sf::Color(14, 16, 18, 235));
+        panel.setOutlineThickness(2.f);
+        panel.setOutlineColor(sf::Color(230, 220, 200, 230));
+        window.draw(panel);
+
+        sf::Sprite viewer(m_topdownTexture.getTexture());
+        viewer.setPosition(panelPos + sf::Vector2f(4.f, 4.f));
+        viewer.setScale(sf::Vector2f(
+            (panelSize - 8.f) / float(m_topdownTexture.getSize().x),
+            (panelSize - 8.f) / float(m_topdownTexture.getSize().y)));
+        window.draw(viewer);
+    }
 }
 
 void Scene_IC_Camp::sGUI()
@@ -662,6 +690,7 @@ void Scene_IC_Camp::sGUI()
             ImGui::Checkbox("Draw Grid", &m_drawGrid);
             ImGui::Checkbox("Draw Textures", &m_drawTextures);
             ImGui::Checkbox("Draw Debug", &m_drawCollision);
+            ImGui::Checkbox("Show Top-down Viewer", &m_showTopDownViewer);
 
             sf::Vector2i mousePos = sf::Mouse::getPosition(m_game.window());
             sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
@@ -824,6 +853,53 @@ void Scene_IC_Camp::runBakePass() {
     m_bakeTexture.clear(sf::Color::Transparent);
     m_bakeTexture.draw(dummyRect, &m_bakeShader);
     m_bakeTexture.display();
+}
+
+void Scene_IC_Camp::runTopDownPass() {
+    auto& transform = m_camera->get<CTransform3D>();
+    auto& cameraData = m_camera->get<CCamera>();
+    sf::Vector2u texSize = m_topdownTexture.getSize();
+    sf::Vector2u winSize = m_game.window().getSize();
+
+    auto makeFootprintCorner = [&](float sx, float sy) {
+        float x_ndc = (sx / float(winSize.x)) * 2.0f - 1.0f;
+        float y_ndc = 1.0f - (sy / float(winSize.y)) * 2.0f;
+        float f = std::tan(cameraData.fovY * 0.5f);
+        sf::Vector3f rayDir = Camera::rotateInverse(
+            sf::Vector3f(x_ndc * f * cameraData.aspectRatio, y_ndc * f, -1.0f),
+            transform.pitch, transform.yaw, transform.roll);
+        rayDir = Camera::normalize(rayDir);
+
+        sf::Vector3f world = transform.pos + rayDir * cameraData.farPlane;
+        if (std::abs(rayDir.y) > 1e-5f) {
+            float tGround = -transform.pos.y / rayDir.y;
+            if (tGround > 0.0f) {
+                world = transform.pos + rayDir * std::min(tGround, cameraData.farPlane);
+            }
+        }
+        return sf::Glsl::Vec2(world.x, world.z);
+    };
+
+    sf::Glsl::Vec2 topLeft = makeFootprintCorner(0.f, 0.f);
+    sf::Glsl::Vec2 topRight = makeFootprintCorner(float(winSize.x), 0.f);
+    sf::Glsl::Vec2 bottomLeft = makeFootprintCorner(0.f, float(winSize.y));
+    sf::Glsl::Vec2 bottomRight = makeFootprintCorner(float(winSize.x), float(winSize.y));
+
+    m_topdownShader.setUniform("viewportSize", sf::Glsl::Vec2(texSize.x, texSize.y));
+    m_topdownShader.setUniform("topLeft", topLeft);
+    m_topdownShader.setUniform("topRight", topRight);
+    m_topdownShader.setUniform("bottomLeft", bottomLeft);
+    m_topdownShader.setUniform("bottomRight", bottomRight);
+    m_topdownShader.setUniform("heightMax", m_topdownMaxHeight);
+    uploadTerrainLayersToShader(m_topdownShader, "layer");
+    for (int i = 0; i < 16; ++i) {
+        m_topdownShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
+    }
+
+    sf::RectangleShape dummyRect(sf::Vector2f(texSize.x, texSize.y));
+    m_topdownTexture.clear(sf::Color::Transparent);
+    m_topdownTexture.draw(dummyRect, &m_topdownShader);
+    m_topdownTexture.display();
 }
 
 void Scene_IC_Camp::runFinalPass() {

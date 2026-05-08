@@ -57,14 +57,19 @@ protected:
     // Shaders and render textures
     sf::Shader& m_bakeShader = Assets::Instance().getShader("TopoBake");
     sf::Shader& m_finalShader = Assets::Instance().getShader("TopoFinal");
+    sf::Shader& m_topdownShader = Assets::Instance().getShader("TopoTopDown");
     sf::Shader& m_sky = Assets::Instance().getShader("Sky");
     sf::RenderTexture m_renderTexture;
     sf::RenderTexture m_bakeTexture;
+    sf::RenderTexture m_topdownTexture;
     sf::RenderTexture m_skyTexture;
     sf::RenderTexture m_minimapTexture;
     sf::Image m_currentBakeImage;
+    bool m_showTopDownViewer = false;
+    float m_topdownMaxHeight = 1.f;
     float m_minimapWorldRadius = 10000.f;
     unsigned int m_minimapTextureSize = 256;
+    unsigned int m_topdownTextureSize = 256;
     float m_minimapContourStep = 300.f;
 
     // Camera bob smoothing (lag) state
@@ -122,6 +127,7 @@ protected:
     void updateMinimapTexture();
     void buildHud();
     void runBakePass();
+    void runTopDownPass();
     void runFinalPass();
     void renderWorld();
 
