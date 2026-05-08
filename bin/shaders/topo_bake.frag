@@ -132,7 +132,7 @@ void main() {
         float hApprox = 0.0;
         if (sampleTopdownHeight(p.xz, hApprox)) {
             float distApprox = p.y - hApprox;
-            if (distApprox > 120.0) {
+            if (distApprox > 40.0) {
                 float minAngle = 0.12 + (1.0 - q) * 0.2;
                 float angleScale = max(rayShallowness, minAngle);
                 float ss = clamp(u_stepSizeScale, 0.1, 5.0);

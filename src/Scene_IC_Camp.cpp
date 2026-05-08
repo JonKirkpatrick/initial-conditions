@@ -909,6 +909,7 @@ void Scene_IC_Camp::runTopDownPass() {
 
     sf::RectangleShape dummyRect(sf::Vector2f(texSize.x, texSize.y));
     m_topdownTexture.clear(sf::Color::Transparent);
+    m_topdownTexture.setSmooth(true);
     m_topdownTexture.draw(dummyRect, &m_topdownShader);
     m_topdownTexture.display();
 }
