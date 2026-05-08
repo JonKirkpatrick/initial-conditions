@@ -21,9 +21,7 @@ class Scene_IC_Camp : public Scene {
         sf::Vector2f center;
         float radius;
         float falloffWidth;
-        float topoScale;
-        float frequency;
-        float boundaryHeight;
+        float topoHeight;
     };
 
     typedef enum class HeadlightState

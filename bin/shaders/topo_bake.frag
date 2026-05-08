@@ -8,16 +8,12 @@ uniform mat3 invRotationMatrix;
 uniform float u_quality; // 0.05..1.0, scales raymarch cost
 uniform float u_stepSizeScale; // multiplier for base step size (default 1.0)
 uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
-uniform float terrainFloorY; // analytic cutoff plane below terrain
-uniform float terrainCeilingY; // analytic cutoff plane above terrain
 
 // Terrain layer parameters (16 layers)
 uniform vec2 layer_center[16];
 uniform float layer_radius[16];
 uniform float layer_falloffWidth[16];
-uniform float layer_topoScale[16];
-uniform float layer_frequency[16];
-uniform float layer_boundaryHeight[16];
+uniform float layer_topoHeight[16];
 
 float maskFromD(float d, float rd, float falloff) {
     float t = falloff;           // falloff distance
@@ -49,7 +45,7 @@ float evaluateLayerHeightAt(in vec2 xz, int layerIdx) {
     float mask = maskFromD(d, radius, falloff);
     
     // Topography simple
-    float topo = 500.0;
+    float topo = layer_topoHeight[layerIdx];
     
     float height = topo * mask;
     

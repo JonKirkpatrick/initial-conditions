@@ -19,7 +19,6 @@ void GameEngine::init(const std::string & path)
     std::cout << "Loading sprite sheets..." << std::endl;
     Assets::Instance().loadFromFile(path);
     std::cout << "Loading sprite sheets..." << std::endl;
-    Assets::Instance().loadSpriteSheet("spriteAtlas.txt");
     auto modes = sf::VideoMode::getFullscreenModes();
     if (modes.empty())
     {

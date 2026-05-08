@@ -53,7 +53,6 @@ public:
     Assets& operator=(const Assets&) = delete;
 
     void loadFromFile(const std::string& path);
-    void loadSpriteSheet(const std::string& path);
     void buildAnimationsFromDescriptor(const SpriteSheetDescriptor& desc);
 
     const sf::Texture& getTexture(const std::string& textureName) const;

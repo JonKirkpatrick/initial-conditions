@@ -464,7 +464,6 @@ void Scene_IC_Camp::sMovement(float dt)
 void Scene_IC_Camp::initializeTerrainLayers() {
     const float PI = 3.14159265f;
     const float layerRingRadius = 15000.0f;  // Distance of layer centers from origin
-    const float baseFrequency = 1.0f / 500.0f;  // Base spatial frequency
 
     for (int i = 0; i < 16; ++i) {
         // Arrange layers in a circle around the origin
@@ -478,23 +477,12 @@ void Scene_IC_Camp::initializeTerrainLayers() {
         
         layer.radius = 5000.0f + (i % 4) * 1500.0f;  // Vary radius based on layer index
         layer.falloffWidth = 700.0f + (i % 3) * 800.0f;  // Vary falloff sharpness
-        layer.topoScale = 200.0f + (i % 8) * 50.0f;  // Vary height scale
-        layer.frequency = baseFrequency * (1.0f + (i % 4) * 0.3f);  // Vary frequency
-        layer.boundaryHeight = 800.0f + (i % 5) * 100.0f;  // Vary boundary height
+        layer.topoHeight = 200.0f + (i % 8) * 50.0f;  // Vary height scale
     }
 }
 
 float Scene_IC_Camp::evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const {
-    // Return the raw surface/topography for this layer (no boundary blending).
-    // The caller (`heightAt`) will multiply this by the user mask to produce
-    // the final contribution, as per the new design.
-    float dx = x - layer.center.x;
-    float dz = z - layer.center.y;
-    float distSq = dx * dx + dz * dz;
-
-    // Topography (surface function) only
-    float topo = layer.topoScale * (std::sin(x * layer.frequency) * std::sin(z * layer.frequency));
-    return 500.0f;
+    return layer.topoHeight;
 }
 
 // Mask math in C++ matching GLSL `maskFromD` (user-specified formulas).
@@ -556,9 +544,7 @@ void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::s
                          sf::Glsl::Vec2(layer.center.x, layer.center.y));
         shader.setUniform(prefix + "_radius[" + idx + "]", layer.radius);
         shader.setUniform(prefix + "_falloffWidth[" + idx + "]", layer.falloffWidth);
-        shader.setUniform(prefix + "_topoScale[" + idx + "]", layer.topoScale);
-        shader.setUniform(prefix + "_frequency[" + idx + "]", layer.frequency);
-        shader.setUniform(prefix + "_boundaryHeight[" + idx + "]", layer.boundaryHeight);
+        shader.setUniform(prefix + "_topoHeight[" + idx + "]", layer.topoHeight);
     }
 }
 
@@ -831,17 +817,6 @@ void Scene_IC_Camp::runBakePass() {
     m_bakeShader.setUniform("farPlane",      cameraData.farPlane);
     m_bakeShader.setUniform("u_quality",     m_shaderQuality);
     m_bakeShader.setUniform("u_stepSizeScale", m_stepSizeScale);
-    m_bakeShader.setUniform("terrainFloorY", 0.0f);
-
-    float terrainCeilingY = 0.0f;
-    for (int i = 0; i < 16; ++i) {
-        if ((m_activeLayerMask & (1u << i)) == 0) {
-            continue;
-        }
-        const TerrainLayer& layer = m_terrainLayers[i];
-        terrainCeilingY = std::max(terrainCeilingY, layer.boundaryHeight + std::abs(layer.topoScale) + 256.0f);
-    }
-    m_bakeShader.setUniform("terrainCeilingY", terrainCeilingY);
     uploadTerrainLayersToShader(m_bakeShader, "layer");
     uploadActiveLayerMaskToShader(m_bakeShader, "u_activeLayerEnabled");
 
@@ -866,9 +841,6 @@ void Scene_IC_Camp::runFinalPass() {
     m_finalShader.setUniform("fovY",          cameraData.fovY);
     m_finalShader.setUniform("aspectRatio",   cameraData.aspectRatio);
     m_finalShader.setUniform("invRotationMatrix", toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll)));
-    m_finalShader.setUniform("u_quality",     m_shaderQuality);
-    m_finalShader.setUniform("u_stepSizeScale", m_stepSizeScale);
-    m_finalShader.setUniform("topoTexSize", sf::Glsl::Vec2(m_bakeTexture.getSize().x, m_bakeTexture.getSize().y));
     m_finalShader.setUniform("sunDir", m_sunDirection); 
     m_finalShader.setUniform("sunColor", m_sunColor);
     m_finalShader.setUniform("ambientStrength", 0.3f);
@@ -883,7 +855,6 @@ void Scene_IC_Camp::runFinalPass() {
     m_finalShader.setUniform("headlampIntensity", 4.f);
     m_finalShader.setUniform("headlampColor", colorToShader(sf::Color(255, 244, 214)));
     m_finalShader.setUniform("headlampRange", 15000.0f);
-    m_finalShader.setUniform("dampingMax", 2.0f);
     uploadActiveLayerMaskToShader(m_finalShader, "u_activeLayerEnabled");
     m_renderTexture.clear(sf::Color::Transparent);
     sf::RectangleShape dummyRect(sf::Vector2f(winSize.x, winSize.y));
