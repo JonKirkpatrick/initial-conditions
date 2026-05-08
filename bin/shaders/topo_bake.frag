@@ -112,6 +112,10 @@ void main() {
     float tPrev = 0.0;
     bool isHit = false;
 
+    if (rayDir.y > 0.0 && cameraPos.y >= topdownHeightMax) {
+        return; // upward ray already starts above the tallest terrain
+    }
+
     // Adaptive step count: very shallow rays (horizon) give up early to avoid crawl
     float rayShallowness = abs(rayDir.y);
     float q = clamp(u_quality, 0.05, 1.0);
@@ -128,6 +132,7 @@ void main() {
 
         vec3 p = cameraPos + rayDir * t;
         if (t > maxTravel) break;
+        if (rayDir.y > 0.0 && p.y > topdownHeightMax) break;
 
         float hApprox = 0.0;
         if (sampleTopdownHeight(p.xz, hApprox)) {

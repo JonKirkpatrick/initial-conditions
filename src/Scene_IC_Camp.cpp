@@ -45,11 +45,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnCamera();
     spawnPlayer();
-        initializeTerrainLayers();
-    m_topdownMaxHeight = 1.f;
-    for (const auto& layer : m_terrainLayers) {
-        m_topdownMaxHeight += layer.topoHeight;
-    }
+    initializeTerrainLayers();
+    m_topdownMaxHeight = computeSceneMaxHeight();
     buildHud();
     updateHUDData();
     updateSunPosition();
@@ -485,6 +482,14 @@ void Scene_IC_Camp::initializeTerrainLayers() {
         layer.falloffWidth = 700.0f + (i % 3) * 800.0f;  // Vary falloff sharpness
         layer.topoHeight = 200.0f + (i % 8) * 50.0f;  // Vary height scale
     }
+}
+
+float Scene_IC_Camp::computeSceneMaxHeight() const {
+    float maxHeight = 0.0f;
+    for (const auto& layer : m_terrainLayers) {
+        maxHeight = std::max(maxHeight, heightAt(layer.center.x, layer.center.y));
+    }
+    return std::max(1.0f, maxHeight * 1.25f);
 }
 
 float Scene_IC_Camp::evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const {

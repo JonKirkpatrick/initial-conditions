@@ -111,6 +111,7 @@ protected:
     // Terrain layer system (16 regions, additive composition)
     std::array<TerrainLayer, 16> m_terrainLayers;
     void initializeTerrainLayers();
+    float computeSceneMaxHeight() const;
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     uint32_t computeActiveLayerMask(const sf::Vector3f& cameraPos);
     float evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const;
