@@ -5,9 +5,14 @@ uniform float nearPlane;
 uniform float fovY;
 uniform float aspectRatio;
 uniform mat3 invRotationMatrix;
+uniform float cameraYaw;
 uniform float u_quality; // 0.05..1.0, scales raymarch cost
 uniform float u_stepSizeScale; // multiplier for base step size (default 1.0)
 uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
+uniform sampler2D topoTopdownTex;
+uniform vec2 topdownWorldMin;
+uniform vec2 topdownWorldSize;
+uniform float topdownHeightMax;
 
 // Terrain layer parameters (16 layers)
 uniform vec2 layer_center[16];
@@ -63,6 +68,32 @@ float heightAt(vec2 xz) {
     return height;
 }
 
+float decodePackedHeight(vec4 c, float maxHeightValue) {
+    float hn = c.r + c.g / 255.0 + c.b / (255.0 * 255.0);
+    return hn * max(maxHeightValue, 1e-6);
+}
+
+bool sampleTopdownHeight(in vec2 xz, out float outH) {
+    vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
+    uv.y = 1.0 - uv.y;
+    
+    // Apply the same -cameraYaw rotation as the top-down shader
+    vec2 uvCentered = uv - vec2(0.5);
+    float cosYaw = cos(-cameraYaw);
+    float sinYaw = sin(-cameraYaw);
+    vec2 uvRotated = vec2(
+        uvCentered.x * cosYaw - uvCentered.y * sinYaw,
+        uvCentered.x * sinYaw + uvCentered.y * cosYaw
+    ) + vec2(0.5);
+    
+    if (any(lessThan(uvRotated, vec2(0.0))) || any(greaterThan(uvRotated, vec2(1.0)))) {
+        return false;
+    }
+    vec4 c = texture2D(topoTopdownTex, uvRotated);
+    outH = decodePackedHeight(c, topdownHeightMax);
+    return true;
+}
+
 void main() {
     vec2 screen = gl_FragCoord.xy;
     screen.y = viewportSize.y - screen.y;
@@ -97,6 +128,21 @@ void main() {
 
         vec3 p = cameraPos + rayDir * t;
         if (t > maxTravel) break;
+
+        float hApprox = 0.0;
+        if (sampleTopdownHeight(p.xz, hApprox)) {
+            float distApprox = p.y - hApprox;
+            if (distApprox > 120.0) {
+                float minAngle = 0.12 + (1.0 - q) * 0.2;
+                float angleScale = max(rayShallowness, minAngle);
+                float ss = clamp(u_stepSizeScale, 0.1, 5.0);
+                float stepApprox = max(20.0 + (1.0 - q) * 50.0, (distApprox / angleScale) * 0.9);
+                stepApprox = clamp(stepApprox * ss, 2.0 * ss, 600.0 * ss);
+                tPrev = t;
+                t += stepApprox;
+                continue;
+            }
+        }
 
         float h = heightAt(p.xz);
         float distToSurf = p.y - h;

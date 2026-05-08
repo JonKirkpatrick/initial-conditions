@@ -1,16 +1,13 @@
 uniform vec2 viewportSize;
-uniform vec3 cameraPos;
 uniform float farPlane;
 uniform float fovY;
 uniform float aspectRatio;
 uniform mat3 invRotationMatrix;
+uniform float cameraYaw;
 uniform float heightMax;
 uniform float u_activeLayerEnabled[16];
-
-uniform vec2 topLeft;
-uniform vec2 topRight;
-uniform vec2 bottomLeft;
-uniform vec2 bottomRight;
+uniform vec2 worldMin;
+uniform vec2 worldSize;
 
 uniform vec2 layer_center[16];
 uniform float layer_radius[16];
@@ -58,9 +55,17 @@ vec3 packHeight24(float heightValue, float maxHeightValue) {
 void main() {
     vec2 uv = gl_FragCoord.xy / viewportSize;
     uv.y = 1.0 - uv.y;
-    vec2 top = mix(topLeft, topRight, uv.x);
-    vec2 bottom = mix(bottomLeft, bottomRight, uv.x);
-    vec2 xz = mix(top, bottom, uv.y);
+    
+    // Rotate UV around center (0.5, 0.5) by -camera yaw so the viewer rotates with heading
+    vec2 uvCentered = uv - vec2(0.5);
+    float cosYaw = cos(-cameraYaw);
+    float sinYaw = sin(-cameraYaw);
+    vec2 uvRotated = vec2(
+        uvCentered.x * cosYaw - uvCentered.y * sinYaw,
+        uvCentered.x * sinYaw + uvCentered.y * cosYaw
+    ) + vec2(0.5);
+    
+    vec2 xz = worldMin + uvRotated * worldSize;
 
     float heightValue = heightAt(xz);
     vec3 rgb = packHeight24(heightValue, heightMax);

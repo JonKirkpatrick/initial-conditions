@@ -624,9 +624,9 @@ void Scene_IC_Camp::sRender() {
     sf::Vector2u winSize = window.getSize();
     window.clear(sf::Color::Transparent);
     renderWorld();
+    runTopDownPass();
     runBakePass();
     runFinalPass();
-    runTopDownPass();
     sf::Sprite finalSprite(m_renderTexture.getTexture());
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
@@ -647,10 +647,10 @@ void Scene_IC_Camp::sRender() {
         window.draw(panel);
 
         sf::Sprite viewer(m_topdownTexture.getTexture());
+        const float sx = (panelSize - 8.f) / float(m_topdownTexture.getSize().x);
+        const float sy = (panelSize - 8.f) / float(m_topdownTexture.getSize().y);
         viewer.setPosition(panelPos + sf::Vector2f(4.f, 4.f));
-        viewer.setScale(sf::Vector2f(
-            (panelSize - 8.f) / float(m_topdownTexture.getSize().x),
-            (panelSize - 8.f) / float(m_topdownTexture.getSize().y)));
+        viewer.setScale(sf::Vector2f(sx, sy));
         window.draw(viewer);
     }
 }
@@ -840,12 +840,17 @@ void Scene_IC_Camp::runBakePass() {
     m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
     m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
     m_bakeShader.setUniform("invRotationMatrix", toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll)));
+    m_bakeShader.setUniform("cameraYaw",     transform.yaw);
     m_bakeShader.setUniform("fovY",          cameraData.fovY);
     m_bakeShader.setUniform("aspectRatio",   cameraData.aspectRatio);
     m_bakeShader.setUniform("nearPlane",     cameraData.nearPlane);
     m_bakeShader.setUniform("farPlane",      cameraData.farPlane);
     m_bakeShader.setUniform("u_quality",     m_shaderQuality);
     m_bakeShader.setUniform("u_stepSizeScale", m_stepSizeScale);
+    m_bakeShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
+    m_bakeShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
+    m_bakeShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
+    m_bakeShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
     uploadTerrainLayersToShader(m_bakeShader, "layer");
     uploadActiveLayerMaskToShader(m_bakeShader, "u_activeLayerEnabled");
 
@@ -885,11 +890,17 @@ void Scene_IC_Camp::runTopDownPass() {
     sf::Glsl::Vec2 bottomLeft = makeFootprintCorner(0.f, float(winSize.y));
     sf::Glsl::Vec2 bottomRight = makeFootprintCorner(float(winSize.x), float(winSize.y));
 
+    float minX = std::min(std::min(topLeft.x, topRight.x), std::min(bottomLeft.x, bottomRight.x));
+    float maxX = std::max(std::max(topLeft.x, topRight.x), std::max(bottomLeft.x, bottomRight.x));
+    float minZ = std::min(std::min(topLeft.y, topRight.y), std::min(bottomLeft.y, bottomRight.y));
+    float maxZ = std::max(std::max(topLeft.y, topRight.y), std::max(bottomLeft.y, bottomRight.y));
+    m_topdownWorldMin = sf::Vector2f(minX, minZ);
+    m_topdownWorldSize = sf::Vector2f(std::max(1.0f, maxX - minX), std::max(1.0f, maxZ - minZ));
+
     m_topdownShader.setUniform("viewportSize", sf::Glsl::Vec2(texSize.x, texSize.y));
-    m_topdownShader.setUniform("topLeft", topLeft);
-    m_topdownShader.setUniform("topRight", topRight);
-    m_topdownShader.setUniform("bottomLeft", bottomLeft);
-    m_topdownShader.setUniform("bottomRight", bottomRight);
+    m_topdownShader.setUniform("cameraYaw", transform.yaw);
+    m_topdownShader.setUniform("worldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
+    m_topdownShader.setUniform("worldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
     m_topdownShader.setUniform("heightMax", m_topdownMaxHeight);
     uploadTerrainLayersToShader(m_topdownShader, "layer");
     for (int i = 0; i < 16; ++i) {

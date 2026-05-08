@@ -67,6 +67,8 @@ protected:
     sf::Image m_currentBakeImage;
     bool m_showTopDownViewer = false;
     float m_topdownMaxHeight = 1.f;
+    sf::Vector2f m_topdownWorldMin{0.f, 0.f};
+    sf::Vector2f m_topdownWorldSize{1.f, 1.f};
     float m_minimapWorldRadius = 10000.f;
     unsigned int m_minimapTextureSize = 256;
     unsigned int m_topdownTextureSize = 256;
