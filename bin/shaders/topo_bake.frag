@@ -127,9 +127,7 @@ void main() {
     float maxStepsF = max(50.0, baseMaxF * q);
     int maxSteps = int(maxStepsF);
 
-    for (int i = 0; i < 500; ++i) {
-        if (i >= maxSteps) break;
-
+    for (int i = 0; i < 1500; ++i) {
         vec3 p = cameraPos + rayDir * t;
         if (t > maxTravel) break;
         if (rayDir.y > 0.0 && p.y > topdownHeightMax) break;
@@ -137,7 +135,7 @@ void main() {
         float hApprox = 0.0;
         if (sampleTopdownHeight(p.xz, hApprox)) {
             float distApprox = p.y - hApprox;
-            if (distApprox > 40.0) {
+            if (distApprox > 20.0) {
                 float minAngle = 0.12 + (1.0 - q) * 0.2;
                 float angleScale = max(rayShallowness, minAngle);
                 float ss = clamp(u_stepSizeScale, 0.1, 5.0);

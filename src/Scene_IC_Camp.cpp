@@ -7,11 +7,6 @@
 #include "imgui-SFML.h"
 #include "Camera.h"
 
-static float smoothstep(float edge0, float edge1, float x) {
-    float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
-
 static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matrix) {
     const float flattened[9] = {
         matrix[0][0], matrix[1][0], matrix[2][0],
@@ -231,7 +226,6 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
                  >> m_latitude;
         }
     }
-    // seed our random number generator
     std::srand(std::time(0));
     m_homeLocationXZ = sf::Vector2f(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
 }
@@ -496,6 +490,11 @@ float Scene_IC_Camp::evaluateLayerHeightAt(const TerrainLayer& layer, float x, f
     return layer.topoHeight;
 }
 
+float Scene_IC_Camp::getCameraHeightAboveGround(const sf::Vector3f& camPos) const {
+    float groundHeight = heightAt(camPos.x, camPos.z);
+    return camPos.y - groundHeight;
+}
+
 // Mask math in C++ matching GLSL `maskFromD` (user-specified formulas).
 static float maskFromD_Cpp(float d, float rd, float falloff) {
     const float k = 1e-10f;
@@ -551,8 +550,7 @@ void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::s
         const TerrainLayer& layer = m_terrainLayers[i];
         std::string idx = std::to_string(i);
         
-        shader.setUniform(prefix + "_center[" + idx + "]", 
-                         sf::Glsl::Vec2(layer.center.x, layer.center.y));
+        shader.setUniform(prefix + "_center[" + idx + "]", sf::Glsl::Vec2(layer.center.x, layer.center.y));
         shader.setUniform(prefix + "_radius[" + idx + "]", layer.radius);
         shader.setUniform(prefix + "_falloffWidth[" + idx + "]", layer.falloffWidth);
         shader.setUniform(prefix + "_topoHeight[" + idx + "]", layer.topoHeight);
@@ -627,11 +625,12 @@ void Scene_IC_Camp::sRender() {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
     sf::Vector2u winSize = window.getSize();
+    auto inverseRotationMatrix = toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll));
     window.clear(sf::Color::Transparent);
-    renderWorld();
+    renderWorld(inverseRotationMatrix);
     runTopDownPass();
-    runBakePass();
-    runFinalPass();
+    runBakePass(inverseRotationMatrix);
+    runFinalPass(inverseRotationMatrix);
     sf::Sprite finalSprite(m_renderTexture.getTexture());
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
@@ -834,7 +833,7 @@ void Scene_IC_Camp::sGUI()
     ImGui::End();
 }
 
-void Scene_IC_Camp::runBakePass() {
+void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
     sf::Vector2u bakeSize = m_bakeTexture.getSize();
@@ -844,7 +843,7 @@ void Scene_IC_Camp::runBakePass() {
 
     m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
     m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_bakeShader.setUniform("invRotationMatrix", toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll)));
+    m_bakeShader.setUniform("invRotationMatrix", inverseRotationMatrix);
     m_bakeShader.setUniform("cameraYaw",     transform.yaw);
     m_bakeShader.setUniform("fovY",          cameraData.fovY);
     m_bakeShader.setUniform("aspectRatio",   cameraData.aspectRatio);
@@ -919,7 +918,7 @@ void Scene_IC_Camp::runTopDownPass() {
     m_topdownTexture.display();
 }
 
-void Scene_IC_Camp::runFinalPass() {
+void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
     sf::Vector2u winSize = m_game.window().getSize();
@@ -933,7 +932,8 @@ void Scene_IC_Camp::runFinalPass() {
     m_finalShader.setUniform("nearPlane",     cameraData.nearPlane);
     m_finalShader.setUniform("fovY",          cameraData.fovY);
     m_finalShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_finalShader.setUniform("invRotationMatrix", toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll)));
+    m_finalShader.setUniform("invRotationMatrix", inverseRotationMatrix);
+    m_finalShader.setUniform("camHeight",     getCameraHeightAboveGround(transform.pos));
     m_finalShader.setUniform("sunDir", m_sunDirection); 
     m_finalShader.setUniform("sunColor", m_sunColor);
     m_finalShader.setUniform("ambientStrength", 0.3f);
@@ -956,12 +956,12 @@ void Scene_IC_Camp::runFinalPass() {
     m_renderTexture.display();
 }
 
-void Scene_IC_Camp::renderWorld() {
+void Scene_IC_Camp::renderWorld(const sf::Glsl::Mat3& rotationMatrix) {
     m_sky.setUniform("viewportSize",  sf::Glsl::Vec2(m_game.window().getSize().x, m_game.window().getSize().y));
     m_sky.setUniform("fovY",          m_camera->get<CCamera>().fovY);
     m_sky.setUniform("aspectRatio",   m_camera->get<CCamera>().aspectRatio);
     auto transform = m_camera->get<CTransform3D>();
-    m_sky.setUniform("invRotationMatrix", toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll)));
+    m_sky.setUniform("invRotationMatrix", rotationMatrix);
     m_sky.setUniform("sunDir", m_sunDirection);
     m_renderTexture.clear(sf::Color::Transparent);
     m_renderTexture.display();

@@ -115,6 +115,7 @@ protected:
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     uint32_t computeActiveLayerMask(const sf::Vector3f& cameraPos);
     float evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const;
+    float getCameraHeightAboveGround(const sf::Vector3f& cameraPos) const;
 
 
     void updateSunPosition();
@@ -129,10 +130,10 @@ protected:
     void updateHUDData();
     void updateMinimapTexture();
     void buildHud();
-    void runBakePass();
+    void runBakePass(const sf::Glsl::Mat3& rotationMatrix);
     void runTopDownPass();
-    void runFinalPass();
-    void renderWorld();
+    void runFinalPass(const sf::Glsl::Mat3& rotationMatrix);
+    void renderWorld(const sf::Glsl::Mat3& rotationMatrix);
 
 public:
     Scene_IC_Camp(GameEngine& game, const std::string& levelPath);

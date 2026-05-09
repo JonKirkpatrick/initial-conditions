@@ -2,6 +2,7 @@ uniform vec2 viewportSize;
 uniform float m_hexSize;
 uniform sampler2D topoTex;
 uniform vec3 cameraPos;
+uniform float camHeight;
 uniform float farPlane;
 uniform float nearPlane;
 uniform float fovY;
@@ -50,72 +51,57 @@ vec2 hexAt(vec2 p) {
     return vec2(rq, rr);
 }
 
-float maskFromD(float d, float rd, float falloff) {
-    float t = falloff;           // falloff distance
-
-    // Inside the circle: full strength
-    float inside = step(d, 0.0);  // 1.0 if d <= 0, else 0.0
-
-    // Smooth transition zone using cosine
-    float u = t - abs(d - t);
-    float g = clamp(0.5 * (1.0 + u / (abs(u) - 1e-10)), 0.0, 1.0);
-
-    float cosTerm = cos(3.141592653589793 * d / (2.0 * t));
-    float b = g * ((cosTerm + 1.0) * 0.5);
-
-    return inside + b;
+// ================== DERIVATIVE ==================
+float dMaskDd(float d, float falloff) {
+    float t = falloff;
+    if (d <= 0.0 || d >= 2.0 * t) return 0.0;
+   
+    float arg = 3.141592653589793 * d / (2.0 * t);
+    return -0.5 * sin(arg) * (3.141592653589793 / (2.0 * t));
 }
 
-// ================== TERRAIN HEIGHT ==================
-float evaluateLayerHeightAt(in vec2 xz, int layerIdx) {
+// ================== LAYER DERIVATIVE ==================
+vec2 evaluateLayerHeightDerivativeAt(in vec2 xz, int layerIdx) {
     vec2 delta = xz - layer_center[layerIdx];
     float distSq = dot(delta, delta);
-    
+   
+    if (distSq < 1e-12) return vec2(0.0);
+
+    float dist = inversesqrt(distSq);        // slightly faster than sqrt()
     float radius = layer_radius[layerIdx];
-    
-    float distFromCenter = sqrt(distSq);
-    float d = distFromCenter - radius;
     float falloff = layer_falloffWidth[layerIdx];
-    
-    // Use your sophisticated mask
-    float mask = maskFromD(d, radius, falloff);
-    
-    // Topography simple
     float topo = layer_topoHeight[layerIdx];
-    
-    float height = topo * mask;
-    
-    return height;
+
+    float d = dist * distSq - radius;        // wait, no — better keep sqrt for clarity, or:
+    // float d = dist - radius;               // (original is fine)
+
+    float maskDeriv = dMaskDd(d, falloff);
+    float dHeight_dDist = maskDeriv * topo;
+
+    return delta * (dist * dHeight_dDist);   // delta * (1/dist * dHeight_dDist) = delta * dist * ...
 }
 
-float heightAt(vec2 xz) {
-    float height = 0.0;
-    
+// ================== NORMAL (ANALYTIC) ==================
+vec3 normalAt(vec2 xz) {
+    float dhdx = 0.0;
+    float dhdz = 0.0;
+
     for (int i = 0; i < 16; ++i) {
         if (u_activeLayerEnabled[i] > 0.5) {
-            height += evaluateLayerHeightAt(xz, i);
+            vec2 deriv = evaluateLayerHeightDerivativeAt(xz, i);
+            dhdx += deriv.x;
+            dhdz += deriv.y;
         }
     }
-    return height;
-}
 
-// ================== NORMAL ==================
-vec3 normalAt(vec2 xz) {
-    float eps = 6.0;
-    float hL = heightAt(xz + vec2(-eps, 0.0));
-    float hR = heightAt(xz + vec2( eps, 0.0));
-    float hD = heightAt(xz + vec2(0.0, -eps));
-    float hU = heightAt(xz + vec2(0.0,  eps));
-   
-    vec3 normal = vec3(hL - hR, 2.0 * eps, hD - hU);
-    vec3 normalized = normalize(normal);
+    vec3 normal = vec3(-dhdx, 1.0, -dhdz);
+    float lenSq = dot(normal, normal);
     
-    // Portable NaN/Inf check: NaN != NaN, and use large magnitude test for infinities
-    if (normalized.x != normalized.x || normalized.y != normalized.y || normalized.z != normalized.z
-        || abs(normalized.x) > 1e20 || abs(normalized.y) > 1e20 || abs(normalized.z) > 1e20) {
+    if (lenSq < 1e-12) {
         return vec3(0.0, 1.0, 0.0);
     }
-    return normalized;
+    
+    return normal * inversesqrt(lenSq);
 }
 
 // ================== HEX GRID ==================
@@ -359,7 +345,6 @@ void main() {
     // ================== HEX GRID ==================
     float gridFade = pow(clamp(1.0 - (dist / farPlane), 0.0, 1.0), 2.0);
 
-    float camHeight = max(0.0, cameraPos.y - heightAt(cameraPos.xz));
     float visibilityDist = 800.0 + camHeight * 20.0;
     float distanceFade = clamp(1.0 - (dist / visibilityDist), 0.0, 1.0);
 
