@@ -104,6 +104,22 @@ vec3 normalAt(vec2 xz) {
     return normal * inversesqrt(lenSq);
 }
 
+// ================== SLOPE-BASED TERRAIN COLORING ==================
+vec3 getTerrainColor(vec3 normal, vec3 baseColor) {
+    // Grass on flatter areas, baseColor (rock/dirt) on steeper slopes
+    vec3 grassColor = vec3(0.18, 0.48, 0.12);     // Nice natural grass green - tune as desired
+    
+    float slopeThreshold = 0.98;   // Higher = grass only on very flat areas
+    float blendSharpness = 0.08;   // Controls how gradual the transition is
+    
+    // normal.y = 1.0 on perfectly flat, decreases as slope increases
+    float flatness = smoothstep(slopeThreshold - blendSharpness, 
+                                slopeThreshold + blendSharpness, 
+                                normal.y);
+    
+    return mix(baseColor, grassColor, flatness);
+}
+
 // ================== HEX GRID ==================
 float hexGrid(vec2 p) {
     float q = (2.0/3.0 * p.x) / m_hexSize;
@@ -254,6 +270,11 @@ void main() {
     // ================== LIGHTING ==================
     vec3 normal = isTerrainHit ? normalAt(worldPos.xz) : vec3(0.0, 1.0, 0.0);
 
+    // === SLOPE COLORING ===
+    vec3 terrainBaseColor = isTerrainHit ? 
+                            getTerrainColor(normal, baseColor) : 
+                            baseColor;
+
     vec3 sunDirNorm = normalize(sunDir);
     float sunElevationDeg = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;
 
@@ -262,7 +283,7 @@ void main() {
 
     float diff = max(dot(normal, sunDirNorm), 0.0) * sunVis;
 
-    vec3 ambient = ambientStrength * mix(1.0, 0.07, nightFactor) * baseColor;
+    vec3 ambient = ambientStrength * mix(1.0, 0.07, nightFactor) * terrainBaseColor;
 
     // === HEADLAMP ===
     vec3 headlampContribution = vec3(0.0);
@@ -308,11 +329,11 @@ void main() {
         }
     }
 
-    vec3 diffuse = diff * sunColor.rgb * baseColor + headlampContribution;
+    vec3 diffuse = diff * sunColor.rgb * terrainBaseColor + headlampContribution;
 
     // Moonlight
     float moonlightFill = nightFactor * 0.08;
-    ambient += moonlightFill * vec3(0.6, 0.75, 1.0) * baseColor;
+    ambient += moonlightFill * vec3(0.6, 0.75, 1.0) * terrainBaseColor;
 
     vec3 viewDir = normalize(cameraPos - worldPos);
     vec3 halfDir = normalize(sunDirNorm + viewDir);

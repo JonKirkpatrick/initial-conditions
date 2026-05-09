@@ -131,41 +131,52 @@ bool Scene_IC_Camp::shouldHeadlightsBeOn() const
 
 void Scene_IC_Camp::updateMinimapTexture()
 {
-    if (m_minimapTexture.getSize().x != m_minimapTextureSize || m_minimapTexture.getSize().y != m_minimapTextureSize)
+    if (m_minimapTexture.getSize().x != m_minimapTextureSize ||
+        m_minimapTexture.getSize().y != m_minimapTextureSize)
     {
         m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
     }
 
     const sf::Vector3f playerPos = m_player->get<CTransform3D>().pos;
-    const float texSize = static_cast<float>(m_minimapTextureSize);
-    const float center = texSize * 0.5f;
-    const float circleRadiusPx = center - 2.f;
+    const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
+    const float center   = texSize * 0.5f;
+    const float worldRadius = 12800.f;
 
+    // ── Draw the hillshaded topo layer via shader ──────────────────────────
     m_minimapTexture.clear(sf::Color::Transparent);
 
-    sf::CircleShape mintBase(circleRadiusPx);
-    mintBase.setOrigin({circleRadiusPx, circleRadiusPx});
-    mintBase.setPosition({center, center});
-    mintBase.setFillColor(sf::Color(198, 230, 205, 235));
-    m_minimapTexture.draw(mintBase);
+    sf::RectangleShape fullQuad({texSize, texSize});
 
-    // No contour drawing for now — keep a simple mint base for readability.
-    // Contour/heatmap will be added later when terrain data is richer.
+    m_topoMinimapShader.setUniform("u_playerXZ",
+        sf::Glsl::Vec2(playerPos.x, playerPos.z));
+    m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
+    m_topoMinimapShader.setUniform("u_texSize",      texSize);
+    m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
+    m_topoMinimapShader.setUniform("u_reliefExaggeration", 1.0f);
+    Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
+    for (int i = 0; i < 16; ++i) {
+        m_topoMinimapShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
+    }
+    sf::RenderStates states;
+    states.shader = &m_topoMinimapShader;
+    m_minimapTexture.draw(fullQuad, states);
 
+    // ── Home marker (unchanged) ────────────────────────────────────────────
     sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-
+    const float circleRadiusPx = center - 2.f;
     const float homeMarkerRadius = 5.5f;
     const float maxMarkerDist = std::max(0.f, circleRadiusPx - homeMarkerRadius - 1.f);
+    const float worldToPixel = circleRadiusPx / worldRadius;
+
     if (dist > 0.0001f)
     {
-        float worldToPixel = maxMarkerDist / m_minimapWorldRadius;
         sf::Vector2f homePx = sf::Vector2f(center, center) + delta * worldToPixel;
-
-        float markerDist = std::sqrt((homePx.x - center) * (homePx.x - center) + (homePx.y - center) * (homePx.y - center));
+        sf::Vector2f diff = homePx - sf::Vector2f(center, center);
+        float markerDist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
         if (markerDist > maxMarkerDist)
         {
-            sf::Vector2f dir = (homePx - sf::Vector2f(center, center)) / markerDist;
+            sf::Vector2f dir = diff / markerDist;
             homePx = sf::Vector2f(center, center) + dir * maxMarkerDist;
         }
 

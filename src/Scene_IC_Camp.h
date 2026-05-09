@@ -58,6 +58,7 @@ protected:
     sf::Shader& m_bakeShader = Assets::Instance().getShader("TopoBake");
     sf::Shader& m_finalShader = Assets::Instance().getShader("TopoFinal");
     sf::Shader& m_topdownShader = Assets::Instance().getShader("TopoTopDown");
+    sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
     sf::Shader& m_sky = Assets::Instance().getShader("Sky");
     sf::RenderTexture m_renderTexture;
     sf::RenderTexture m_bakeTexture;
