@@ -29,6 +29,7 @@ uniform vec2 layer_center[16];
 uniform float layer_radius[16];
 uniform float layer_falloffWidth[16];
 uniform float layer_topoHeight[16];
+uniform int u_stripeLayerIndex;
 
 #include "topo_common.glsl"
 
@@ -52,21 +53,86 @@ vec2 hexAt(vec2 p) {
     return vec2(rq, rr);
 }
 
+// Return normalized position within the 2*t falloff band (0..1) for the selected layer,
+// or -1.0 if outside the target middle band. The normal argument is retained for call-site
+// compatibility, but the stripe mask itself is driven only by the warped layer band.
+float evaluateLayerStripe(vec2 xz, vec3 normal) {
+    vec2 warpedXZ = warpXZ(xz);
+
+    for (int i = 0; i < 16; ++i) {
+        if (i != u_stripeLayerIndex) continue;
+        if (u_activeLayerEnabled[i] < 0.5) continue;
+
+        vec2  delta   = warpedXZ - layer_center[i];
+        float dist    = length(delta);
+        float radius  = layer_radius[i];
+        float falloff = layer_falloffWidth[i];
+        float d       = dist - radius; // 0 .. 2*falloff outward
+
+        float bandWidth = 2.0 * falloff;
+        if (bandWidth <= 1e-6) return -1.0;
+
+        // Only consider outward band [0, 2*falloff]
+        if (d < 0.0 || d > bandWidth) return -1.0;
+
+        // normalized position inside the outward band (0..1)
+        float pos = d / bandWidth;
+
+        // Return only when within the middle 20% (0.4..0.6) as requested
+        if (pos >= 0.25 && pos <= 0.75) {
+            return (pos - 0.25) / 0.5; // remap to 0..1 across the selected sub-band
+        }
+    }
+    return -1.0;
+}
+
 // ================== SLOPE-BASED TERRAIN COLORING ==================
-vec3 getTerrainColor(vec3 normal, vec3 baseColor) {
-    // Grass on flatter areas, baseColor (rock/dirt) on steeper slopes
-    vec3 grassColor = vec3(0.18, 0.48, 0.12);     // Nice natural grass green - tune as desired
+vec3 getTerrainColor(vec3 normal, vec3 baseColor, vec2 xz) {
+    // Dust-covered barren surface: grey-brown on flat, brown on slopes
+    vec3 baseColorBarren = vec3(0.40, 0.38, 0.33);  // Grey-brown dust on flats
+    vec3 bandColor = vec3(1.0, 1.0, 1.0);  // Bright white for visibility during tuning
     
-    float slopeThreshold = 0.98;   // Higher = grass only on very flat areas
-    float blendSharpness = 0.08;   // Controls how gradual the transition is
+    float slopeThreshold = 0.98;   // Higher = only on very flat areas
+    float blendSharpness = 0.08;   // Controls transition smoothness
     
     // normal.y = 1.0 on perfectly flat, decreases as slope increases
     float flatness = smoothstep(slopeThreshold - blendSharpness, 
                                 slopeThreshold + blendSharpness, 
                                 normal.y);
-    
-    return mix(baseColor, grassColor, flatness);
-}
+
+
+    // Stripe based only on band proportion (evaluateLayerStripe returns -1.0 if no stripe)
+    float stripePos = evaluateLayerStripe(xz, normal);
+        vec3 slopeColor = baseColor;
+
+        if (stripePos >= 0.0) {
+            // === YOUR ORIGINAL STRIPE COLOR LOGIC — UNCHANGED ===
+            vec3 col0 = vec3(0.65, 0.58, 0.50);
+            vec3 col1 = vec3(0.48, 0.34, 0.30);
+            vec3 col2 = vec3(0.65, 0.28, 0.20);
+            float centers[3];
+            centers[0] = 0.25;
+            centers[1] = 0.5;
+            centers[2] = 0.85;
+            float sigma = 0.05;
+            float w0 = exp(-pow((stripePos - centers[0]) / sigma, 2.0));
+            float w1 = exp(-pow((stripePos - centers[1]) / sigma, 2.0));
+            float w2 = exp(-pow((stripePos - centers[2]) / sigma, 2.0));
+            float total = w0 + w1 + w2 + 1e-6;
+            vec3 stripeColor = (w0 * col0 + w1 * col1 + w2 * col2) / total;
+
+            // === NEW: Soft fade only at the outer edges of the whole band ===
+            float edgeFade = smoothstep(0.0, 0.18, stripePos) * 
+                             smoothstep(1.0, 0.82, stripePos);
+
+            // Apply fade to the blend amount
+            float stripeBlend = smoothstep(0.0, 1.0, 0.2) * edgeFade;   // keep your original base strength
+
+            slopeColor = mix(baseColor, stripeColor, stripeBlend);
+        }
+
+        return mix(slopeColor, baseColorBarren, flatness);
+    }
 
 // ================== HEX GRID ==================
 float hexGrid(vec2 p) {
@@ -89,6 +155,7 @@ float hexGrid(vec2 p) {
     center.x = m_hexSize * 1.5 * rq;
     center.y = m_hexSize * 1.7320508 * (rr + rq / 2.0);
    
+    
     vec2 delta = abs(p - center);
     float distToEdge = max(delta.y, delta.y * 0.5 + delta.x * 0.866025);
     float hexBoundary = m_hexSize * 0.866025;
@@ -226,7 +293,7 @@ void main() {
 
     // === SLOPE COLORING ===
     vec3 terrainBaseColor = isTerrainHit ? 
-                            getTerrainColor(normal, baseColor) : 
+                            getTerrainColor(normal, baseColor, worldPos.xz) : 
                             baseColor;
 
     vec3 sunDirNorm = normalize(sunDir);

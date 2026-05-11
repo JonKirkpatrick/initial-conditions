@@ -9,6 +9,7 @@ uniform float cameraYaw;
 uniform float u_quality; // 0.05..1.0, scales raymarch cost
 uniform float u_stepSizeScale; // multiplier for base step size (default 1.0)
 uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
+uniform float u_heightmapTransitionThreshold; // distance above cached heightmap before raymarching
 uniform sampler2D topoTopdownTex;
 uniform vec2 topdownWorldMin;
 uniform vec2 topdownWorldSize;
@@ -19,8 +20,6 @@ uniform vec2 layer_center[16];
 uniform float layer_radius[16];
 uniform float layer_falloffWidth[16];
 uniform float layer_topoHeight[16];
-
-uniform float u_boundaryRoughness; // 0.0 = perfect circles, ~0.15 = natural edges
 
 #include "topo_common.glsl"
 
@@ -91,7 +90,7 @@ void main() {
         float hApprox = 0.0;
         if (sampleTopdownHeight(p.xz, hApprox)) {
             float distApprox = p.y - hApprox;
-            if (distApprox > 30.0) {
+            if (distApprox > u_heightmapTransitionThreshold) {
                 float minAngle = 0.12 + (1.0 - q) * 0.2;
                 float angleScale = max(rayShallowness, minAngle);
                 float ss = clamp(u_stepSizeScale, 0.1, 5.0);

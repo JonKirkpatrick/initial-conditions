@@ -40,7 +40,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnCamera();
     spawnPlayer();
-    initializeTerrainLayers();
+    Topography::setWarpParameters(m_warpScale, m_warpStrength);
     m_topdownMaxHeight = computeSceneMaxHeight();
     buildHud();
     updateHUDData();
@@ -152,7 +152,7 @@ void Scene_IC_Camp::updateMinimapTexture()
     m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
     m_topoMinimapShader.setUniform("u_texSize",      texSize);
     m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    m_topoMinimapShader.setUniform("u_reliefExaggeration", 1.5f);
+    m_topoMinimapShader.setUniform("u_reliefExaggeration", 2.4f);
     Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
     for (int i = 0; i < 16; ++i) {
         m_topoMinimapShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
@@ -204,13 +204,13 @@ HUD* Scene_IC_Camp::getHUD() const
 void Scene_IC_Camp::loadLevel(const std::string& filename)
 {
     m_entityManager = EntityManager();
+    m_terrainLayers = {};
 
     std::ifstream file(filename);
     std::string str;
-    while (file.good())
+    int terrainLayerIndex = 0;
+    while (file >> str)
     {
-        file >> str;
-
         if (str == "Camera")
         {
             file >> m_cameraConfig.PITCH
@@ -228,6 +228,29 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
                  >> m_playerConfig.EYE_OFFSET
                  >> m_playerConfig.POSITION_X
                  >> m_playerConfig.POSITION_Z;
+        }
+        if (str == "TerrainLayer")
+        {
+            float centerX = 0.f;
+            float centerY = 0.f;
+            float radius = 0.f;
+            float falloffWidth = 0.f;
+            float topoHeight = 0.f;
+
+            file >> centerX
+                 >> centerY
+                 >> radius
+                 >> falloffWidth
+                 >> topoHeight;
+
+            if (terrainLayerIndex < static_cast<int>(m_terrainLayers.size()))
+            {
+                TerrainLayer& layer = m_terrainLayers[terrainLayerIndex++];
+                layer.center = sf::Vector2f(centerX, centerY);
+                layer.radius = radius;
+                layer.falloffWidth = falloffWidth;
+                layer.topoHeight = topoHeight;
+            }
         }
         if (str == "DateTimePlace")
         {
@@ -252,6 +275,7 @@ void Scene_IC_Camp::spawnPlayer()
     );
     m_player->add<CInput>();
 }
+
 
 void Scene_IC_Camp::spawnCamera()
 {
@@ -466,28 +490,8 @@ void Scene_IC_Camp::sMovement(float dt)
     }
 }
 
-void Scene_IC_Camp::initializeTerrainLayers() {
-    const float PI = 3.14159265f;
-    const float layerRingRadius = 15000.0f;  // Distance of layer centers from origin
-
-    for (int i = 0; i < 16; ++i) {
-        // Arrange layers in a circle around the origin
-        float angle = 2.0f * PI * (float)i / 16.0f;
-        
-        TerrainLayer& layer = m_terrainLayers[i];
-        layer.center = sf::Vector2f(
-            std::cos(angle) * layerRingRadius,
-            std::sin(angle) * layerRingRadius
-        );
-        
-        layer.radius = 5000.0f + (i % 4) * 1500.0f;  // Vary radius based on layer index
-        layer.falloffWidth = 700.0f + (i % 3) * 800.0f;  // Vary falloff sharpness
-        layer.topoHeight = 200.0f + (i % 8) * 50.0f;  // Vary height scale
-    }
-}
-
 void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix) {
-    shader.setUniform("u_boundaryRoughness", m_boundaryRoughness);
+    uploadWarpParametersToShader(shader);
     for (int i = 0; i < 16; ++i) {
         const TerrainLayer& layer = m_terrainLayers[i];
         std::string idx = std::to_string(i);
@@ -504,6 +508,31 @@ void Scene_IC_Camp::uploadActiveLayerMaskToShader(sf::Shader& shader, const std:
         const float enabled = (m_activeLayerMask & (1u << i)) != 0 ? 1.0f : 0.0f;
         shader.setUniform(prefix + "[" + std::to_string(i) + "]", enabled);
     }
+}
+
+void Scene_IC_Camp::uploadWarpParametersToShader(sf::Shader& shader) const {
+    shader.setUniform("u_warpScale", m_warpScale);
+    shader.setUniform("u_warpStrength", m_warpStrength);
+}
+
+int Scene_IC_Camp::selectStripeLayerIndex() const {
+    int bestIndex = -1;
+    float bestScore = -1.0f;
+
+    for (int i = 0; i < 16; ++i) {
+        if ((m_activeLayerMask & (1u << i)) == 0) continue;
+
+        const TerrainLayer& layer = m_terrainLayers[i];
+        if (layer.falloffWidth <= 1e-6f) continue;
+
+        float score = layer.topoHeight / layer.falloffWidth;
+        if (score > bestScore) {
+            bestScore = score;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
 }
 
 sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
@@ -741,8 +770,13 @@ void Scene_IC_Camp::sGUI()
     ImGui::SliderFloat("Heightmap Transition Threshold", &m_heightmapTransitionThreshold, 10.0f, 500.0f, "%.1f");
     ImGui::Text("Distance above cached heightmap before switching to raymarching");
     ImGui::Separator();
-    ImGui::SliderFloat("Boundary Roughness", &m_boundaryRoughness, 0.0f, 0.85f, "%.3f");
-    ImGui::Text("0 = perfect circles, ~0.15 = natural organic edges");
+        bool warpChanged = false;
+        warpChanged |= ImGui::SliderFloat("Warp Scale", &m_warpScale, 0.00002f, 0.00025f, "%.5f");
+        warpChanged |= ImGui::SliderFloat("Warp Strength", &m_warpStrength, 0.0f, 2500.0f, "%.0f");
+        if (warpChanged) {
+            Topography::setWarpParameters(m_warpScale, m_warpStrength);
+        }
+        ImGui::Text("Warp is shared by C++ terrain queries and all terrain shaders");
     ImGui::End();
 
     ImGui::End();
@@ -768,6 +802,7 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_bakeShader.setUniform("farPlane",      cameraData.farPlane);
     m_bakeShader.setUniform("u_quality",     m_shaderQuality);
     m_bakeShader.setUniform("u_stepSizeScale", m_stepSizeScale);
+    m_bakeShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);    
     m_bakeShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
     m_bakeShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
     m_bakeShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
@@ -818,6 +853,7 @@ void Scene_IC_Camp::runTopDownPass() {
     auto& cameraData = m_camera->get<CCamera>();
     sf::Vector2u texSize = m_topdownTexture.getSize();
     sf::Vector2u winSize = m_game.window().getSize();
+    m_topdownMaxHeight = computeSceneMaxHeight();
 
     auto makeFootprintCorner = [&](float sx, float sy) {
         float x_ndc = (sx / float(winSize.x)) * 2.0f - 1.0f;
@@ -873,6 +909,7 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     sf::Vector2u winSize = m_game.window().getSize();
     sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
     sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
+    m_stripeLayerIndex = selectStripeLayerIndex();
 
     m_finalShader.setUniform("viewportSize",  sf::Glsl::Vec2(winSize.x, winSize.y));
     m_finalShader.setUniform("m_hexSize",     m_hexSize);
@@ -888,10 +925,11 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_finalShader.setUniform("ambientStrength", 0.3f);
     m_finalShader.setUniform("baseColor", colorToShader(Theme::color("best-brown")));
     m_finalShader.setUniform("gridColor", colorToShader(m_gridColor));
-        uploadTerrainLayersToShader(m_finalShader, "layer");
+    uploadTerrainLayersToShader(m_finalShader, "layer");
     m_finalShader.setUniform("topoTex", m_bakeTexture.getTexture());
     m_finalShader.setUniform("cursorMode", m_cursorMode);
     m_finalShader.setUniform("hoveredHex", sf::Glsl::Vec2((float)hex.x, (float)hex.y));
+    m_finalShader.setUniform("u_stripeLayerIndex", m_stripeLayerIndex);
     const bool headlampOn = shouldHeadlightsBeOn();
     m_finalShader.setUniform("headlampOn", headlampOn);
     m_finalShader.setUniform("headlampIntensity", 4.f);

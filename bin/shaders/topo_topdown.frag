@@ -14,8 +14,6 @@ uniform float layer_radius[16];
 uniform float layer_falloffWidth[16];
 uniform float layer_topoHeight[16];
 
-uniform float u_boundaryRoughness; // 0.0 = perfect circles, ~0.15 = natural edges
-
 #include "topo_common.glsl"
 
 vec3 packHeight24(float heightValue, float maxHeightValue) {

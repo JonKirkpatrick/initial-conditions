@@ -18,12 +18,33 @@ namespace Topography {
         float topoHeight;
     };
 
+    inline float warpScale = 0.00009f;
+    inline float warpStrength = 850.0f;
+
+    inline void setWarpParameters(float scale, float strength) {
+        warpScale = scale;
+        warpStrength = strength;
+    }
+
+    inline sf::Vector2f warpXZ(const sf::Vector2f& xz, float scale = warpScale, float strength = warpStrength) {
+        const float x = xz.x * scale;
+        const float z = xz.y * scale;
+
+        const float warpedX = std::sin(z * 1.43f + 0.40f) + 0.5f * std::cos((x + z) * 1.97f - 1.20f);
+        const float warpedZ = std::cos(x * 1.67f - 0.90f) + 0.5f * std::sin((x - z) * 1.31f + 0.70f);
+
+        return sf::Vector2f(
+            xz.x + strength * warpedX,
+            xz.y + strength * warpedZ
+        );
+    }
+
     // ============================================================================
     // Terrain Query Functions
     // ============================================================================
 
     /// Mask calculation in C++ matching GLSL `maskFromD` (user-specified formulas).
-    static inline float maskFromD_Cpp(float d, float rd, float falloff) {
+    static inline float maskFromD_Cpp(float d, float falloff) {
         const float k = 1e-10f;
         float t = falloff;
 
@@ -54,17 +75,18 @@ namespace Topography {
 
     /// Evaluate terrain height at a specific location given all terrain layers and active mask.
     inline float heightAt(float x, float z, const std::array<TerrainLayer, 16>& layers, uint32_t activeLayerMask) {
+        const sf::Vector2f warpedXZ = warpXZ(sf::Vector2f(x, z));
         float height = 0.0f;
         for (int i = 0; i < 16; ++i) {
             if ((activeLayerMask & (1u << i)) == 0) continue;
 
             const TerrainLayer& layer = layers[i];
-            float dx   = x - layer.center.x;
-            float dz   = z - layer.center.y;
+            float dx   = warpedXZ.x - layer.center.x;
+            float dz   = warpedXZ.y - layer.center.y;
             float dist = std::sqrt(dx * dx + dz * dz);
 
             float d = dist - layer.radius;
-            float m = maskFromD_Cpp(d, layer.radius, layer.falloffWidth);
+            float m = maskFromD_Cpp(d, layer.falloffWidth);
             if (m <= 0.0f) continue;
 
             height += m * layer.topoHeight;
@@ -74,12 +96,13 @@ namespace Topography {
 
     /// Height contribution from a single layer.
     inline float evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) {
-        float dx   = x - layer.center.x;
-        float dz   = z - layer.center.y;
+        const sf::Vector2f warpedXZ = warpXZ(sf::Vector2f(x, z));
+        float dx   = warpedXZ.x - layer.center.x;
+        float dz   = warpedXZ.y - layer.center.y;
         float dist = std::sqrt(dx * dx + dz * dz);
 
         float d = dist - layer.radius;
-        float m = maskFromD_Cpp(d, layer.radius, layer.falloffWidth);
+        float m = maskFromD_Cpp(d, layer.falloffWidth);
 
         return layer.topoHeight * m;
     }

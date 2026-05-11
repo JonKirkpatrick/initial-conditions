@@ -67,11 +67,8 @@ protected:
     float m_topdownMaxHeight = 1.f;
     sf::Vector2f m_topdownWorldMin{0.f, 0.f};
     sf::Vector2f m_topdownWorldSize{1.f, 1.f};
-    float m_minimapWorldRadius = 10000.f;
     unsigned int m_minimapTextureSize = 256;
-    unsigned int m_topdownTextureSize = 256;
-    float m_minimapContourStep = 300.f;
-    float m_boundaryRoughness  = 0.15f; // 0 = perfect circles, ~0.15 = natural organic edges
+    unsigned int m_topdownTextureSize = 512;
 
     // Camera bob smoothing (lag) state
     sf::Vector3f m_cameraBobOffset{0.f, 0.f, 0.f};
@@ -94,13 +91,18 @@ protected:
     // Debug-only normalization divisor for step count (fixed to avoid rescaling on parameter changes)
     float m_stepCountNormalizationMax = 255.0f;
     // Debug-only threshold for heightmap-to-raymarching transition in the depth/step shader
-    float m_heightmapTransitionThreshold = 120.0f;
+    float m_heightmapTransitionThreshold = 350.0f;
+    float m_warpScale = 0.00020f;
+    float m_warpStrength = 2415.0f;
+    int m_stripeLayerIndex = -1;
     // Active layer bitmask for culling (bit i = layer i enabled)
     uint32_t m_activeLayerMask = 0xFFFF;
     sf::Glsl::Vec3 colorToShader(const sf::Color& color);
     sf::Vector2i worldToHex(float x, float z) const;
     sf::Vector2f hexToWorld(int q, int r) const;
     sf::Vector3f screenToWorld(sf::Vector2i mousePos) const;
+    void uploadWarpParametersToShader(sf::Shader& shader) const;
+    int selectStripeLayerIndex() const;
 
 
     float m_gameTimeOfDay; // Hours between 0 and 24
@@ -113,8 +115,7 @@ protected:
     float m_sunIntensity = 1.0f;
     float m_atmosphereTint = 0.0f;
     // Terrain layer system (16 regions, additive composition)
-    std::array<TerrainLayer, 16> m_terrainLayers;
-    void initializeTerrainLayers();
+    std::array<TerrainLayer, 16> m_terrainLayers{};
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
 

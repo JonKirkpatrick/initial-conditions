@@ -8,6 +8,18 @@
 // uniform float layer_falloffWidth[16];
 // uniform float layer_topoHeight[16];
 // uniform float u_activeLayerEnabled[16];
+uniform float u_warpScale;
+uniform float u_warpStrength;
+
+vec2 warpXZ(vec2 xz) {
+    float x = xz.x * u_warpScale;
+    float z = xz.y * u_warpScale;
+
+    float warpedX = sin(z * 1.43 + 0.40) + 0.5 * cos((x + z) * 1.97 - 1.20);
+    float warpedZ = cos(x * 1.67 - 0.90) + 0.5 * sin((x - z) * 1.31 + 0.70);
+
+    return xz + vec2(warpedX, warpedZ) * u_warpStrength;
+}
 
 float maskFromD(float d, float falloff) {
     float t      = falloff;
@@ -19,6 +31,7 @@ float maskFromD(float d, float falloff) {
 }
 
 float heightAt(vec2 xz) {
+    xz = warpXZ(xz);
     float height = 0.0;
 
     for (int i = 0; i < 16; ++i) {
@@ -69,6 +82,7 @@ vec3 layerHeightAndGrad(in vec2 xz, int i) {
 
 // Combined height + normal computation (single loop)
 void heightAndNormal(in vec2 xz, out float h, out vec3 normal) {
+    xz = warpXZ(xz);
     float totalH = 0.0;
     float dhdx   = 0.0;
     float dhdz   = 0.0;
