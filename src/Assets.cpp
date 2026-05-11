@@ -187,8 +187,47 @@ void Assets::addMusic(const std::string& name, const std::string& path)
 void Assets::addShader(const std::string& shaderName, const std::string& path)
 {
     auto shader = std::make_unique<sf::Shader>();
-    if (!shader->loadFromFile(path, sf::Shader::Type::Fragment)) return;
+    
+    // Preprocess #include directives
+    std::string processedSource = preprocessShaderIncludes(path);
+    
+    if (!shader->loadFromMemory(processedSource, sf::Shader::Type::Fragment)) return;
     m_shaderMap.emplace(shaderName, std::move(shader));
+}
+
+std::string Assets::preprocessShaderIncludes(const std::string& filePath)
+{
+    std::ifstream file(filePath);
+    std::string result;
+    std::string line;
+    std::string baseDir = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+    
+    while (std::getline(file, line)) {
+        // Check for #include "filename"
+        size_t includePos = line.find("#include");
+        if (includePos != std::string::npos) {
+            size_t quoteStart = line.find('"', includePos);
+            size_t quoteEnd = line.find('"', quoteStart + 1);
+            
+            if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
+                std::string includePath = line.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+                std::string fullIncludePath = baseDir + includePath;
+                
+                // Read the included file
+                std::ifstream includeFile(fullIncludePath);
+                if (includeFile.good()) {
+                    std::string includedContent((std::istreambuf_iterator<char>(includeFile)),
+                                                 std::istreambuf_iterator<char>());
+                    result += includedContent + "\n";
+                    continue;
+                }
+            }
+        }
+        
+        result += line + "\n";
+    }
+    
+    return result;
 }
 
 sf::Sound& Assets::getSound(const std::string& soundName)

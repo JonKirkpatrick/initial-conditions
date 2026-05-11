@@ -16,31 +16,7 @@ uniform float layer_topoHeight[16];
 
 uniform float u_boundaryRoughness; // 0.0 = perfect circles, ~0.15 = natural edges
 
-float maskFromD(float d, float falloff) {
-    float t      = falloff;
-    float inside = step(d, 0.0);
-    float u      = t - abs(d - t);
-    float g      = clamp(0.5 * (1.0 + u / (abs(u) - 1e-10)), 0.0, 1.0);
-    float b      = g * ((cos(3.141592653589793 * d / (2.0 * t)) + 1.0) * 0.5);
-    return inside + b;
-}
-
-float heightAt(vec2 xz) {
-    float height = 0.0;
-    for (int i = 0; i < 16; ++i) {
-        if (u_activeLayerEnabled[i] < 0.5) continue;
-
-        vec2  delta   = xz - layer_center[i];
-        float dist    = length(delta);
-        float radius  = layer_radius[i];
-        float falloff = layer_falloffWidth[i];
-
-        float d       = dist - radius;
-
-        height += layer_topoHeight[i] * maskFromD(d, falloff);
-    }
-    return height;
-}
+#include "topo_common.glsl"
 
 vec3 packHeight24(float heightValue, float maxHeightValue) {
     float normalized = clamp(heightValue / max(maxHeightValue, 1e-6), 0.0, 1.0);

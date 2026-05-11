@@ -161,7 +161,6 @@ void Scene_IC_Camp::updateMinimapTexture()
     states.shader = &m_topoMinimapShader;
     m_minimapTexture.draw(fullQuad, states);
 
-    // ── Home marker (unchanged) ────────────────────────────────────────────
     sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
     const float circleRadiusPx = center - 2.f;
@@ -312,7 +311,6 @@ void Scene_IC_Camp::update() {
     if (m_showGUI) {
         sGUI();
     }
-
     // FPS sampling: update once every 0.5s for a stable reading
     m_fpsFrameCount++;
     float elapsed = m_fpsClock.getElapsedTime().asSeconds();
@@ -488,73 +486,6 @@ void Scene_IC_Camp::initializeTerrainLayers() {
     }
 }
 
-float Scene_IC_Camp::computeSceneMaxHeight() const {
-    float maxHeight = 0.0f;
-    for (const auto& layer : m_terrainLayers) {
-        maxHeight = std::max(maxHeight, heightAt(layer.center.x, layer.center.y));
-    }
-    return std::max(1.0f, maxHeight * 1.5f);
-}
-
-float Scene_IC_Camp::evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const {
-    return layer.topoHeight;
-}
-
-float Scene_IC_Camp::getCameraHeightAboveGround(const sf::Vector3f& camPos) const {
-    float groundHeight = heightAt(camPos.x, camPos.z);
-    return camPos.y - groundHeight;
-}
-
-// Mask math in C++ matching GLSL `maskFromD` (user-specified formulas).
-static float maskFromD_Cpp(float d, float rd, float falloff) {
-    const float k = 1e-10f;
-    float t = falloff;
-
-    float s = 0.0f;
-    float denom_s = d - k;
-    if (std::fabs(denom_s) >= k) {
-        s = (1.0f - std::fabs(d) / denom_s) * 0.5f;
-    }
-
-    float u = t - std::fabs(d - t);
-
-    float g = 0.0f;
-    float denom_g = std::fabs(u) - k;
-    if (std::fabs(denom_g) >= k) {
-        g = ((u / denom_g) + 1.0f) * 0.5f;
-    }
-
-    const float PI = 3.14159265358979323846f;
-    float cosTerm = std::cos(PI * (d / (2.0f * t)));
-    float b = g * ((cosTerm + 1.0f) * 0.5f);
-
-    float m = s + b;
-    if (m < 0.0f) m = 0.0f;
-    if (m > 1.0f) m = 1.0f;
-
-    return m;
-}
-
-uint32_t Scene_IC_Camp::computeActiveLayerMask(const sf::Vector3f& cameraPos) {
-    // Compute which layers are within culling distance of the camera.
-    // Layers beyond this distance won't significantly affect raymarching near the camera.
-    // Higher culling distance = more stable mask (fewer frame-to-frame changes) = less flicker.
-    const float LAYER_CULL_DIST = 150000.0f;  // Increased to reduce mask thrashing
-    uint32_t mask = 0;
-    
-    for (int i = 0; i < 16; ++i) {
-        float dx = cameraPos.x - m_terrainLayers[i].center.x;
-        float dz = cameraPos.z - m_terrainLayers[i].center.y;
-        float distSq = dx * dx + dz * dz;
-        float cullRadiusSq = (LAYER_CULL_DIST + m_terrainLayers[i].radius) * 
-                             (LAYER_CULL_DIST + m_terrainLayers[i].radius);
-        if (distSq <= cullRadiusSq) {
-            mask |= (1u << i);
-        }
-    }
-    return mask;
-}
-
 void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix) {
     shader.setUniform("u_boundaryRoughness", m_boundaryRoughness);
     for (int i = 0; i < 16; ++i) {
@@ -574,27 +505,6 @@ void Scene_IC_Camp::uploadActiveLayerMaskToShader(sf::Shader& shader, const std:
         shader.setUniform(prefix + "[" + std::to_string(i) + "]", enabled);
     }
 }
-
-float Scene_IC_Camp::heightAt(float x, float z) const {
-    float height = 0.0f;
-    for (int i = 0; i < 16; ++i) {
-        if ((m_activeLayerMask & (1u << i)) == 0) continue;
-
-        const TerrainLayer& layer = m_terrainLayers[i];
-        float dx   = x - layer.center.x;
-        float dz   = z - layer.center.y;
-        float dist = std::sqrt(dx * dx + dz * dz);
-
-        float d       = dist - layer.radius;
-
-        float m = maskFromD_Cpp(d, layer.radius, layer.falloffWidth);
-        if (m <= 0.0f) continue;
-
-        height += m * layer.topoHeight;
-    }
-    return height;
-}
-
 
 sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
     return sf::Glsl::Vec3(
@@ -672,6 +582,8 @@ void Scene_IC_Camp::sRender() {
         window.draw(viewer);
     }
 }
+
+//==== GUI ====
 
 void Scene_IC_Camp::sGUI()
 {
@@ -836,13 +748,15 @@ void Scene_IC_Camp::sGUI()
     ImGui::End();
 }
 
+// ==== Terrain and Shader Logic ====
+
 void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
     sf::Vector2u bakeSize = m_bakeTexture.getSize();
 
     // Compute which layers are close enough to affect raymarching
-    m_activeLayerMask = computeActiveLayerMask(transform.pos);
+    m_activeLayerMask = Topography::computeActiveLayerMask(transform.pos, m_terrainLayers);
 
     m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
     m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));

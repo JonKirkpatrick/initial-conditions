@@ -46,6 +46,9 @@ class Assets
 
     Assets() = default;
 
+private:
+    std::string preprocessShaderIncludes(const std::string& filePath);
+
 public:
 
     static Assets& Instance();

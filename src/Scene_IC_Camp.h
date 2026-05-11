@@ -1,6 +1,7 @@
 #pragma once
 #include "Scene.h"
 #include "HUD.h"
+#include "Topography.hpp"
 #include <SFML/System.hpp>
 
 class Scene_IC_Camp : public Scene {
@@ -16,13 +17,7 @@ class Scene_IC_Camp : public Scene {
         float MOVE_SPEED, ROTATION_SPEED, HEIGHT_OFFSET, EYE_OFFSET, POSITION_X, POSITION_Z;
     };
 
-    struct TerrainLayer
-    {
-        sf::Vector2f center;
-        float radius;
-        float falloffWidth;
-        float topoHeight;
-    };
+    using TerrainLayer = Topography::TerrainLayer;
 
     typedef enum class HeadlightState
     {
@@ -106,7 +101,6 @@ protected:
     sf::Vector2i worldToHex(float x, float z) const;
     sf::Vector2f hexToWorld(int q, int r) const;
     sf::Vector3f screenToWorld(sf::Vector2i mousePos) const;
-    void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
 
 
     float m_gameTimeOfDay; // Hours between 0 and 24
@@ -121,18 +115,12 @@ protected:
     // Terrain layer system (16 regions, additive composition)
     std::array<TerrainLayer, 16> m_terrainLayers;
     void initializeTerrainLayers();
-    float computeSceneMaxHeight() const;
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
-    uint32_t computeActiveLayerMask(const sf::Vector3f& cameraPos);
-    float evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const;
-    float getCameraHeightAboveGround(const sf::Vector3f& cameraPos) const;
+    void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
 
 
     void updateSunPosition();
     bool shouldHeadlightsBeOn() const;
-
-    // Physical bridge for terrain
-    float heightAt(float x, float z) const;
     void updateCamera();
     void captureBake();
 
@@ -145,6 +133,20 @@ protected:
     void runTopDownPass();
     void runFinalPass(const sf::Glsl::Mat3& rotationMatrix);
     void renderWorld(const sf::Glsl::Mat3& rotationMatrix);
+
+    // Convenience wrappers around Topography namespace functions
+    float heightAt(float x, float z) const {
+        return Topography::heightAt(x, z, m_terrainLayers, m_activeLayerMask);
+    }
+    float getCameraHeightAboveGround(const sf::Vector3f& cameraPos) const {
+        return Topography::getCameraHeightAboveGround(cameraPos, m_terrainLayers, m_activeLayerMask);
+    }
+    float computeSceneMaxHeight() const {
+        return Topography::computeSceneMaxHeight(m_terrainLayers, m_activeLayerMask);
+    }
+    float evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const {
+        return Topography::evaluateLayerHeightAt(layer, x, z);
+    }
 
 public:
     Scene_IC_Camp(GameEngine& game, const std::string& levelPath);
