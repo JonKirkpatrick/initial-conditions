@@ -20,50 +20,31 @@ uniform float layer_radius[16];
 uniform float layer_falloffWidth[16];
 uniform float layer_topoHeight[16];
 
-float maskFromD(float d, float rd, float falloff) {
-    float t = falloff;           // falloff distance
+uniform float u_boundaryRoughness; // 0.0 = perfect circles, ~0.15 = natural edges
 
-    // Inside the circle: full strength
-    float inside = step(d, 0.0);  // 1.0 if d <= 0, else 0.0
-
-    // Smooth transition zone using cosine
-    float u = t - abs(d - t);
-    float g = clamp(0.5 * (1.0 + u / (abs(u) - 1e-10)), 0.0, 1.0);
-
-    float cosTerm = cos(3.141592653589793 * d / (2.0 * t));
-    float b = g * ((cosTerm + 1.0) * 0.5);
-
+float maskFromD(float d, float falloff) {
+    float t      = falloff;
+    float inside = step(d, 0.0);
+    float u      = t - abs(d - t);
+    float g      = clamp(0.5 * (1.0 + u / (abs(u) - 1e-10)), 0.0, 1.0);
+    float b      = g * ((cos(3.141592653589793 * d / (2.0 * t)) + 1.0) * 0.5);
     return inside + b;
-}
-
-float evaluateLayerHeightAt(in vec2 xz, int layerIdx) {
-    vec2 delta = xz - layer_center[layerIdx];
-    float distSq = dot(delta, delta);
-    
-    float radius = layer_radius[layerIdx];
-    
-    float distFromCenter = sqrt(distSq);
-    float d = distFromCenter - radius;
-    float falloff = layer_falloffWidth[layerIdx];
-    
-    // Use your sophisticated mask
-    float mask = maskFromD(d, radius, falloff);
-    
-    // Topography simple
-    float topo = layer_topoHeight[layerIdx];
-    
-    float height = topo * mask;
-    
-    return height;
 }
 
 float heightAt(vec2 xz) {
     float height = 0.0;
-    
+
     for (int i = 0; i < 16; ++i) {
-        if (u_activeLayerEnabled[i] > 0.5) {
-            height += evaluateLayerHeightAt(xz, i);
-        }
+        if (u_activeLayerEnabled[i] < 0.5) continue;
+
+        vec2  delta   = xz - layer_center[i];
+        float dist    = length(delta);
+        float radius  = layer_radius[i];
+        float falloff = layer_falloffWidth[i];
+
+        float d       = dist - radius;
+
+        height += layer_topoHeight[i] * maskFromD(d, falloff);
     }
     return height;
 }
@@ -135,7 +116,7 @@ void main() {
         float hApprox = 0.0;
         if (sampleTopdownHeight(p.xz, hApprox)) {
             float distApprox = p.y - hApprox;
-            if (distApprox > 20.0) {
+            if (distApprox > 30.0) {
                 float minAngle = 0.12 + (1.0 - q) * 0.2;
                 float angleScale = max(rayShallowness, minAngle);
                 float ss = clamp(u_stepSizeScale, 0.1, 5.0);

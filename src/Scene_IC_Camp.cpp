@@ -140,7 +140,7 @@ void Scene_IC_Camp::updateMinimapTexture()
     const sf::Vector3f playerPos = m_player->get<CTransform3D>().pos;
     const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
     const float center   = texSize * 0.5f;
-    const float worldRadius = 12800.f;
+    const float worldRadius = 25600.f;
 
     // ── Draw the hillshaded topo layer via shader ──────────────────────────
     m_minimapTexture.clear(sf::Color::Transparent);
@@ -152,7 +152,7 @@ void Scene_IC_Camp::updateMinimapTexture()
     m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
     m_topoMinimapShader.setUniform("u_texSize",      texSize);
     m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    m_topoMinimapShader.setUniform("u_reliefExaggeration", 1.0f);
+    m_topoMinimapShader.setUniform("u_reliefExaggeration", 1.5f);
     Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
     for (int i = 0; i < 16; ++i) {
         m_topoMinimapShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
@@ -464,8 +464,7 @@ void Scene_IC_Camp::sMovement(float dt)
         transform.prevPos = transform.pos;
         transform.pos += transform.velocity * dt;
         
-        // Grounding logic (The 172.0f "Floating" height)
-        transform.pos.y = heightAt(transform.pos.x, transform.pos.z) + 172.0f;
+        transform.pos.y = heightAt(transform.pos.x, transform.pos.z) + m_playerConfig.HEIGHT_OFFSET;
     }
 }
 
@@ -494,7 +493,7 @@ float Scene_IC_Camp::computeSceneMaxHeight() const {
     for (const auto& layer : m_terrainLayers) {
         maxHeight = std::max(maxHeight, heightAt(layer.center.x, layer.center.y));
     }
-    return std::max(1.0f, maxHeight * 1.25f);
+    return std::max(1.0f, maxHeight * 1.5f);
 }
 
 float Scene_IC_Camp::evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const {
@@ -557,6 +556,7 @@ uint32_t Scene_IC_Camp::computeActiveLayerMask(const sf::Vector3f& cameraPos) {
 }
 
 void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix) {
+    shader.setUniform("u_boundaryRoughness", m_boundaryRoughness);
     for (int i = 0; i < 16; ++i) {
         const TerrainLayer& layer = m_terrainLayers[i];
         std::string idx = std::to_string(i);
@@ -581,23 +581,20 @@ float Scene_IC_Camp::heightAt(float x, float z) const {
         if ((m_activeLayerMask & (1u << i)) == 0) continue;
 
         const TerrainLayer& layer = m_terrainLayers[i];
-        float dx = x - layer.center.x;
-        float dz = z - layer.center.y;
+        float dx   = x - layer.center.x;
+        float dz   = z - layer.center.y;
         float dist = std::sqrt(dx * dx + dz * dz);
-        float d = dist - layer.radius; // signed-distance-like
+
+        float d       = dist - layer.radius;
 
         float m = maskFromD_Cpp(d, layer.radius, layer.falloffWidth);
         if (m <= 0.0f) continue;
 
-        float layerH = evaluateLayerHeightAt(layer, x, z);
-        height += m * layerH;
+        height += m * layer.topoHeight;
     }
     return height;
 }
 
-/*
-float contribution = 300.0(sin(xz.x/100.0)*sin(xz.z/100.0))
-*/
 
 sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
     return sf::Glsl::Vec3(
@@ -634,18 +631,24 @@ sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
 void Scene_IC_Camp::sRender() {
     auto& window = m_game.window();
     auto& transform = m_camera->get<CTransform3D>();
-    auto& cameraData = m_camera->get<CCamera>();
-    sf::Vector2u winSize = window.getSize();
     auto inverseRotationMatrix = toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll));
     window.clear(sf::Color::Transparent);
-    renderWorld(inverseRotationMatrix);
     runTopDownPass();
-    runBakePass(inverseRotationMatrix);
-    runFinalPass(inverseRotationMatrix);
-    sf::Sprite finalSprite(m_renderTexture.getTexture());
-    sf::Sprite backgroundSprite(m_skyTexture.getTexture());
-    window.draw(backgroundSprite);
-    window.draw(finalSprite);
+
+    if (m_useDepthStepDebug) {
+        runDepthStepPass(inverseRotationMatrix);
+        sf::Sprite debugSprite(m_renderTexture.getTexture());
+        window.draw(debugSprite);
+    } else {
+        renderWorld(inverseRotationMatrix);
+        runBakePass(inverseRotationMatrix);
+        runFinalPass(inverseRotationMatrix);
+        sf::Sprite finalSprite(m_renderTexture.getTexture());
+        sf::Sprite backgroundSprite(m_skyTexture.getTexture());
+        window.draw(backgroundSprite);
+        window.draw(finalSprite);
+    }
+
     m_hud->render(m_game.window(), false);
 
     if (m_showTopDownViewer) {
@@ -675,28 +678,6 @@ void Scene_IC_Camp::sGUI()
     ImGui::Begin("Scene Properties##IC_Camp");
 
     ImGui::Text("FPS: %.1f", m_fps);
-
-    // --- Camera controls ---
-    if (ImGui::CollapsingHeader("Camera Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
-        auto& transform = m_player->get<CTransform3D>();
-        auto& cameraData = m_player->get<CCamera>();
-        static float yaw = transform.yaw;
-        static float pitch = transform.pitch;
-        static float roll = transform.roll;
-        static float pos[3] = { transform.pos.x, transform.pos.y, transform.pos.z };
-        bool changed = false;
-        changed |= ImGui::SliderFloat("Yaw (rad)", &yaw, -3.14f, 3.14f);
-        changed |= ImGui::SliderFloat("Pitch (rad)", &pitch, -3.14f/2, 3.14f/2);
-        changed |= ImGui::SliderFloat("Roll (rad)", &roll, -3.14f, 3.14f);
-        changed |= ImGui::InputFloat3("Position (x, y, z)", pos, "%.2f");
-        if (changed) {
-            transform.yaw = yaw;
-            transform.pitch = pitch;
-            transform.roll = roll;
-            transform.pos = sf::Vector3f(pos[0], pos[1], pos[2]);
-        }
-        ImGui::Text("Current: pos=(%.2f, %.2f, %.2f) pitch=%.2f yaw=%.2f roll=%.2f", transform.pos.x, transform.pos.y, transform.pos.z, transform.pitch, transform.yaw, transform.roll);
-    }
 
     if (ImGui::BeginTabBar("MyTabBar"))
     {
@@ -835,10 +816,21 @@ void Scene_IC_Camp::sGUI()
 
     // Shader quality control
     ImGui::Begin("Rendering Quality");
+    ImGui::Checkbox("Depth/Step Debug Bypass", &m_useDepthStepDebug);
+    ImGui::Text("Bypasses the final composite and shows step cost directly.");
     ImGui::SliderFloat("Render Quality", &m_shaderQuality, 0.05f, 1.0f, "%.2f");
     ImGui::Text("Lowering quality reduces GPU work (fewer march steps)");
     ImGui::SliderFloat("Step Size Scale", &m_stepSizeScale, 0.1f, 5.0f, "%.2f");
     ImGui::Text("Decrease to <1.0 for finer detail, increase for performance");
+    ImGui::SliderFloat("Step Contribution Scale", &m_stepContributionScale, 0.1f, 8.0f, "%.2f");
+    ImGui::Text("Scales the step-count channel only; does not change marching behavior");
+    ImGui::SliderFloat("Step Count Normalization Max", &m_stepCountNormalizationMax, 50.0f, 500.0f, "%.0f");
+    ImGui::Text("Fixed divisor for step count; adjust to baseline, then change threshold");
+    ImGui::SliderFloat("Heightmap Transition Threshold", &m_heightmapTransitionThreshold, 10.0f, 500.0f, "%.1f");
+    ImGui::Text("Distance above cached heightmap before switching to raymarching");
+    ImGui::Separator();
+    ImGui::SliderFloat("Boundary Roughness", &m_boundaryRoughness, 0.0f, 0.85f, "%.3f");
+    ImGui::Text("0 = perfect circles, ~0.15 = natural organic edges");
     ImGui::End();
 
     ImGui::End();
@@ -873,6 +865,38 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_bakeTexture.clear(sf::Color::Transparent);
     m_bakeTexture.draw(dummyRect, &m_bakeShader);
     m_bakeTexture.display();
+}
+
+void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
+    auto& transform = m_camera->get<CTransform3D>();
+    auto& cameraData = m_camera->get<CCamera>();
+    sf::Vector2u outputSize = m_renderTexture.getSize();
+
+    m_depthStepShader.setUniform("viewportSize",  sf::Glsl::Vec2(outputSize.x, outputSize.y));
+    m_depthStepShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
+    m_depthStepShader.setUniform("invRotationMatrix", inverseRotationMatrix);
+    m_depthStepShader.setUniform("cameraYaw",     transform.yaw);
+    m_depthStepShader.setUniform("fovY",          cameraData.fovY);
+    m_depthStepShader.setUniform("aspectRatio",   cameraData.aspectRatio);
+    m_depthStepShader.setUniform("nearPlane",     cameraData.nearPlane);
+    m_depthStepShader.setUniform("farPlane",      cameraData.farPlane);
+    m_depthStepShader.setUniform("u_quality",     m_shaderQuality);
+    m_depthStepShader.setUniform("u_stepSizeScale", m_stepSizeScale);
+    m_depthStepShader.setUniform("u_stepContributionScale", m_stepContributionScale);
+    m_depthStepShader.setUniform("u_stepCountNormalizationMax", m_stepCountNormalizationMax);
+    m_depthStepShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);
+    m_depthStepShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
+    m_depthStepShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
+    m_depthStepShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
+    m_depthStepShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
+    uploadTerrainLayersToShader(m_depthStepShader, "layer");
+    uploadActiveLayerMaskToShader(m_depthStepShader, "u_activeLayerEnabled");
+
+    sf::RectangleShape dummyRect(sf::Vector2f(outputSize.x, outputSize.y));
+    m_renderTexture.clear(sf::Color::Transparent);
+    m_renderTexture.draw(dummyRect, &m_depthStepShader);
+    m_renderTexture.setSmooth(true);
+    m_renderTexture.display();
 }
 
 void Scene_IC_Camp::runTopDownPass() {

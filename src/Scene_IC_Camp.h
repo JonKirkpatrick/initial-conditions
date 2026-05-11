@@ -56,6 +56,7 @@ protected:
 
     // Shaders and render textures
     sf::Shader& m_bakeShader = Assets::Instance().getShader("TopoBake");
+    sf::Shader& m_depthStepShader = Assets::Instance().getShader("TopoDepthSteps");
     sf::Shader& m_finalShader = Assets::Instance().getShader("TopoFinal");
     sf::Shader& m_topdownShader = Assets::Instance().getShader("TopoTopDown");
     sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
@@ -66,6 +67,7 @@ protected:
     sf::RenderTexture m_skyTexture;
     sf::RenderTexture m_minimapTexture;
     sf::Image m_currentBakeImage;
+    bool m_useDepthStepDebug = false;
     bool m_showTopDownViewer = false;
     float m_topdownMaxHeight = 1.f;
     sf::Vector2f m_topdownWorldMin{0.f, 0.f};
@@ -74,6 +76,7 @@ protected:
     unsigned int m_minimapTextureSize = 256;
     unsigned int m_topdownTextureSize = 256;
     float m_minimapContourStep = 300.f;
+    float m_boundaryRoughness  = 0.15f; // 0 = perfect circles, ~0.15 = natural organic edges
 
     // Camera bob smoothing (lag) state
     sf::Vector3f m_cameraBobOffset{0.f, 0.f, 0.f};
@@ -91,6 +94,12 @@ protected:
     float m_shaderQuality = 1.0f;
     // Step size scale (0.1 .. 5.0) - lower for finer detail, higher for performance
     float m_stepSizeScale = 1.0f;
+    // Debug-only multiplier for how the step count is visualized in the depth/step shader
+    float m_stepContributionScale = 1.0f;
+    // Debug-only normalization divisor for step count (fixed to avoid rescaling on parameter changes)
+    float m_stepCountNormalizationMax = 255.0f;
+    // Debug-only threshold for heightmap-to-raymarching transition in the depth/step shader
+    float m_heightmapTransitionThreshold = 120.0f;
     // Active layer bitmask for culling (bit i = layer i enabled)
     uint32_t m_activeLayerMask = 0xFFFF;
     sf::Glsl::Vec3 colorToShader(const sf::Color& color);
@@ -132,6 +141,7 @@ protected:
     void updateMinimapTexture();
     void buildHud();
     void runBakePass(const sf::Glsl::Mat3& rotationMatrix);
+    void runDepthStepPass(const sf::Glsl::Mat3& rotationMatrix);
     void runTopDownPass();
     void runFinalPass(const sf::Glsl::Mat3& rotationMatrix);
     void renderWorld(const sf::Glsl::Mat3& rotationMatrix);

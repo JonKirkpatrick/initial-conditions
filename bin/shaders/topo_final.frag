@@ -30,7 +30,6 @@ uniform float layer_radius[16];
 uniform float layer_falloffWidth[16];
 uniform float layer_topoHeight[16];
 
-
 // ================== HEX CELL TEST ==================
 vec2 hexAt(vec2 p) {
     float q = (2.0/3.0 * p.x) / m_hexSize;
@@ -55,53 +54,62 @@ vec2 hexAt(vec2 p) {
 float dMaskDd(float d, float falloff) {
     float t = falloff;
     if (d <= 0.0 || d >= 2.0 * t) return 0.0;
-   
     float arg = 3.141592653589793 * d / (2.0 * t);
     return -0.5 * sin(arg) * (3.141592653589793 / (2.0 * t));
 }
 
-// ================== LAYER DERIVATIVE ==================
-vec2 evaluateLayerHeightDerivativeAt(in vec2 xz, int layerIdx) {
-    vec2 delta = xz - layer_center[layerIdx];
-    float distSq = dot(delta, delta);
-   
-    if (distSq < 1e-12) return vec2(0.0);
-
-    float dist = inversesqrt(distSq);        // slightly faster than sqrt()
-    float radius = layer_radius[layerIdx];
-    float falloff = layer_falloffWidth[layerIdx];
-    float topo = layer_topoHeight[layerIdx];
-
-    float d = dist * distSq - radius;        // wait, no — better keep sqrt for clarity, or:
-    // float d = dist - radius;               // (original is fine)
-
-    float maskDeriv = dMaskDd(d, falloff);
-    float dHeight_dDist = maskDeriv * topo;
-
-    return delta * (dist * dHeight_dDist);   // delta * (1/dist * dHeight_dDist) = delta * dist * ...
+float maskFromD(float d, float falloff) {
+    float t      = falloff;
+    float inside = step(d, 0.0);
+    float u      = t - abs(d - t);
+    float g      = clamp(0.5 * (1.0 + u / (abs(u) - 1e-10)), 0.0, 1.0);
+    float b      = g * ((cos(3.141592653589793 * d / (2.0 * t)) + 1.0) * 0.5);
+    return inside + b;
 }
 
-// ================== NORMAL (ANALYTIC) ==================
-vec3 normalAt(vec2 xz) {
-    float dhdx = 0.0;
-    float dhdz = 0.0;
+// ================== UNIFIED HEIGHT + GRADIENT PER LAYER ==================
+vec3 layerHeightAndGrad(in vec2 xz, int i) {
+    vec2  delta   = xz - layer_center[i];
+    float distSq  = dot(delta, delta);
+    if (distSq < 1e-12) return vec3(0.0);
+
+    float radius  = layer_radius[i];
+    float falloff = layer_falloffWidth[i];
+    float topo    = layer_topoHeight[i];
+
+    float dist    = sqrt(distSq);
+
+    float invDist = inversesqrt(distSq);
+
+    float d       = dist - radius;
+
+    float mask    = maskFromD(d, falloff);
+    float maskD   = dMaskDd(d, falloff);
+
+    vec2  dD_dXZ   = delta * invDist;
+    vec2  grad     = dD_dXZ * maskD * topo;
+
+    return vec3(topo * mask, grad.x, grad.y);
+}
+
+// ================== COMBINED HEIGHT + NORMAL (single loop) ==================
+void heightAndNormal(in vec2 xz, out float h, out vec3 normal) {
+    float totalH = 0.0;
+    float dhdx   = 0.0;
+    float dhdz   = 0.0;
 
     for (int i = 0; i < 16; ++i) {
-        if (u_activeLayerEnabled[i] > 0.5) {
-            vec2 deriv = evaluateLayerHeightDerivativeAt(xz, i);
-            dhdx += deriv.x;
-            dhdz += deriv.y;
-        }
+        if (u_activeLayerEnabled[i] < 0.5) continue;
+        vec3 hn = layerHeightAndGrad(xz, i);
+        totalH += hn.x;
+        dhdx   += hn.y;
+        dhdz   += hn.z;
     }
 
-    vec3 normal = vec3(-dhdx, 1.0, -dhdz);
-    float lenSq = dot(normal, normal);
-    
-    if (lenSq < 1e-12) {
-        return vec3(0.0, 1.0, 0.0);
-    }
-    
-    return normal * inversesqrt(lenSq);
+    h = totalH;
+    vec3 n = vec3(-dhdx, 1.0, -dhdz);
+    float lenSq = dot(n, n);
+    normal = (lenSq < 1e-12) ? vec3(0.0, 1.0, 0.0) : n * inversesqrt(lenSq);
 }
 
 // ================== SLOPE-BASED TERRAIN COLORING ==================
@@ -268,7 +276,13 @@ void main() {
     }
 
     // ================== LIGHTING ==================
-    vec3 normal = isTerrainHit ? normalAt(worldPos.xz) : vec3(0.0, 1.0, 0.0);
+    float _h; // height not needed here, normal is what matters
+    vec3 normal;
+    if (isTerrainHit) {
+        heightAndNormal(worldPos.xz, _h, normal);
+    } else {
+        normal = vec3(0.0, 1.0, 0.0);
+    }
 
     // === SLOPE COLORING ===
     vec3 terrainBaseColor = isTerrainHit ? 

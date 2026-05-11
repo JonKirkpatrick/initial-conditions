@@ -23,6 +23,7 @@ Font      Hack           fonts/Hack-Regular.ttf
 Font      Noto           fonts/Noto-Sans-Symbols.ttf
 Font      Good           fonts/good-timing-bd.otf
 Shader    TopoBake       shaders/topo_bake.frag
+Shader    TopoDepthSteps shaders/topo_depth_steps.frag
 Shader    TopoFinal      shaders/topo_final.frag
 Shader    TopoTopDown    shaders/topo_topdown.frag
 Shader    TopoMiniMap    shaders/minimap_topo.frag
