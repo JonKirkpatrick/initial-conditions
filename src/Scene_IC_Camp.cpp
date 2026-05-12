@@ -24,11 +24,12 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 {
     sf::ContextSettings settings;
     settings.antiAliasingLevel = 8;
-    m_renderTexture = sf::RenderTexture({game.window().getSize().x, game.window().getSize().y});
-    m_skyTexture = sf::RenderTexture({game.window().getSize().x, game.window().getSize().y});
+    sf::Vector2u windowSize = game.window().getSize();
+    m_renderTexture = sf::RenderTexture({windowSize.x, windowSize.y});
+    m_skyTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     sf::Vector2u bakeSize(
-        std::max(1u, game.window().getSize().x / 1),
-        std::max(1u, game.window().getSize().y / 1)
+        std::max(1u, windowSize.x / 1),
+        std::max(1u, windowSize.y / 1)
     );
     m_bakeTexture = sf::RenderTexture({bakeSize.x, bakeSize.y});
     m_bakeTexture.setSmooth(false);
@@ -36,8 +37,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_topdownTexture.setSmooth(false);
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
     m_gridColor = Theme::color("cerulean");
-    m_cameraConfig.VIEWPORT_WIDTH = game.window().getSize().x;
-    m_cameraConfig.VIEWPORT_HEIGHT = game.window().getSize().y;
+    m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
+    m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
     loadLevel(m_levelPath);
     spawnCamera();
     spawnPlayer();
@@ -57,7 +58,6 @@ void Scene_IC_Camp::updateCamera() {
     auto& playerTransform = m_player->get<CTransform3D>();
     auto& playerState = m_player->get<CPlayer>();
     auto& cameraData = m_camera->get<CCamera>();
-    
     sf::Vector3f headPos = playerTransform.pos;
     
     sf::Vector3f forward = Camera::getForwardXZ(m_player);
@@ -992,7 +992,8 @@ void Scene_IC_Camp::renderOrbs() {
     auto& window = m_game.window();
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
-    const sf::Vector2u windowSize = window.getSize();
+    const sf::Vector2u windowSize = m_bakeTexture.getSize();
+    window.setView(window.getView());
 
     struct OrbDrawItem
     {
@@ -1003,9 +1004,6 @@ void Scene_IC_Camp::renderOrbs() {
         float depthSort;
         float depthNorm;
     };
-
-    auto prevView = window.getView();
-    window.setView(window.getDefaultView());
 
     std::vector<OrbDrawItem> orbDrawItems;
     orbDrawItems.reserve(m_entityManager.getEntities("orb").size());
@@ -1082,8 +1080,6 @@ void Scene_IC_Camp::renderOrbs() {
 
         sf::RenderStates states;
         states.shader = &m_orbShader;
-        float isNight = (m_sunDirection.y < 0.12f || m_sunIntensity < 0.75f) ? 1.0f : 0.0f;
-        m_orbShader.setUniform("isNight", isNight);
         m_orbShader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
         m_orbShader.setUniform("sunColor", m_sunColor);
         m_orbShader.setUniform("orbColor", sf::Glsl::Vec4(
@@ -1099,10 +1095,7 @@ void Scene_IC_Camp::renderOrbs() {
         m_orbShader.setUniform("u_orbCenterView", sf::Glsl::Vec3(item.cameraSpacePos.x, item.cameraSpacePos.y, item.cameraSpacePos.z));
         m_orbShader.setUniform("u_orbDepthNorm", item.depthNorm);
         m_orbShader.setUniform("u_orbRadiusPx", radiusPx);
-        m_orbShader.setUniform("farPlane", cameraData.farPlane);
         m_orbShader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-        m_orbShader.setUniform("headlampPos", sf::Glsl::Vec3(0.f, 0.f, 0.f));
-        m_orbShader.setUniform("headlampDir", sf::Glsl::Vec3(0.f, 0.f, -1.f));
         m_orbShader.setUniform("headlampIntensity", 5.5f);
         m_orbShader.setUniform("headlampRange", 5000.0f);
         m_orbShader.setUniform("headlampConeCos", 0.94f);
@@ -1121,8 +1114,6 @@ void Scene_IC_Camp::renderOrbs() {
     for (const auto& orbItem : orbDrawItems) {
         drawOrbBillboard(orbItem);
     }
-
-    window.setView(prevView);
 }
 
 void Scene_IC_Camp::updateSunPosition()

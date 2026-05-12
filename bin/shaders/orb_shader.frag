@@ -8,14 +8,10 @@ uniform vec2 u_screenCenter;
 uniform vec3 u_orbCenterView;
 uniform float u_orbDepthNorm;
 uniform float u_orbRadiusPx;
-// Headlamp/flashlight uniforms
-uniform vec3 headlampPos;      // camera-space position of headlamp
-uniform vec3 headlampDir;      // camera-space direction of headlamp (normalized)
 uniform float headlampIntensity;
 uniform float headlampRange;
 uniform float headlampConeCos; // cos(angle) of headlamp cone (for cutoff)
 uniform float headlampEnabled; // 1.0 when headlights are on, 0.0 when off
-uniform float isNight; // 1.0 if night, 0.0 if day
 
 void main()
 {
