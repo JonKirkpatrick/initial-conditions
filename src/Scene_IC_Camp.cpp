@@ -614,146 +614,7 @@ void Scene_IC_Camp::sRender() {
         sf::Sprite backgroundSprite(m_skyTexture.getTexture());
         window.draw(backgroundSprite);
         window.draw(finalSprite);
-
-        // Draw orb billboards on top of the terrain composite but below the HUD
-        // Ensure we're in the default (screen) view so positions are in pixels.
-        auto prevView = window.getView();
-        window.setView(window.getDefaultView());
-        auto& transform = m_camera->get<CTransform3D>();
-        auto& cameraData = m_camera->get<CCamera>();
-        const sf::Vector2u windowSize = window.getSize();
-
-        struct OrbDrawItem
-        {
-            std::shared_ptr<Entity> entity;
-            sf::Vector2f screenPos;
-            sf::Vector3f cameraSpacePos;
-            float radiusPx;
-            float depthSort;
-            float depthNorm;
-        };
-
-        std::vector<OrbDrawItem> orbDrawItems;
-        orbDrawItems.reserve(m_entityManager.getEntities("orb").size());
-
-        for (auto orb : m_entityManager.getEntities("orb")) {
-            if (!orb->has<COrb>() || !orb->has<CTransform3D>()) {
-                continue;
-            }
-
-            auto& orbTransform = orb->get<CTransform3D>();
-            auto& orbData = orb->get<COrb>();
-
-            sf::Vector2f screenPos;
-            if (!Camera::worldToScreen(m_camera, orbTransform.pos, screenPos)) {
-                continue;
-            }
-
-            sf::Vector3f relative = orbTransform.pos - transform.pos;
-            sf::Vector3f cameraSpace = Camera::worldToCamera(relative, transform.pitch, transform.yaw, transform.roll);
-            if (cameraSpace.z >= -cameraData.nearPlane) {
-                continue;
-            }
-
-            float depth = std::abs(cameraSpace.z);
-            if (depth <= 0.0001f) {
-                continue;
-            }
-
-            float focalLengthPx = (float(windowSize.y) * 0.5f) / std::tan(cameraData.fovY * 0.5f);
-            float radiusPx = orbData.radius * focalLengthPx / depth;
-            if (radiusPx <= 0.5f) {
-                continue;
-            }
-
-            float depthNorm = std::clamp((depth - cameraData.nearPlane) / (cameraData.farPlane - cameraData.nearPlane), 0.0f, 1.0f);
-            orbDrawItems.push_back({orb, screenPos, cameraSpace, radiusPx, depth, depthNorm});
-        }
-
-        std::sort(orbDrawItems.begin(), orbDrawItems.end(), [](const OrbDrawItem& a, const OrbDrawItem& b) {
-            return a.depthSort > b.depthSort;
-        });
-
-        auto drawOrbBillboard = [&](const OrbDrawItem& item) {
-            auto& orbTransform = item.entity->get<CTransform3D>();
-            auto& orbData = item.entity->get<COrb>();
-
-            const float radiusPx = item.radiusPx;
-            const float diameterPx = radiusPx * 2.0f;
-            constexpr float ORB_TEXTURE_SCALE = 1.5f;
-            constexpr unsigned int ORB_TEXTURE_MIN = 64u;
-            constexpr unsigned int ORB_TEXTURE_MAX = 512u;
-            unsigned int orbTextureSize = static_cast<unsigned int>(std::ceil(diameterPx * ORB_TEXTURE_SCALE));
-            orbTextureSize = std::clamp(orbTextureSize, ORB_TEXTURE_MIN, ORB_TEXTURE_MAX);
-
-            sf::Vector3f sunDirView = Camera::worldToCamera(
-                sf::Vector3f(m_sunDirection.x, m_sunDirection.y, m_sunDirection.z),
-                transform.pitch,
-                transform.yaw,
-                transform.roll
-            );
-
-            // Draw the sphere-lit orb into a small texture first, then place that
-            // texture as a sprite in screen space at the billboard position.
-            static sf::RenderTexture orbTexture;
-            static bool orbTextureInitialized = false;
-            if (!orbTextureInitialized || orbTexture.getSize().x != orbTextureSize || orbTexture.getSize().y != orbTextureSize) {
-                orbTexture = sf::RenderTexture({orbTextureSize, orbTextureSize});
-                orbTexture.setSmooth(true);
-                orbTextureInitialized = true;
-            }
-
-            orbTexture.clear(sf::Color::Transparent);
-
-            sf::RectangleShape shadedRect{sf::Vector2f(float(orbTextureSize), float(orbTextureSize))};
-            shadedRect.setPosition(sf::Vector2f(0.f, 0.f));
-            shadedRect.setFillColor(sf::Color::White);
-
-            sf::RenderStates states;
-            states.shader = &m_orbShader;
-            // Night detection: match sky/final shader logic
-            float isNight = (m_sunDirection.y < 0.12f || m_sunIntensity < 0.75f) ? 1.0f : 0.0f;
-            m_orbShader.setUniform("isNight", isNight);
-            m_orbShader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
-            m_orbShader.setUniform("sunColor", m_sunColor);
-            m_orbShader.setUniform("orbColor", sf::Glsl::Vec4(
-                orbData.color.r / 255.0f,
-                orbData.color.g / 255.0f,
-                orbData.color.b / 255.0f,
-                orbData.color.a / 255.0f
-            ));
-            m_orbShader.setUniform("u_texSize", sf::Glsl::Vec2(float(orbTextureSize), float(orbTextureSize)));
-            m_orbShader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
-            m_orbShader.setUniform("u_viewportSize", sf::Glsl::Vec2(float(windowSize.x), float(windowSize.y)));
-            m_orbShader.setUniform("u_screenCenter", sf::Glsl::Vec2(item.screenPos.x, item.screenPos.y));
-            m_orbShader.setUniform("u_orbCenterView", sf::Glsl::Vec3(item.cameraSpacePos.x, item.cameraSpacePos.y, item.cameraSpacePos.z));
-            m_orbShader.setUniform("u_orbDepthNorm", item.depthNorm);
-            m_orbShader.setUniform("u_orbRadiusPx", radiusPx);
-            m_orbShader.setUniform("farPlane", cameraData.farPlane);
-            m_orbShader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-            // Headlamp uniforms: camera-space beam anchored at the screen center.
-            m_orbShader.setUniform("headlampPos", sf::Glsl::Vec3(0.f, 0.f, 0.f));
-            m_orbShader.setUniform("headlampDir", sf::Glsl::Vec3(0.f, 0.f, -1.f));
-            m_orbShader.setUniform("headlampIntensity", 5.5f); // tweak as needed
-            m_orbShader.setUniform("headlampRange", 5000.0f);  // world units from camera
-            m_orbShader.setUniform("headlampConeCos", 0.94f);  // ~23 deg cone
-            orbTexture.draw(shadedRect, states);
-            orbTexture.display();
-
-            sf::Sprite shadedSprite(orbTexture.getTexture());
-            shadedSprite.setOrigin(sf::Vector2f(float(orbTextureSize) * 0.5f, float(orbTextureSize) * 0.5f));
-            shadedSprite.setPosition(item.screenPos);
-            float spriteScale = (radiusPx * 2.0f) / float(orbTextureSize);
-            shadedSprite.setScale(sf::Vector2f(spriteScale, spriteScale));
-
-            window.draw(shadedSprite);
-        };
-
-        for (const auto& orbItem : orbDrawItems) {
-            drawOrbBillboard(orbItem);
-        }
-        // Restore previous view used for world rendering
-        window.setView(prevView);
+        renderOrbs();
     }
 
     m_hud->render(m_game.window(), false);
@@ -1125,6 +986,143 @@ void Scene_IC_Camp::renderWorld(const sf::Glsl::Mat3& rotationMatrix) {
     m_skyTexture.draw(groundSprite, &m_sky);
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
+}
+
+void Scene_IC_Camp::renderOrbs() {
+    auto& window = m_game.window();
+    auto& transform = m_camera->get<CTransform3D>();
+    auto& cameraData = m_camera->get<CCamera>();
+    const sf::Vector2u windowSize = window.getSize();
+
+    struct OrbDrawItem
+    {
+        std::shared_ptr<Entity> entity;
+        sf::Vector2f screenPos;
+        sf::Vector3f cameraSpacePos;
+        float radiusPx;
+        float depthSort;
+        float depthNorm;
+    };
+
+    auto prevView = window.getView();
+    window.setView(window.getDefaultView());
+
+    std::vector<OrbDrawItem> orbDrawItems;
+    orbDrawItems.reserve(m_entityManager.getEntities("orb").size());
+
+    for (auto orb : m_entityManager.getEntities("orb")) {
+        if (!orb->has<COrb>() || !orb->has<CTransform3D>()) {
+            continue;
+        }
+
+        auto& orbTransform = orb->get<CTransform3D>();
+        auto& orbData = orb->get<COrb>();
+
+        sf::Vector2f screenPos;
+        if (!Camera::worldToScreen(m_camera, orbTransform.pos, screenPos)) {
+            continue;
+        }
+
+        sf::Vector3f relative = orbTransform.pos - transform.pos;
+        sf::Vector3f cameraSpace = Camera::worldToCamera(relative, transform.pitch, transform.yaw, transform.roll);
+        if (cameraSpace.z >= -cameraData.nearPlane) {
+            continue;
+        }
+
+        float depth = std::abs(cameraSpace.z);
+        if (depth <= 0.0001f) {
+            continue;
+        }
+
+        float focalLengthPx = (float(windowSize.y) * 0.5f) / std::tan(cameraData.fovY * 0.5f);
+        float radiusPx = orbData.radius * focalLengthPx / depth;
+        if (radiusPx <= 0.5f) {
+            continue;
+        }
+
+        float depthNorm = std::clamp((depth - cameraData.nearPlane) / (cameraData.farPlane - cameraData.nearPlane), 0.0f, 1.0f);
+        orbDrawItems.push_back({orb, screenPos, cameraSpace, radiusPx, depth, depthNorm});
+    }
+
+    std::sort(orbDrawItems.begin(), orbDrawItems.end(), [](const OrbDrawItem& a, const OrbDrawItem& b) {
+        return a.depthSort > b.depthSort;
+    });
+
+    auto drawOrbBillboard = [&](const OrbDrawItem& item) {
+        auto& orbData = item.entity->get<COrb>();
+
+        const float radiusPx = item.radiusPx;
+        const float diameterPx = radiusPx * 2.0f;
+        constexpr float ORB_TEXTURE_SCALE = 1.5f;
+        constexpr unsigned int ORB_TEXTURE_MIN = 64u;
+        constexpr unsigned int ORB_TEXTURE_MAX = 512u;
+        unsigned int orbTextureSize = static_cast<unsigned int>(std::ceil(diameterPx * ORB_TEXTURE_SCALE));
+        orbTextureSize = std::clamp(orbTextureSize, ORB_TEXTURE_MIN, ORB_TEXTURE_MAX);
+
+        sf::Vector3f sunDirView = Camera::worldToCamera(
+            sf::Vector3f(m_sunDirection.x, m_sunDirection.y, m_sunDirection.z),
+            transform.pitch,
+            transform.yaw,
+            transform.roll
+        );
+
+        static sf::RenderTexture orbTexture;
+        static bool orbTextureInitialized = false;
+        if (!orbTextureInitialized || orbTexture.getSize().x != orbTextureSize || orbTexture.getSize().y != orbTextureSize) {
+            orbTexture = sf::RenderTexture({orbTextureSize, orbTextureSize});
+            orbTexture.setSmooth(true);
+            orbTextureInitialized = true;
+        }
+
+        orbTexture.clear(sf::Color::Transparent);
+
+        sf::RectangleShape shadedRect{sf::Vector2f(float(orbTextureSize), float(orbTextureSize))};
+        shadedRect.setPosition(sf::Vector2f(0.f, 0.f));
+        shadedRect.setFillColor(sf::Color::White);
+
+        sf::RenderStates states;
+        states.shader = &m_orbShader;
+        float isNight = (m_sunDirection.y < 0.12f || m_sunIntensity < 0.75f) ? 1.0f : 0.0f;
+        m_orbShader.setUniform("isNight", isNight);
+        m_orbShader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
+        m_orbShader.setUniform("sunColor", m_sunColor);
+        m_orbShader.setUniform("orbColor", sf::Glsl::Vec4(
+            orbData.color.r / 255.0f,
+            orbData.color.g / 255.0f,
+            orbData.color.b / 255.0f,
+            orbData.color.a / 255.0f
+        ));
+        m_orbShader.setUniform("u_texSize", sf::Glsl::Vec2(float(orbTextureSize), float(orbTextureSize)));
+        m_orbShader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
+        m_orbShader.setUniform("u_viewportSize", sf::Glsl::Vec2(float(windowSize.x), float(windowSize.y)));
+        m_orbShader.setUniform("u_screenCenter", sf::Glsl::Vec2(item.screenPos.x, item.screenPos.y));
+        m_orbShader.setUniform("u_orbCenterView", sf::Glsl::Vec3(item.cameraSpacePos.x, item.cameraSpacePos.y, item.cameraSpacePos.z));
+        m_orbShader.setUniform("u_orbDepthNorm", item.depthNorm);
+        m_orbShader.setUniform("u_orbRadiusPx", radiusPx);
+        m_orbShader.setUniform("farPlane", cameraData.farPlane);
+        m_orbShader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+        m_orbShader.setUniform("headlampPos", sf::Glsl::Vec3(0.f, 0.f, 0.f));
+        m_orbShader.setUniform("headlampDir", sf::Glsl::Vec3(0.f, 0.f, -1.f));
+        m_orbShader.setUniform("headlampIntensity", 5.5f);
+        m_orbShader.setUniform("headlampRange", 5000.0f);
+        m_orbShader.setUniform("headlampConeCos", 0.94f);
+        orbTexture.draw(shadedRect, states);
+        orbTexture.display();
+
+        sf::Sprite shadedSprite(orbTexture.getTexture());
+        shadedSprite.setOrigin(sf::Vector2f(float(orbTextureSize) * 0.5f, float(orbTextureSize) * 0.5f));
+        shadedSprite.setPosition(item.screenPos);
+        float spriteScale = (radiusPx * 2.0f) / float(orbTextureSize);
+        shadedSprite.setScale(sf::Vector2f(spriteScale, spriteScale));
+
+        window.draw(shadedSprite);
+    };
+
+    for (const auto& orbItem : orbDrawItems) {
+        drawOrbBillboard(orbItem);
+    }
+
+    window.setView(prevView);
 }
 
 void Scene_IC_Camp::updateSunPosition()

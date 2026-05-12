@@ -135,6 +135,7 @@ protected:
     void runTopDownPass();
     void runFinalPass(const sf::Glsl::Mat3& rotationMatrix);
     void renderWorld(const sf::Glsl::Mat3& rotationMatrix);
+    void renderOrbs();
 
     // Convenience wrappers around Topography namespace functions
     float heightAt(float x, float z) const {
