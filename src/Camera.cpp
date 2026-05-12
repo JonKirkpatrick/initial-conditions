@@ -10,7 +10,7 @@
 
 namespace Camera
 {
-    sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll) {
+    sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float roll) {
         float cp = std::cos(-pitch), sp = std::sin(-pitch);
         float cy = std::cos(-yaw),   sy = std::sin(-yaw);
         float cr = std::cos(-roll),  sr = std::sin(-roll);
@@ -31,7 +31,7 @@ namespace Camera
         return sf::Vector3f(x3, y3, z2);
     }
 
-    sf::Vector3f rotateInverse(const sf::Vector3f& v, float pitch, float yaw, float roll) {
+    sf::Vector3f cameraToWorld(const sf::Vector3f& v, float pitch, float yaw, float roll) {
         float cp = std::cos(-pitch), sp = std::sin(-pitch);
         float cy = std::cos(-yaw),   sy = std::sin(-yaw);
         float cr = std::cos(-roll),  sr = std::sin(-roll);
@@ -52,6 +52,14 @@ namespace Camera
         float y3 = y2;
         
         return sf::Vector3f(x3, y3, z3);
+    }
+
+    sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll) {
+        return worldToCamera(v, pitch, yaw, roll);
+    }
+
+    sf::Vector3f rotateInverse(const sf::Vector3f& v, float pitch, float yaw, float roll) {
+        return cameraToWorld(v, pitch, yaw, roll);
     }
 
     sf::Vector3f normalize(const sf::Vector3f& v)
@@ -87,7 +95,7 @@ namespace Camera
     
     sf::Vector3f getForwardXZ(std::shared_ptr<Entity> cameraEntity) {
         auto cameraTransform = cameraEntity->get<CTransform3D>();
-        auto forward = rotateInverse(sf::Vector3f(0, 0, -1), cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll);
+        auto forward = cameraToWorld(sf::Vector3f(0, 0, -1), cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll);
         forward.y = 0.f; // Flatten to XZ plane
         float forwardLen = std::max(std::sqrt(forward.x * forward.x + forward.z * forward.z), 0.0001f);
         forward /= forwardLen; // Normalize
@@ -96,17 +104,20 @@ namespace Camera
 
     sf::Vector3f getForward(std::shared_ptr<Entity> cameraEntity) {
         auto cameraTransform = cameraEntity->get<CTransform3D>();
-        return rotateInverse(sf::Vector3f(0, 0, -1), cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll);
+        return cameraToWorld(sf::Vector3f(0, 0, -1), cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll);
     }
 
     bool worldToScreen(std::shared_ptr<Entity> cameraEntity, const sf::Vector3f& world, sf::Vector2f& screenOut) {
         auto cameraTransform = cameraEntity->get<CTransform3D>();
         auto cameraData = cameraEntity->get<CCamera>();
         sf::Vector3f rel = world - cameraTransform.pos;
-        sf::Vector3f cam = rotate(rel, cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll);
-        if (cam.z >= -cameraData.nearPlane) {
+        // Use the canonical worldToCamera helper to ensure consistent rotation
+        // conventions (yaw/pitch/roll sign handling) across codepaths.
+        sf::Vector3f cam = worldToCamera(rel, cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll);
+        if (cam.z > -cameraData.nearPlane) {
             return false;
-        } 
+        }
+
         float f = 1.0f / std::tan(cameraData.fovY * 0.5f);
         float x_ndc = (cam.x * f / cameraData.aspectRatio) / -cam.z;
         float y_ndc = (cam.y * f) / -cam.z;
@@ -122,7 +133,7 @@ namespace Camera
         float y_ndc = 1.f - (screen.y / cameraData.viewportSize.y) * 2.f;
         float f = std::tan(cameraData.fovY * 0.5f);
         sf::Vector3f rayDir(x_ndc * f * cameraData.aspectRatio, y_ndc * f, -1.f);
-        rayDir = rotateInverse(rayDir, cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll); // into world space
+        rayDir = cameraToWorld(rayDir, cameraTransform.pitch, cameraTransform.yaw, cameraTransform.roll); // into world space
         // Intersect with y=0
         if (std::abs(rayDir.y) < 0.0001f) return cameraTransform.pos; // parallel to ground
         float t = -cameraTransform.pos.y / rayDir.y;

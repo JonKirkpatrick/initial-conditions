@@ -28,7 +28,8 @@ typedef std::tuple<
     CUIButton,
     CUIPanel,
     CTextLabel,
-    CLEDIndicator
+    CLEDIndicator,
+    COrb
 > ComponentTuple;
            
 class Entity

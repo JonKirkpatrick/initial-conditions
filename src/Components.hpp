@@ -329,6 +329,21 @@ public:
     CLEDIndicator() = default;
 };
 
+class COrb : public Component
+{
+public:
+    sf::Color color = sf::Color::White;
+    float radius = 50.0f;
+    float bobRate = 2.0f;           // cycles per second
+    float bobMagnitude = 8.0f;      // units of vertical movement
+    float bobPhase = 0.0f;          // current phase [0, 1)
+    float heightAboveGround = 100.0f;
+
+    COrb() = default;
+    COrb(const sf::Color& c, float r, float rate = 2.0f, float mag = 8.0f, float heightAbove = 100.0f)
+        : color(c), radius(r), bobRate(rate), bobMagnitude(mag), heightAboveGround(heightAbove) {}
+};
+
 static_assert(std::is_default_constructible_v<CTransform3D>);
 static_assert(std::is_default_constructible_v<CPlayer>);
 static_assert(std::is_default_constructible_v<CCamera>);
@@ -351,6 +366,7 @@ static_assert(std::is_default_constructible_v<CUIButton>);
 static_assert(std::is_default_constructible_v<CUIPanel>);
 static_assert(std::is_default_constructible_v<CTextLabel>);
 static_assert(std::is_default_constructible_v<CLEDIndicator>);
+static_assert(std::is_default_constructible_v<COrb>);
 
 static_assert(std::is_default_constructible_v<Vec2f>);
 static_assert(std::is_default_constructible_v<Animation>);

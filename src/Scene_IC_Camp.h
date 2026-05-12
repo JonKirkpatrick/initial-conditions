@@ -56,6 +56,7 @@ protected:
     sf::Shader& m_topdownShader = Assets::Instance().getShader("TopoTopDown");
     sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
     sf::Shader& m_sky = Assets::Instance().getShader("Sky");
+    sf::Shader& m_orbShader = Assets::Instance().getShader("Orb");
     sf::RenderTexture m_renderTexture;
     sf::RenderTexture m_bakeTexture;
     sf::RenderTexture m_topdownTexture;
@@ -161,6 +162,7 @@ public:
     void sMovement(float dt);
     void spawnCamera();
     void spawnPlayer();
+    void spawnOrb(float worldX, float worldZ, const sf::Color& color, float radius, float bobRate = 2.0f, float bobMagnitude = 8.0f);
     void loadLevel(const std::string& filename);
     HUD* getHUD() const override;
 };
