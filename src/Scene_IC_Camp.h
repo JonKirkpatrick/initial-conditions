@@ -39,15 +39,16 @@ protected:
     bool m_drawGrid = true;
     bool m_drawTextures = true;
     bool m_drawCollision = false;
-    bool m_showGUI = true;
+    bool m_showGUI = false;
     bool m_cursorMode = false;
-    HeadlightState m_headlightState = HeadlightState::Auto;
 
     // Scene-specific data
     float m_hexSize = 100.f;
     sf::Color m_gridColor;
 
-    sf::Vector2f m_homeLocationXZ{0.f, 0.f}; // Move to level file??
+    sf::Vector2f m_homeLocationXZ{0.f, 0.f};
+    void resolveEntityPosition(std::shared_ptr<Entity> e, float dt);
+    void handlePlayerMovement(std::shared_ptr<Entity> player, float dt);
 
     // Shaders and render textures
     sf::Shader& m_bakeShader = Assets::Instance().getShader("TopoBake");
@@ -74,28 +75,40 @@ protected:
     // Camera bob smoothing (lag) state
     sf::Vector3f m_cameraBobOffset{0.f, 0.f, 0.f};
     float m_bobLag = 0.16f; // smoothing factor for camera bob (0..1)
+    // In Scene_IC_Camp.h, in the private section:
+    float m_crouchFactor = 0.0f;        // 0.0 = standing, 1.0 = fully crouched
+
+    // Orb bobbing
+    void updateOrbBobbing(std::shared_ptr<Entity> e, float dt);
 
     // FPS display
     sf::Clock m_fpsClock;
     int m_fpsFrameCount = 0;
     float m_fps = 0.0f;
+
     // Last frame wall-clock time (seconds) for delta-time
     float m_lastFrameTime = 0.0f;
 
     //---- */ Helpers and members to setup up shader uniforms ----//
+
     // Shader render quality (0.05 .. 1.0) - lower reduces GPU work at cost of visual fidelity
     float m_shaderQuality = 1.0f;
+
     // Step size scale (0.1 .. 5.0) - lower for finer detail, higher for performance
     float m_stepSizeScale = 1.0f;
+
     // Debug-only multiplier for how the step count is visualized in the depth/step shader
     float m_stepContributionScale = 1.0f;
+
     // Debug-only normalization divisor for step count (fixed to avoid rescaling on parameter changes)
     float m_stepCountNormalizationMax = 255.0f;
+
     // Debug-only threshold for heightmap-to-raymarching transition in the depth/step shader
     float m_heightmapTransitionThreshold = 350.0f;
     float m_warpScale = 0.00020f;
     float m_warpStrength = 2415.0f;
     int m_stripeLayerIndex = -1;
+
     // Active layer bitmask for culling (bit i = layer i enabled)
     uint32_t m_activeLayerMask = 0xFFFF;
     sf::Glsl::Vec3 colorToShader(const sf::Color& color);
@@ -105,7 +118,7 @@ protected:
     void uploadWarpParametersToShader(sf::Shader& shader) const;
     int selectStripeLayerIndex() const;
 
-
+    // Time, Date and Location
     float m_gameTimeOfDay; // Hours between 0 and 24
     int m_gameDayOfYear; // Day of the year between 1 and 365
     float m_latitude; // Newfoundland
@@ -115,16 +128,8 @@ protected:
     sf::Glsl::Vec4 m_sunColor;
     float m_sunIntensity = 1.0f;
     float m_atmosphereTint = 0.0f;
-    // Terrain layer system (16 regions, additive composition)
-    std::array<TerrainLayer, 16> m_terrainLayers{};
-    void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
-    void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
 
-
-    void updateSunPosition();
-    bool shouldHeadlightsBeOn() const;
-    void updateCamera();
-    void captureBake();
+    void updateCamera(float dt);
 
     // Main render passes and world updates
     void updateHUDData();
@@ -134,8 +139,16 @@ protected:
     void runDepthStepPass(const sf::Glsl::Mat3& rotationMatrix);
     void runTopDownPass();
     void runFinalPass(const sf::Glsl::Mat3& rotationMatrix);
-    void renderWorld(const sf::Glsl::Mat3& rotationMatrix);
+    void renderSky(const sf::Glsl::Mat3& rotationMatrix);
     void renderOrbs();
+    void renderTopDownViewer(sf::RenderWindow& window);
+    void captureBake();
+    void updateSunPosition();
+    void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
+    void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
+    std::array<TerrainLayer, 16> m_terrainLayers{};
+    bool shouldHeadlightsBeOn() const;
+    HeadlightState m_headlightState = HeadlightState::Auto;
 
     // Convenience wrappers around Topography namespace functions
     float heightAt(float x, float z) const {
@@ -163,7 +176,7 @@ public:
     void sMovement(float dt);
     void spawnCamera();
     void spawnPlayer();
-    void spawnOrb(float worldX, float worldZ, const sf::Color& color, float radius, float bobRate = 2.0f, float bobMagnitude = 8.0f);
+    void spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius, float bobRate = 2.0f, float bobMagnitude = 8.0f);
     void loadLevel(const std::string& filename);
     HUD* getHUD() const override;
 };

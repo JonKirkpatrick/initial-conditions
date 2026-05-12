@@ -115,6 +115,7 @@ public:
     bool jump           = false;
     bool sprint         = false;
     bool interact       = false;
+    bool crouch         = false;
     float xAxis        = 0.f;
     float yAxis        = 0.f;
     Vec2f mouseDelta     = { 0.f, 0.f };
@@ -344,6 +345,24 @@ public:
         : color(c), radius(r), bobRate(rate), bobMagnitude(mag), heightAboveGround(heightAbove) {}
 };
 
+class CPhysics : public Component
+{
+public:
+    float gravity         = 981.0f;
+    float jumpSpeed       = 420.0f;
+    
+    float groundFriction  = 12.0f;
+    float airFriction     = 3.0f;
+    
+    bool  onGround        = true;
+    bool  isCrouching     = false;
+    
+    float standingHeight  = 1.8f;
+    float crouchHeight    = 0.9f;
+
+    CPhysics() = default;
+};
+
 static_assert(std::is_default_constructible_v<CTransform3D>);
 static_assert(std::is_default_constructible_v<CPlayer>);
 static_assert(std::is_default_constructible_v<CCamera>);
@@ -367,7 +386,7 @@ static_assert(std::is_default_constructible_v<CUIPanel>);
 static_assert(std::is_default_constructible_v<CTextLabel>);
 static_assert(std::is_default_constructible_v<CLEDIndicator>);
 static_assert(std::is_default_constructible_v<COrb>);
-
+static_assert(std::is_default_constructible_v<CPhysics>);
 static_assert(std::is_default_constructible_v<Vec2f>);
 static_assert(std::is_default_constructible_v<Animation>);
 static_assert(std::is_default_constructible_v<SliderElements>);

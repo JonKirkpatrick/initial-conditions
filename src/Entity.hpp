@@ -29,7 +29,8 @@ typedef std::tuple<
     CUIPanel,
     CTextLabel,
     CLEDIndicator,
-    COrb
+    COrb,
+    CPhysics
 > ComponentTuple;
            
 class Entity

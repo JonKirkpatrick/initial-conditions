@@ -8,6 +8,7 @@
 #include "imgui-SFML.h"
 #include "Camera.h"
 
+// This might need to move somewhere else.  It's just to flatten a 3x3 matrix into column-major order for uploading to the shader, and I need it in multiple places now.
 static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matrix) {
     const float flattened[9] = {
         matrix[0][0], matrix[1][0], matrix[2][0],
@@ -42,8 +43,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnCamera();
     spawnPlayer();
-    spawnOrb(260.f, 180.f, sf::Color(240, 208, 96, 190), 50.0f, 2.0f, 8.0f);
-    spawnOrb(-420.f, 310.f, sf::Color(120, 194, 255, 170), 50.0f, 1.5f, 6.0f);
+    spawnOrb(12, 3, sf::Color(240, 208, 96, 190), 50.0f, 2.0f, 8.0f);
+    spawnOrb(-5, 16, sf::Color(120, 194, 255, 170), 50.0f, 1.5f, 6.0f);
     Topography::setWarpParameters(m_warpScale, m_warpStrength);
     m_topdownMaxHeight = computeSceneMaxHeight();
     buildHud();
@@ -53,13 +54,23 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_cursorMode = false;
 }
 
-void Scene_IC_Camp::updateCamera() {
+void Scene_IC_Camp::updateCamera(float dt) 
+{
     auto& camTransform = m_camera->get<CTransform3D>();
     auto& playerTransform = m_player->get<CTransform3D>();
     auto& playerState = m_player->get<CPlayer>();
     auto& cameraData = m_camera->get<CCamera>();
-    sf::Vector3f headPos = playerTransform.pos;
-    
+
+    // Smooth crouch transition
+    float targetCrouch = playerState.crouching ? 1.0f : 0.0f;
+    m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt; // 8.0f = speed of transition
+    m_crouchFactor = std::clamp(m_crouchFactor, 0.0f, 1.0f);
+
+    // Eye height
+    float eyeHeight = m_playerConfig.HEIGHT_OFFSET * (1.0f - m_crouchFactor * 0.45f); // 45% reduction when fully crouched
+
+    sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
+
     sf::Vector3f forward = Camera::getForwardXZ(m_player);
     sf::Vector3f right(forward.z, 0.f, -forward.x);
 
@@ -71,22 +82,23 @@ void Scene_IC_Camp::updateCamera() {
     float moveFactor = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 1.0f);
     float phase = playerState.bobAccumulator * 6.2831853f;
 
-    // Slightly slower cadence: previously felt too aggressive — slow by factor ~3
-    float cadenceScale = 1.0f; // bobAccumulator already slowed in sMovement
+    float cadenceScale = 1.0f;
 
-    // Slightly tighten lateral motion to reduce perceived sway
+    // Bob amplitudes reduced while crouching
     float lateralAmplitude = playerState.sprinting ? 4.2f : 6.8f;
-    const float lateralScale = 0.85f; // 0.85 = 15% tighter laterally
-    lateralAmplitude *= lateralScale;
     float verticalAmplitude = playerState.sprinting ? 7.4f : 6.2f;
+
+    lateralAmplitude *= (1.0f - m_crouchFactor * 0.4f);
+    verticalAmplitude *= (1.0f - m_crouchFactor * 0.5f);
+
+    const float lateralScale = 0.85f;
+    lateralAmplitude *= lateralScale;
 
     float lateralBob = std::sin(phase * cadenceScale) * lateralAmplitude * moveFactor;
     float verticalBob = std::sin(phase * 2.f * cadenceScale) * verticalAmplitude * moveFactor;
 
-    // Target bob offset in world-space (right axis and vertical)
     sf::Vector3f targetBob = right * lateralBob + sf::Vector3f(0.f, verticalBob, 0.f);
 
-    // Smooth/lag the camera bob so the world feels a bit more inertial
     m_cameraBobOffset += (targetBob - m_cameraBobOffset) * m_bobLag;
 
     camTransform.pos = headPos - (forward * m_playerConfig.EYE_OFFSET) + m_cameraBobOffset;
@@ -94,8 +106,25 @@ void Scene_IC_Camp::updateCamera() {
     camTransform.yaw   = playerTransform.yaw;
     camTransform.pitch = playerTransform.pitch;
 
+    // FOV adjustment
     float targetFov = m_cameraConfig.FOVY + (playerState.sprinting ? 0.14f : 0.0f);
+    targetFov -= m_crouchFactor * 0.05f;   // slight zoom when crouched
+
     cameraData.fovY += (targetFov - cameraData.fovY) * 0.12f;
+}
+
+bool Scene_IC_Camp::shouldHeadlightsBeOn() const
+{
+    switch (m_headlightState)
+    {
+    case HeadlightState::Off:
+        return false;
+    case HeadlightState::On:
+        return true;
+    case HeadlightState::Auto:
+    default:
+        return m_sunDirection.y < 0.12f || m_sunIntensity < 0.75f;
+    }
 }
 
 void Scene_IC_Camp::updateHUDData()
@@ -116,82 +145,6 @@ void Scene_IC_Camp::updateHUDData()
     m_hudData.headlightState = static_cast<int>(m_headlightState);
     m_hudData.headlightEnabled = shouldHeadlightsBeOn();
     m_hudData.minimapTex = &m_minimapTexture.getTexture();
-}
-
-bool Scene_IC_Camp::shouldHeadlightsBeOn() const
-{
-    switch (m_headlightState)
-    {
-    case HeadlightState::Off:
-        return false;
-    case HeadlightState::On:
-        return true;
-    case HeadlightState::Auto:
-    default:
-        return m_sunDirection.y < 0.12f || m_sunIntensity < 0.75f;
-    }
-}
-
-void Scene_IC_Camp::updateMinimapTexture()
-{
-    if (m_minimapTexture.getSize().x != m_minimapTextureSize ||
-        m_minimapTexture.getSize().y != m_minimapTextureSize)
-    {
-        m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
-    }
-
-    const sf::Vector3f playerPos = m_player->get<CTransform3D>().pos;
-    const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
-    const float center   = texSize * 0.5f;
-    const float worldRadius = 25600.f;
-
-    // ── Draw the hillshaded topo layer via shader ──────────────────────────
-    m_minimapTexture.clear(sf::Color::Transparent);
-
-    sf::RectangleShape fullQuad({texSize, texSize});
-
-    m_topoMinimapShader.setUniform("u_playerXZ",
-        sf::Glsl::Vec2(playerPos.x, playerPos.z));
-    m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
-    m_topoMinimapShader.setUniform("u_texSize",      texSize);
-    m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    m_topoMinimapShader.setUniform("u_reliefExaggeration", 2.4f);
-    Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
-    for (int i = 0; i < 16; ++i) {
-        m_topoMinimapShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
-    }
-    sf::RenderStates states;
-    states.shader = &m_topoMinimapShader;
-    m_minimapTexture.draw(fullQuad, states);
-
-    sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
-    float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-    const float circleRadiusPx = center - 2.f;
-    const float homeMarkerRadius = 5.5f;
-    const float maxMarkerDist = std::max(0.f, circleRadiusPx - homeMarkerRadius - 1.f);
-    const float worldToPixel = circleRadiusPx / worldRadius;
-
-    if (dist > 0.0001f)
-    {
-        sf::Vector2f homePx = sf::Vector2f(center, center) + delta * worldToPixel;
-        sf::Vector2f diff = homePx - sf::Vector2f(center, center);
-        float markerDist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
-        if (markerDist > maxMarkerDist)
-        {
-            sf::Vector2f dir = diff / markerDist;
-            homePx = sf::Vector2f(center, center) + dir * maxMarkerDist;
-        }
-
-        sf::CircleShape homeHex(homeMarkerRadius, 6);
-        homeHex.setOrigin({homeMarkerRadius, homeMarkerRadius});
-        homeHex.setPosition(homePx);
-        homeHex.setFillColor(sf::Color(245, 225, 98, 255));
-        homeHex.setOutlineThickness(1.f);
-        homeHex.setOutlineColor(sf::Color(88, 70, 24, 240));
-        m_minimapTexture.draw(homeHex);
-    }
-
-    m_minimapTexture.display();
 }
 
 void Scene_IC_Camp::buildHud()
@@ -277,20 +230,21 @@ void Scene_IC_Camp::spawnPlayer()
         0.f, 0.f, 0.f
     );
     m_player->add<CInput>();
+    m_player->add<CPhysics>();
 }
 
-void Scene_IC_Camp::spawnOrb(float worldX, float worldZ, const sf::Color& color, float radius, float bobRate, float bobMagnitude)
+void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius, float bobRate, float bobMagnitude)
 {
     auto orb = m_entityManager.addEntity("orb");
+    sf::Vector2f worldPos = hexToWorld(hexQ, hexR);
     orb->add<CTransform3D>(
-        sf::Vector3f(worldX, heightAt(worldX, worldZ) + 100.0f, worldZ),
+        sf::Vector3f(worldPos.x, heightAt(worldPos.x, worldPos.y) + 100.0f, worldPos.y),
         sf::Vector3f(0.f, 0.f, 0.f),
         sf::Vector3f(1.f, 1.f, 1.f),
         0.f, 0.f, 0.f
     );
     orb->add<COrb>(color, radius, bobRate, bobMagnitude, 100.0f);
 }
-
 
 void Scene_IC_Camp::spawnCamera()
 {
@@ -341,24 +295,10 @@ void Scene_IC_Camp::update() {
         dt = std::clamp(dt, 0.0001f, 0.5f);
     }
     m_lastFrameTime = currentTime;
-
-    // Update orb bob phases
-    for (auto e : m_entityManager.getEntities("orb")) {
-        if (!e->has<COrb>()) continue;
-        auto& orb = e->get<COrb>();
-        auto& transform = e->get<CTransform3D>();
-        
-        orb.bobPhase = std::fmod(orb.bobPhase + orb.bobRate * dt, 1.0f);
-        float bobOffset = std::sin(orb.bobPhase * 6.2831853f) * orb.bobMagnitude;
-        
-        float groundHeight = heightAt(transform.pos.x, transform.pos.z);
-        transform.pos.y = groundHeight + orb.heightAboveGround + bobOffset;
-    }
-
     sMovement(dt);
     updateHUDData();
     updateSunPosition();
-    updateCamera();
+    updateCamera(dt);
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
         sGUI();
@@ -374,7 +314,7 @@ void Scene_IC_Camp::update() {
 }
 
 void Scene_IC_Camp::sDoAction(const Action& action) {
-    auto& input = m_player->get<CInput>();  // slaved to player now, not camera
+    auto& input = m_player->get<CInput>();
 
     if (action.type() == "ANALOG") {
         if (action.name() == InputAction::CameraYawRight) {
@@ -409,14 +349,13 @@ void Scene_IC_Camp::sDoAction(const Action& action) {
             );
         }
         else if (m_cursorMode) { return; }
-
-        // Movement
         else if (action.name() == InputAction::MoveForward)  { input.forward  = true; }
         else if (action.name() == InputAction::MoveBackward) { input.backward = true; }
         else if (action.name() == InputAction::MoveLeft)     { input.left     = true; }
         else if (action.name() == InputAction::MoveRight)    { input.right    = true; }
         else if (action.name() == InputAction::Strafe)       { input.strafe   = true; }
         else if (action.name() == InputAction::Jump)         { input.jump     = true; }
+        else if (action.name() == InputAction::Crouch)       { input.crouch   = true; }
         else if (action.name() == InputAction::Sprint)       { input.sprint   = true; }
         else if (action.name() == InputAction::Interact)     { input.interact = true; }
         else if (action.name() == InputAction::ShowGui)      { m_showGUI = !m_showGUI; }
@@ -432,14 +371,13 @@ void Scene_IC_Camp::sDoAction(const Action& action) {
     }
 
     else if (action.type() == "END") {
-
-        // Movement
         if      (action.name() == InputAction::MoveForward)  { input.forward  = false; }
         else if (action.name() == InputAction::MoveBackward) { input.backward = false; }
         else if (action.name() == InputAction::MoveLeft)     { input.left     = false; }
         else if (action.name() == InputAction::MoveRight)    { input.right    = false; }
         else if (action.name() == InputAction::Strafe)       { input.strafe   = false; }
         else if (action.name() == InputAction::Jump)         { input.jump     = false; }
+        else if (action.name() == InputAction::Crouch)       { input.crouch   = false; }
         else if (action.name() == InputAction::Sprint)       { input.sprint   = false; }
         else if (action.name() == InputAction::Interact)     { input.interact = false; }
     }
@@ -449,100 +387,201 @@ void Scene_IC_Camp::sMovement(float dt)
 {
     for (auto e : m_entityManager.getEntities())
     {
-        if (!e->has<CTransform3D>() || !e->has<CInput>()) continue;
+        if (!e->has<CTransform3D>()) continue;
+        auto& t = e->get<CTransform3D>();
 
-        auto& transform = e->get<CTransform3D>();
-        auto& input = e->get<CInput>();
-
+        // 1. Player-specific input handling
         if (e->tag() == "player")
         {
-            auto& playerState = e->get<CPlayer>();
-
-            // 1. Determine Speeds (Sprint on SHIFT)
-            // Level file values are now interpreted as units-per-second.
-            float currentMoveSpeed = input.sprint ? (m_playerConfig.MOVE_SPEED * 3.0f) : m_playerConfig.MOVE_SPEED;
-            float currentRotSpeed  = m_playerConfig.ROTATION_SPEED;
-            playerState.sprinting = input.sprint;
-            playerState.moveSpeed = currentMoveSpeed;
-            playerState.rotSpeed = currentRotSpeed;
-
-            // 2. Handle Rotation (Turn with A/D unless CTRL is held)
-            if (input.strafe)
-            {
-                if (input.left)  transform.yaw += currentRotSpeed * dt; 
-                if (input.right) transform.yaw -= currentRotSpeed * dt;
-            }
-
-            // 3. Handle Mouse Look (Incremental deltas)
-            transform.yaw   -= input.mouseDelta.x * 0.002f; // Sensitivity constant (mouse already delta/time-normalized)
-            transform.pitch -= input.mouseDelta.y * 0.002f; 
-            input.mouseDelta = { 0.f, 0.f }; // Consume the delta
-
-            // 4. Translation Directions
-            // Using your existing Camera utility to get forward vector based on current yaw
-            sf::Vector3f forward = Camera::getForwardXZ(e); 
-            sf::Vector3f right(-forward.z, 0.f, forward.x);
-
-            sf::Vector3f moveVec(0.f, 0.f, 0.f);
-
-            // Forward/Back (W/S)
-            if (input.forward)  moveVec += forward;
-            if (input.backward) moveVec -= forward;
-
-            // Lateral (A/D only if Strafe modifier is active)
-            if (!input.strafe) 
-            {
-                if (input.left)  moveVec -= right;
-                if (input.right) moveVec += right;
-            }
-            // currentMoveSpeed is interpreted as units per second; convert to per-second velocity
-            transform.velocity = Camera::normalize(moveVec) * currentMoveSpeed;
-
-            if (moveVec.x != 0.f || moveVec.y != 0.f || moveVec.z != 0.f)
-            {
-                // Slow bob cadence by factor of ~3 to make motion gentler
-                // Make walk cadence a bit quicker while leaving sprint unchanged
-                float baseBobStep = playerState.sprinting ? 0.08f : 0.06f;
-                float bobStep = baseBobStep * (1.0f / 3.0f);
-                // previous code incremented per-frame; convert to per-second rate by scaling to 60fps baseline
-                const float FRAME_BASE = 60.0f;
-                playerState.bobAccumulator = std::fmod(playerState.bobAccumulator + bobStep * FRAME_BASE * dt, 1.f);
-            }
+            handlePlayerMovement(e, dt);
         }
 
-        // Apply shared physics movement for all entities
-        transform.prevPos = transform.pos;
-        transform.pos += transform.velocity * dt;
-        
-        transform.pos.y = heightAt(transform.pos.x, transform.pos.z) + m_playerConfig.HEIGHT_OFFSET;
+        // 2. Physics integration
+        if (e->has<CPhysics>())
+        {
+            auto& p = e->get<CPhysics>();
+
+            // Gravity
+            if (!p.onGround)
+                t.velocity.y -= p.gravity * dt;
+
+            t.prevPos = t.pos;
+            t.pos += t.velocity * dt;
+
+            // Friction
+            float friction = p.onGround ? p.groundFriction : p.airFriction;
+            t.velocity.x *= std::max(0.0f, 1.0f - friction * dt);
+            t.velocity.z *= std::max(0.0f, 1.0f - friction * dt);
+        }
+        else
+        {
+            // Kinematic movement (orbs, etc.)
+            t.prevPos = t.pos;
+            t.pos += t.velocity * dt;
+        }
+
+        // 3. Ground resolution + special cases
+        resolveEntityPosition(e, dt);
     }
 }
 
-void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix) {
-    uploadWarpParametersToShader(shader);
-    for (int i = 0; i < 16; ++i) {
-        const TerrainLayer& layer = m_terrainLayers[i];
-        std::string idx = std::to_string(i);
-        
-        shader.setUniform(prefix + "_center[" + idx + "]", sf::Glsl::Vec2(layer.center.x, layer.center.y));
-        shader.setUniform(prefix + "_radius[" + idx + "]", layer.radius);
-        shader.setUniform(prefix + "_falloffWidth[" + idx + "]", layer.falloffWidth);
-        shader.setUniform(prefix + "_topoHeight[" + idx + "]", layer.topoHeight);
+void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
+{
+    if (!e->has<CTransform3D>() || !e->has<CInput>() || !e->has<CPlayer>() || !e->has<CPhysics>())
+        return;
+
+    auto& t       = e->get<CTransform3D>();
+    auto& input   = e->get<CInput>();
+    auto& player  = e->get<CPlayer>();
+    auto& phys    = e->get<CPhysics>();
+
+    // Crouch state
+    player.crouching = input.crouch;
+    bool sprinting = input.sprint && !player.crouching;
+
+    float moveSpeed = m_playerConfig.MOVE_SPEED;
+    if (sprinting)                moveSpeed *= 3.0f;
+    else if (player.crouching)    moveSpeed *= 0.6f;
+
+    player.sprinting = sprinting;
+
+    // === Rotation ===
+    t.yaw   -= input.mouseDelta.x * 0.002f;
+    t.pitch -= input.mouseDelta.y * 0.002f;
+    input.mouseDelta = { 0.f, 0.f };
+
+    if (input.strafe)
+    {
+        if (input.left)  t.yaw += m_playerConfig.ROTATION_SPEED * dt;
+        if (input.right) t.yaw -= m_playerConfig.ROTATION_SPEED * dt;
+    }
+
+    t.pitch = std::clamp(t.pitch, -1.57f, 1.57f);
+
+    // === Movement Direction ===
+    sf::Vector3f forward = Camera::getForwardXZ(e);
+    sf::Vector3f right   = {-forward.z, 0.0f, forward.x};
+
+    sf::Vector3f moveDir(0.f, 0.f, 0.f);
+    if (input.forward)  moveDir += forward;
+    if (input.backward) moveDir -= forward;
+    if (!input.strafe)
+    {
+        if (input.left)  moveDir -= right;
+        if (input.right) moveDir += right;
+    }
+
+    // === Kinematic Horizontal Movement with Air Control ===
+    float currentSpeed = std::sqrt(t.velocity.x*t.velocity.x + t.velocity.z*t.velocity.z);
+
+    if (moveDir.x != 0.0f || moveDir.z != 0.0f)
+    {
+        sf::Vector3f desired = Camera::normalize(moveDir) * moveSpeed;
+
+        if (phys.onGround)
+        {
+            // Full ground control (snappy)
+            t.velocity.x = desired.x;
+            t.velocity.z = desired.z;
+        }
+        else
+        {
+            // Limited air control
+            float airControl = 0.25f;                    // ← tune this (0.2 ~ 0.4 feels good)
+            t.velocity.x = t.velocity.x * (1.0f - airControl) + desired.x * airControl;
+            t.velocity.z = t.velocity.z * (1.0f - airControl) + desired.z * airControl;
+        }
+    }
+    else if (phys.onGround)
+    {
+        // Stop on ground when no input
+        t.velocity.x = 0.0f;
+        t.velocity.z = 0.0f;
+    }
+    // In air with no input → let momentum carry you (nice feeling)
+
+    // === Jumping ===
+    if (input.jump && phys.onGround && !player.crouching)
+    {
+        t.velocity.y = phys.jumpSpeed;
+        phys.onGround = false;
+        player.onGround = false;
+    }
+
+    // Legacy sync
+    player.moveSpeed = moveSpeed;
+    player.rotSpeed  = m_playerConfig.ROTATION_SPEED;
+
+    // Bob
+    if ((moveDir.x != 0.0f || moveDir.z != 0.0f) && phys.onGround)
+    {
+        float baseBobStep = sprinting ? 0.08f : (player.crouching ? 0.035f : 0.06f);
+        player.bobAccumulator = std::fmod(player.bobAccumulator + baseBobStep * 60.0f * dt, 1.0f);
     }
 }
 
-void Scene_IC_Camp::uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix) {
-    for (int i = 0; i < 16; ++i) {
-        const float enabled = (m_activeLayerMask & (1u << i)) != 0 ? 1.0f : 0.0f;
-        shader.setUniform(prefix + "[" + std::to_string(i) + "]", enabled);
+void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
+{
+    if (!e->has<CTransform3D>()) return;
+    auto& t = e->get<CTransform3D>();
+
+    if (e->tag() == "orb")
+    {
+        updateOrbBobbing(e, dt);
+        return;
+    }
+
+    // Normal entities / player
+    float groundY = heightAt(t.pos.x, t.pos.z);
+
+    if (e->has<CPhysics>())
+    {
+        auto& p = e->get<CPhysics>();
+
+        if (t.pos.y < groundY)
+        {
+            t.pos.y = groundY;
+            if (t.velocity.y < 0.0f)
+            {
+                t.velocity.y = 0.0f;
+                p.onGround = true;
+            }
+        }
+        else
+        {
+            p.onGround = false;
+        }
+
+        // Legacy sync with CPlayer
+        if (e->has<CPlayer>())
+        {
+            e->get<CPlayer>().onGround = p.onGround;
+        }
+    }
+    else
+    {
+        t.pos.y = groundY;
     }
 }
 
-void Scene_IC_Camp::uploadWarpParametersToShader(sf::Shader& shader) const {
-    shader.setUniform("u_warpScale", m_warpScale);
-    shader.setUniform("u_warpStrength", m_warpStrength);
+void Scene_IC_Camp::updateOrbBobbing(std::shared_ptr<Entity> e, float dt)
+{
+    if (!e->has<COrb>() || !e->has<CTransform3D>()) return;
+
+    auto& orb = e->get<COrb>();
+    auto& t   = e->get<CTransform3D>();
+
+    orb.bobPhase = std::fmod(orb.bobPhase + orb.bobRate * dt, 1.0f);
+    float bobOffset = std::sin(orb.bobPhase * 6.2831853f) * orb.bobMagnitude;
+
+    float groundY = heightAt(t.pos.x, t.pos.z);
+    t.pos.y = groundY + orb.heightAboveGround + bobOffset;
+
+    t.velocity.y = 0.0f; // orbs float
 }
 
+// This picks out one of the 16 terrain layers to render a sedamentary stripe pattern on.
+// It chooses the layer with the highest ratio of topoHeight to falloffWidth, which tends to produce the most visually striking stripes.
 int Scene_IC_Camp::selectStripeLayerIndex() const {
     int bestIndex = -1;
     float bestScore = -1.0f;
@@ -563,6 +602,7 @@ int Scene_IC_Camp::selectStripeLayerIndex() const {
     return bestIndex;
 }
 
+// This is used already, but will become a far more central function as I start building out the orb system.
 sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
     return sf::Glsl::Vec3(
         color.r / 255.0f,
@@ -607,7 +647,7 @@ void Scene_IC_Camp::sRender() {
         sf::Sprite debugSprite(m_renderTexture.getTexture());
         window.draw(debugSprite);
     } else {
-        renderWorld(inverseRotationMatrix);
+        renderSky(inverseRotationMatrix);
         runBakePass(inverseRotationMatrix);
         runFinalPass(inverseRotationMatrix);
         sf::Sprite finalSprite(m_renderTexture.getTexture());
@@ -616,32 +656,12 @@ void Scene_IC_Camp::sRender() {
         window.draw(finalSprite);
         renderOrbs();
     }
+    m_hud->render(window, false);
 
-    m_hud->render(m_game.window(), false);
-
-    if (m_showTopDownViewer) {
-        sf::Vector2u size = window.getSize();
-        const float panelSize = 220.f;
-        const float pad = 12.f;
-        sf::Vector2f panelPos(pad, size.y - panelSize - pad);
-
-        sf::RectangleShape panel(sf::Vector2f(panelSize, panelSize));
-        panel.setPosition(panelPos);
-        panel.setFillColor(sf::Color(14, 16, 18, 235));
-        panel.setOutlineThickness(2.f);
-        panel.setOutlineColor(sf::Color(230, 220, 200, 230));
-        window.draw(panel);
-
-        sf::Sprite viewer(m_topdownTexture.getTexture());
-        const float sx = (panelSize - 8.f) / float(m_topdownTexture.getSize().x);
-        const float sy = (panelSize - 8.f) / float(m_topdownTexture.getSize().y);
-        viewer.setPosition(panelPos + sf::Vector2f(4.f, 4.f));
-        viewer.setScale(sf::Vector2f(sx, sy));
-        window.draw(viewer);
-    }
+    if (m_showTopDownViewer) { renderTopDownViewer(window); }
 }
 
-//==== GUI ====
+//==== ImGui ====
 
 void Scene_IC_Camp::sGUI()
 {
@@ -812,7 +832,35 @@ void Scene_IC_Camp::sGUI()
 }
 
 // ==== Terrain and Shader Logic ====
+// Our terrain is composed of 16 individual "regions".  The following three methods are concerned with provided the shaders with
+// the necessary parameters to evaluate the contribution of each layer to the final terrain height at a given point.
+void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix) {
+    uploadWarpParametersToShader(shader);
+    for (int i = 0; i < 16; ++i) {
+        const TerrainLayer& layer = m_terrainLayers[i];
+        std::string idx = std::to_string(i);
+        
+        shader.setUniform(prefix + "_center[" + idx + "]", sf::Glsl::Vec2(layer.center.x, layer.center.y));
+        shader.setUniform(prefix + "_radius[" + idx + "]", layer.radius);
+        shader.setUniform(prefix + "_falloffWidth[" + idx + "]", layer.falloffWidth);
+        shader.setUniform(prefix + "_topoHeight[" + idx + "]", layer.topoHeight);
+    }
+}
 
+void Scene_IC_Camp::uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix) {
+    for (int i = 0; i < 16; ++i) {
+        const float enabled = (m_activeLayerMask & (1u << i)) != 0 ? 1.0f : 0.0f;
+        shader.setUniform(prefix + "[" + std::to_string(i) + "]", enabled);
+    }
+}
+
+void Scene_IC_Camp::uploadWarpParametersToShader(sf::Shader& shader) const {
+    shader.setUniform("u_warpScale", m_warpScale);
+    shader.setUniform("u_warpStrength", m_warpStrength);
+}
+
+// This is the heart of the rendering system: it runs a fullscreen shader that raymarches the terrain to produce a depth value for each pixel, 
+// which is stored in m_bakeTexture.  This is then sampled in the final pass to composite the terrain with the sky and orbs.
 void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
@@ -845,6 +893,9 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_bakeTexture.display();
 }
 
+// This is a debug pass that is intended to visualize the cost of raymarching steps in the bake shader.
+// It operates in a similar fashion to the bake shader, but reserves the red channel to encode the number of
+// steps taken instead of providing 24 bit precision for depth.
 void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
@@ -877,6 +928,10 @@ void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix
     m_renderTexture.display();
 }
 
+// This may still benefit from a bit of refinement, but it's intended to aid the bake shader in its job
+// raymarching.  By rendering a top down view bounded by the camera's frustum and farplane, the bake
+// shader can sample this instead of expensive raymarching steps until the ray is close enough to the ground
+// to warrant the full reaymarching.
 void Scene_IC_Camp::runTopDownPass() {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
@@ -932,6 +987,7 @@ void Scene_IC_Camp::runTopDownPass() {
     m_topdownTexture.display();
 }
 
+// This pass uses the baked depthmap alone to produce a final shaded image.
 void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     auto& transform = m_camera->get<CTransform3D>();
     auto& cameraData = m_camera->get<CCamera>();
@@ -972,7 +1028,8 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_renderTexture.display();
 }
 
-void Scene_IC_Camp::renderWorld(const sf::Glsl::Mat3& rotationMatrix) {
+// Draws the sky background.
+void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& rotationMatrix) {
     m_sky.setUniform("viewportSize",  sf::Glsl::Vec2(m_game.window().getSize().x, m_game.window().getSize().y));
     m_sky.setUniform("fovY",          m_camera->get<CCamera>().fovY);
     m_sky.setUniform("aspectRatio",   m_camera->get<CCamera>().aspectRatio);
@@ -982,10 +1039,34 @@ void Scene_IC_Camp::renderWorld(const sf::Glsl::Mat3& rotationMatrix) {
     m_renderTexture.clear(sf::Color::Transparent);
     m_renderTexture.display();
     m_skyTexture.clear(sf::Color::Transparent);
-    sf::Sprite groundSprite(m_renderTexture.getTexture());
-    m_skyTexture.draw(groundSprite, &m_sky);
+    sf::Sprite skySprite(m_renderTexture.getTexture());
+    m_skyTexture.draw(skySprite, &m_sky);
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
+}
+
+// This is a diagnostic tool.  It draws a small top-down view based on the texture produced
+// for consumption by the bake pass.  It is useful for debugging, but is generally not intended
+// to be displayed.
+void Scene_IC_Camp::renderTopDownViewer(sf::RenderWindow& window) {
+        sf::Vector2u size = window.getSize();
+        const float panelSize = 220.f;
+        const float pad = 12.f;
+        sf::Vector2f panelPos(pad, size.y - panelSize - pad);
+
+        sf::RectangleShape panel(sf::Vector2f(panelSize, panelSize));
+        panel.setPosition(panelPos);
+        panel.setFillColor(sf::Color(14, 16, 18, 235));
+        panel.setOutlineThickness(2.f);
+        panel.setOutlineColor(sf::Color(230, 220, 200, 230));
+        window.draw(panel);
+
+        sf::Sprite viewer(m_topdownTexture.getTexture());
+        const float sx = (panelSize - 8.f) / float(m_topdownTexture.getSize().x);
+        const float sy = (panelSize - 8.f) / float(m_topdownTexture.getSize().y);
+        viewer.setPosition(panelPos + sf::Vector2f(4.f, 4.f));
+        viewer.setScale(sf::Vector2f(sx, sy));
+        window.draw(viewer);
 }
 
 void Scene_IC_Camp::renderOrbs() {
@@ -1114,6 +1195,68 @@ void Scene_IC_Camp::renderOrbs() {
     for (const auto& orbItem : orbDrawItems) {
         drawOrbBillboard(orbItem);
     }
+}
+
+void Scene_IC_Camp::updateMinimapTexture()
+{
+    if (m_minimapTexture.getSize().x != m_minimapTextureSize ||
+        m_minimapTexture.getSize().y != m_minimapTextureSize)
+    {
+        m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
+    }
+
+    const sf::Vector3f playerPos = m_player->get<CTransform3D>().pos;
+    const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
+    const float center   = texSize * 0.5f;
+    const float worldRadius = 25600.f;
+
+    // ── Draw the hillshaded topo layer via shader ──────────────────────────
+    m_minimapTexture.clear(sf::Color::Transparent);
+
+    sf::RectangleShape fullQuad({texSize, texSize});
+
+    m_topoMinimapShader.setUniform("u_playerXZ",
+        sf::Glsl::Vec2(playerPos.x, playerPos.z));
+    m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
+    m_topoMinimapShader.setUniform("u_texSize",      texSize);
+    m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
+    m_topoMinimapShader.setUniform("u_reliefExaggeration", 2.4f);
+    Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
+    for (int i = 0; i < 16; ++i) {
+        m_topoMinimapShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
+    }
+    sf::RenderStates states;
+    states.shader = &m_topoMinimapShader;
+    m_minimapTexture.draw(fullQuad, states);
+
+    sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
+    float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+    const float circleRadiusPx = center - 2.f;
+    const float homeMarkerRadius = 5.5f;
+    const float maxMarkerDist = std::max(0.f, circleRadiusPx - homeMarkerRadius - 1.f);
+    const float worldToPixel = circleRadiusPx / worldRadius;
+
+    if (dist > 0.0001f)
+    {
+        sf::Vector2f homePx = sf::Vector2f(center, center) + delta * worldToPixel;
+        sf::Vector2f diff = homePx - sf::Vector2f(center, center);
+        float markerDist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
+        if (markerDist > maxMarkerDist)
+        {
+            sf::Vector2f dir = diff / markerDist;
+            homePx = sf::Vector2f(center, center) + dir * maxMarkerDist;
+        }
+
+        sf::CircleShape homeHex(homeMarkerRadius, 6);
+        homeHex.setOrigin({homeMarkerRadius, homeMarkerRadius});
+        homeHex.setPosition(homePx);
+        homeHex.setFillColor(sf::Color(245, 225, 98, 255));
+        homeHex.setOutlineThickness(1.f);
+        homeHex.setOutlineColor(sf::Color(88, 70, 24, 240));
+        m_minimapTexture.draw(homeHex);
+    }
+
+    m_minimapTexture.display();
 }
 
 void Scene_IC_Camp::updateSunPosition()

@@ -51,7 +51,7 @@ void GameEngine::loadDefaultBindings()
     registerAction(sf::Keyboard::Scancode::D,       InputAction::MoveRight);
     registerAction(sf::Keyboard::Scancode::S,       InputAction::MoveBackward);
     registerAction(sf::Keyboard::Scancode::W,       InputAction::MoveForward);
-    registerAction(sf::Keyboard::Scancode::C,       InputAction::ToggleCapture);    // Custom action for toggling frame capture
+    registerAction(sf::Keyboard::Scancode::C,       InputAction::Crouch);
     registerAction(sf::Keyboard::Scancode::H,       InputAction::ToggleHeadlight);  // Custom action for toggling headlight state
     registerAction(sf::Keyboard::Scancode::LControl,InputAction::Strafe);           // Hold for strafing (A/D for lateral movement instead of rotation)
     registerAction(sf::Keyboard::Scancode::Space,   InputAction::Jump);
