@@ -1384,9 +1384,9 @@ void Scene_IC_Camp::renderOrbs() {
         m_orbShader.setUniform("u_orbDepthNorm", item.depthNorm);
         m_orbShader.setUniform("u_orbRadiusPx", radiusPx);
         m_orbShader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-        m_orbShader.setUniform("headlampIntensity", 5.5f);
-        m_orbShader.setUniform("headlampRange", 5000.0f);
-        m_orbShader.setUniform("headlampConeCos", 0.94f);
+        m_orbShader.setUniform("headlampIntensity", 6.5f);
+        m_orbShader.setUniform("headlampRange", 7500.0f);
+        m_orbShader.setUniform("headlampConeCos", 0.920504853f);
         orbTexture.draw(shadedRect, states);
         orbTexture.display();
 
