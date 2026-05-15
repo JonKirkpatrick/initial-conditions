@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "imgui-SFML.h"
 #include "Camera.h"
+#include <random>
 
 // This might need to move somewhere else.  It's just to flatten a 3x3 matrix into column-major order for uploading to the shader, and I need it in multiple places now.
 static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matrix) {
@@ -43,8 +44,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnCamera();
     spawnPlayer();
-    spawnOrb(12, 3, sf::Color(240, 208, 96, 190), 50.0f, 2.0f, 8.0f);
-    spawnOrb(-5, 16, sf::Color(120, 194, 255, 170), 50.0f, 1.5f, 6.0f);
+    spawnDebugOrbs(1000);
     Topography::setWarpParameters(m_warpScale, m_warpStrength);
     m_topdownMaxHeight = computeSceneMaxHeight();
     buildHud();
@@ -63,11 +63,11 @@ void Scene_IC_Camp::updateCamera(float dt)
 
     // Smooth crouch transition
     float targetCrouch = playerState.crouching ? 1.0f : 0.0f;
-    m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt; // 8.0f = speed of transition
+    m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt;
     m_crouchFactor = std::clamp(m_crouchFactor, 0.0f, 1.0f);
 
     // Eye height
-    float eyeHeight = m_playerConfig.HEIGHT_OFFSET * (1.0f - m_crouchFactor * 0.45f); // 45% reduction when fully crouched
+    float eyeHeight = m_playerConfig.HEIGHT_OFFSET * (1.0f - m_crouchFactor * 0.45f);
 
     sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
 
@@ -79,37 +79,50 @@ void Scene_IC_Camp::updateCamera(float dt)
         playerTransform.velocity.z * playerTransform.velocity.z
     );
 
-    float moveFactor = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 1.0f);
+    // Speed as a fraction of base move speed, clamped to sprint ceiling.
+    // Slope and terrain are already baked into horizontalSpeed, so no
+    // further compensation needed here.
+    float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
+
+    // moveFactor gates the bob entirely when nearly still (0..1 over first unit of speed)
+    float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
+
     float phase = playerState.bobAccumulator * 6.2831853f;
 
-    float cadenceScale = 1.0f;
+    // === Bob Parameters ===
+    float baseFrequency = 1.0f;
 
-    // Bob amplitudes reduced while crouching
-    float lateralAmplitude = playerState.sprinting ? 4.2f : 6.8f;
-    float verticalAmplitude = playerState.sprinting ? 7.4f : 6.2f;
+    // Amplitudes interpolate continuously with speed.
+    // Sprint end (speedFraction = 3) is tighter/smaller — you're more rigid at a run.
+    // Walk end (speedFraction = 1) is the most pronounced swing.
+    // Uphill crawl (speedFraction < 1) tapers down toward zero via moveFactor.
+    float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
+    float lateralAmplitude = 5.5f + (3.8f - 5.5f) * t;
+    float verticalAmplitude = 6.2f + (4.8f - 6.2f) * t;
 
-    lateralAmplitude *= (1.0f - m_crouchFactor * 0.4f);
-    verticalAmplitude *= (1.0f - m_crouchFactor * 0.5f);
+    // Crouch reduces amplitude as a postural state regardless of speed
+    if (playerState.crouching)
+    {
+        lateralAmplitude  *= (1.0f - m_crouchFactor * 0.45f);
+        verticalAmplitude *= (1.0f - m_crouchFactor * 0.55f);
+    }
 
-    const float lateralScale = 0.85f;
-    lateralAmplitude *= lateralScale;
+    lateralAmplitude *= 0.85f;
 
-    float lateralBob = std::sin(phase * cadenceScale) * lateralAmplitude * moveFactor;
-    float verticalBob = std::sin(phase * 2.f * cadenceScale) * verticalAmplitude * moveFactor;
+    // Use same base frequency, with mild harmonic on vertical
+    float lateralBob  = std::sin(phase * baseFrequency) * lateralAmplitude * moveFactor;
+    float verticalBob = std::sin(phase * baseFrequency * 1.65f) * verticalAmplitude * moveFactor;
 
     sf::Vector3f targetBob = right * lateralBob + sf::Vector3f(0.f, verticalBob, 0.f);
-
     m_cameraBobOffset += (targetBob - m_cameraBobOffset) * m_bobLag;
 
     camTransform.pos = headPos - (forward * m_playerConfig.EYE_OFFSET) + m_cameraBobOffset;
-
     camTransform.yaw   = playerTransform.yaw;
     camTransform.pitch = playerTransform.pitch;
 
-    // FOV adjustment
-    float targetFov = m_cameraConfig.FOVY + (playerState.sprinting ? 0.14f : 0.0f);
-    targetFov -= m_crouchFactor * 0.05f;   // slight zoom when crouched
-
+    // FOV scales continuously with speed rather than snapping on sprint state
+    float targetFov = m_cameraConfig.FOVY + 0.14f * (speedFraction / 3.0f);
+    targetFov -= m_crouchFactor * 0.05f;
     cameraData.fovY += (targetFov - cameraData.fovY) * 0.12f;
 }
 
@@ -246,6 +259,103 @@ void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float r
     orb->add<COrb>(color, radius, bobRate, bobMagnitude, 100.0f);
 }
 
+void Scene_IC_Camp::spawnDebugOrbs(int count)
+{
+    static const std::vector<sf::Color> palette = {
+        sf::Color(240, 208,  96, 190),  // warm yellow
+        sf::Color(120, 194, 255, 170),  // ice blue
+        sf::Color(255, 140,  80, 180),  // ember orange
+        sf::Color(160, 255, 160, 175),  // pale green
+        sf::Color(220, 130, 255, 185),  // soft violet
+    };
+
+    std::mt19937 rng(42); // fixed seed for reproducibility
+    std::uniform_real_distribution<float> hexQDist(-100.0f, 100.0f);
+    std::uniform_real_distribution<float> hexRDist(-100.0f, 100.0f);
+    std::uniform_real_distribution<float> radiusDist(20.0f, 80.0f);
+    std::uniform_real_distribution<float> bobRateDist(0.5f, 3.0f);
+    std::uniform_real_distribution<float> bobMagDist(4.0f, 12.0f);
+
+    for (int i = 0; i < count; ++i)
+    {
+        int hexQ = static_cast<int>(hexQDist(rng));
+        int hexR = static_cast<int>(hexRDist(rng));
+        const sf::Color& color = palette[i % palette.size()];
+        float radius     = radiusDist(rng);
+        float bobRate    = bobRateDist(rng);
+        float bobMag     = bobMagDist(rng);
+        spawnOrb(hexQ, hexR, color, radius, bobRate, bobMag);
+    }
+}
+
+void Scene_IC_Camp::updateShadowOrbs()
+{
+    m_shadowOrbList.clear();
+
+    auto& transform  = m_camera->get<CTransform3D>();
+    auto& cameraData = m_camera->get<CCamera>();
+
+    constexpr int   MAX_SHADOW_ORBS    = 24;
+    constexpr float SHADOW_CUTOFF_DIST = 5000.0f; // 50 metres in cm
+
+    struct CandidateOrb {
+        sf::Vector3f worldPos;
+        float        radius;
+        float        depth;
+    };
+
+    std::vector<CandidateOrb> candidates;
+    candidates.reserve(m_entityManager.getEntities("orb").size());
+
+    for (auto orb : m_entityManager.getEntities("orb"))
+    {
+        if (!orb->has<COrb>() || !orb->has<CTransform3D>()) continue;
+
+        auto& orbTransform = orb->get<CTransform3D>();
+        auto& orbData      = orb->get<COrb>();
+
+        sf::Vector3f relative    = orbTransform.pos - transform.pos;
+        sf::Vector3f cameraSpace = Camera::worldToCamera(relative, transform.pitch, transform.yaw, transform.roll);
+
+        if (cameraSpace.z >= -cameraData.nearPlane) continue;
+
+        float depth = std::sqrt(relative.x * relative.x + 
+                        relative.y * relative.y + 
+                        relative.z * relative.z);
+        if (depth > SHADOW_CUTOFF_DIST) continue;
+
+        candidates.push_back({ orbTransform.pos, orbData.radius, depth });
+    }
+
+    std::sort(candidates.begin(), candidates.end(), [](const CandidateOrb& a, const CandidateOrb& b) {
+        return a.depth < b.depth;
+    });
+
+    int count = std::min((int)candidates.size(), MAX_SHADOW_ORBS);
+    m_shadowOrbList.reserve(count);
+    for (int i = 0; i < count; ++i)
+    {
+        m_shadowOrbList.push_back({ candidates[i].worldPos, candidates[i].radius });
+    }
+}
+
+void Scene_IC_Camp::uploadShadowOrbsToShader(sf::Shader& shader)
+{
+    int count = static_cast<int>(m_shadowOrbList.size());
+    shader.setUniform("u_shadowOrbCount", count);
+    shader.setUniform("u_shadowDarkness", 0.6f);
+
+    for (int i = 0; i < count; ++i)
+    {
+        std::string idx = "[" + std::to_string(i) + "]";
+        shader.setUniform("u_shadowOrbPos" + idx,
+            sf::Glsl::Vec3(m_shadowOrbList[i].worldPos.x,
+                           m_shadowOrbList[i].worldPos.y,
+                           m_shadowOrbList[i].worldPos.z));
+        shader.setUniform("u_shadowOrbRadius" + idx, m_shadowOrbList[i].radius);
+    }
+}
+
 void Scene_IC_Camp::spawnCamera()
 {
     m_camera = m_entityManager.addEntity("camera");
@@ -274,6 +384,7 @@ void Scene_IC_Camp::onEnter() {
         m_game.window()
     );
     m_game.setMouseCaptured(true);
+    m_lastStepPhase = 0.0f;
 }
 
 void Scene_IC_Camp::onExit() {
@@ -295,6 +406,18 @@ void Scene_IC_Camp::update() {
         dt = std::clamp(dt, 0.0001f, 0.5f);
     }
     m_lastFrameTime = currentTime;
+    // Time advancement — debug rate: 1 in-game hour per 4 real seconds
+    // To slow later: replace 1.0f / 4.0f with 1.0f / (4.0f * desiredSlowdown)
+    const float realSecondsPerGameHour = 4.0f;
+    m_gameTimeOfDay += dt * (1.0f / realSecondsPerGameHour);
+
+    if (m_gameTimeOfDay >= 24.0f)
+    {
+        m_gameTimeOfDay -= 24.0f;
+        m_gameDayOfYear += 1;
+        if (m_gameDayOfYear > 365)
+            m_gameDayOfYear = 1;
+    }
     sMovement(dt);
     updateHUDData();
     updateSunPosition();
@@ -445,6 +568,34 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
 
     player.sprinting = sprinting;
 
+    float sampleDist = 10.0f; // cm — tune to your terrain scale
+    sf::Vector3f fwd = Camera::getForwardXZ(e); // already normalised XZ
+
+    float hAhead  = heightAt(t.pos.x + fwd.x * sampleDist, t.pos.z + fwd.z * sampleDist);
+    float hBehind = heightAt(t.pos.x - fwd.x * sampleDist, t.pos.z - fwd.z * sampleDist);
+
+    float slope = (hAhead - hBehind) / (2.0f * sampleDist); // rise over run
+
+    float slopeBoost;
+    if (slope >= 0.0f)
+    {
+        // Uphill — simple penalty as before
+        slopeBoost = -std::clamp(slope * 2.0f, 0.0f, 0.4f);
+    }
+    else
+    {
+        // Downhill — peaks around 15% grade then falls off
+        float grade = -slope; // positive for downhill
+        float peak  = 0.15f;  // grade at which you're fastest
+        float boost = (grade / peak) * std::exp(1.0f - grade / peak) * 0.25f;
+        slopeBoost  = std::clamp(boost, -0.5f, 0.25f);
+        // negative slopeBoost = penalty (too steep), positive = speed gain (gentle decline)
+    }
+
+    float slopeScale = 1.0f + slopeBoost;
+
+    moveSpeed *= slopeScale;
+
     // === Rotation ===
     t.yaw   -= input.mouseDelta.x * 0.002f;
     t.pitch -= input.mouseDelta.y * 0.002f;
@@ -498,8 +649,6 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
         t.velocity.x = 0.0f;
         t.velocity.z = 0.0f;
     }
-    // In air with no input → let momentum carry you (nice feeling)
-
     // === Jumping ===
     if (input.jump && phys.onGround && !player.crouching)
     {
@@ -512,11 +661,66 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
     player.moveSpeed = moveSpeed;
     player.rotSpeed  = m_playerConfig.ROTATION_SPEED;
 
-    // Bob
-    if ((moveDir.x != 0.0f || moveDir.z != 0.0f) && phys.onGround)
+    // Bob - driven by actual horizontal speed so slope and terrain are accounted for naturally
+    float horizSpeed = std::sqrt(t.velocity.x * t.velocity.x + t.velocity.z * t.velocity.z);
+
+    if (horizSpeed > 1.0f)
     {
-        float baseBobStep = sprinting ? 0.08f : (player.crouching ? 0.035f : 0.06f);
-        player.bobAccumulator = std::fmod(player.bobAccumulator + baseBobStep * 60.0f * dt, 1.0f);
+        // Normalise against base move speed — sprint naturally pushes this above 1.0,
+        // slope naturally pulls it below. Clamp to [0, 3] to match max sprint multiplier.
+        float speedFraction = std::clamp(horizSpeed / m_playerConfig.MOVE_SPEED, 0.0f, 3.0f);
+
+        // Bob rate scales continuously with speed. 0.020f is the base (walking) rate,
+        // and we allow it to scale up toward sprint pace proportionally.
+        float baseRate = 0.020f * std::sqrt(speedFraction);
+
+        // Crouch reduces rate as a postural choice independent of speed
+        if (player.crouching)
+            baseRate *= 0.625f; // mirrors the 0.0125 / 0.020 ratio from before
+
+        player.bobAccumulator = std::fmod(
+            player.bobAccumulator + baseRate * 60.0f * dt,
+            1.0f
+        );
+    }
+
+    // === Footsteps ===
+    if (horizSpeed > 1.0f && phys.onGround)
+    {
+        float currentPhase = player.bobAccumulator;
+
+        // Trigger footsteps at roughly 0.0 and 0.5 in the cycle
+        bool shouldStep = false;
+        bool isLeft = true;
+        bool isSprinting = sprinting;
+        bool isCrouching = player.crouching;
+
+
+        // Cross 0.0 / 1.0 boundary
+        if ((m_lastStepPhase > 0.8f && currentPhase < 0.2f) ||
+            (m_lastStepPhase < 0.2f && currentPhase > 0.8f))
+        {
+            shouldStep = true;
+            isLeft = true;                    // Adjust based on your audio feel
+        }
+        // Cross 0.5 boundary
+        else if ((m_lastStepPhase < 0.45f && currentPhase >= 0.45f) ||
+                (m_lastStepPhase > 0.55f && currentPhase <= 0.55f))
+        {
+            shouldStep = true;
+            isLeft = false;
+        }
+
+        if (shouldStep)
+        {
+            const std::string& soundName = isLeft ? "FootLeft" : "FootRight";
+            
+            float volume = isSprinting ? 75.f : (isCrouching ? 30.f : 45.f);
+            
+            AudioManager::Instance().sfx.playSound(Assets::Instance().getSound(soundName), volume);
+        }
+
+        m_lastStepPhase = currentPhase;
     }
 }
 
@@ -538,6 +742,8 @@ void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
     {
         auto& p = e->get<CPhysics>();
 
+        const float groundSkin = 10.f; // tune to taste — depends on your world units
+
         if (t.pos.y < groundY)
         {
             t.pos.y = groundY;
@@ -547,15 +753,13 @@ void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
                 p.onGround = true;
             }
         }
+        else if (t.pos.y <= groundY + groundSkin) // within skin = still on ground
+        {
+            p.onGround = true;
+        }
         else
         {
             p.onGround = false;
-        }
-
-        // Legacy sync with CPlayer
-        if (e->has<CPlayer>())
-        {
-            e->get<CPlayer>().onGround = p.onGround;
         }
     }
     else
@@ -1126,6 +1330,9 @@ void Scene_IC_Camp::renderOrbs() {
     std::sort(orbDrawItems.begin(), orbDrawItems.end(), [](const OrbDrawItem& a, const OrbDrawItem& b) {
         return a.depthSort > b.depthSort;
     });
+
+    updateShadowOrbs();
+    uploadShadowOrbsToShader(m_finalShader);
 
     auto drawOrbBillboard = [&](const OrbDrawItem& item) {
         auto& orbData = item.entity->get<COrb>();

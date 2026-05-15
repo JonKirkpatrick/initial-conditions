@@ -39,6 +39,7 @@ private:
     void drawMiniMap(sf::RenderWindow& window);
     void drawHeadlightWidget(sf::RenderWindow& window);
     void drawCompass(sf::RenderWindow& window, float yawDeg);
+    void updateHeadlightIcon();
 
     sf::RectangleShape m_tapeBg;
     float m_yawDeg;
@@ -56,6 +57,9 @@ private:
 
     // Mini Map Layers
     std::unique_ptr<sf::Sprite> m_minimapRing;
+
+    // Headlamp Widget
+    std::unique_ptr<sf::Sprite> m_headlightIcon;
 
     sf::CircleShape m_joystickBase;
     sf::CircleShape m_joystickKnob;

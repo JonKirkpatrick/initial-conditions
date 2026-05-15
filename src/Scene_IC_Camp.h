@@ -25,6 +25,11 @@ class Scene_IC_Camp : public Scene {
         On,
         Auto
     } HeadlightState;
+
+    struct ShadowOrbEntry {
+        sf::Vector3f worldPos;
+        float radius;
+    };
     
 protected:
     std::string m_levelPath;
@@ -34,6 +39,7 @@ protected:
     PlayerConfig m_playerConfig;
     std::unique_ptr<HUD>    m_hud;
     HUD_Data m_hudData;
+    std::vector<ShadowOrbEntry> m_shadowOrbList;
 
     // Debug visualization options
     bool m_drawGrid = true;
@@ -45,6 +51,7 @@ protected:
     // Scene-specific data
     float m_hexSize = 100.f;
     sf::Color m_gridColor;
+    float m_lastStepPhase = 0.0f;
 
     sf::Vector2f m_homeLocationXZ{0.f, 0.f};
     void resolveEntityPosition(std::shared_ptr<Entity> e, float dt);
@@ -146,9 +153,12 @@ protected:
     void updateSunPosition();
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
+    void uploadShadowOrbsToShader(sf::Shader& shader);
+    void spawnDebugOrbs(int count);
     std::array<TerrainLayer, 16> m_terrainLayers{};
     bool shouldHeadlightsBeOn() const;
     HeadlightState m_headlightState = HeadlightState::Auto;
+    void updateShadowOrbs();
 
     // Convenience wrappers around Topography namespace functions
     float heightAt(float x, float z) const {

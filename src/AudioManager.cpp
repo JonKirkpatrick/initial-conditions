@@ -33,6 +33,11 @@ void AudioBus::apply() {
         snd->setVolume(currentVolume());
 }
 
+void AudioBus::playSound(sf::SoundSource& snd, float volume) {
+    snd.setVolume(volume >= 0.f ? volume : currentVolume());
+    snd.play();
+}
+
 void MusicBus::setBaseVolume(float v) {
     baseVolume = std::clamp(v, 0.f, 100.f);
     apply();

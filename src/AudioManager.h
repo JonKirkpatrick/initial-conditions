@@ -6,11 +6,12 @@
 class AudioBus 
 {
 public:
-    void setBaseVolume(float v);
-    void setMuted(bool m);
+    void  setBaseVolume(float v);
+    void  setMuted(bool m);
     float getBaseVolume() const;
     bool  isMuted() const;
-    void registerSound(sf::SoundSource* snd);
+    void  registerSound(sf::SoundSource* snd);
+    void  playSound(sf::SoundSource& snd, float volume = -1.f);
 
 private:
     float baseVolume = 50.f;

@@ -31,6 +31,11 @@ uniform float layer_falloffWidth[16];
 uniform float layer_topoHeight[16];
 uniform int u_stripeLayerIndex;
 
+uniform int u_shadowOrbCount;
+uniform vec3 u_shadowOrbPos[24];
+uniform float u_shadowOrbRadius[24];
+uniform float u_shadowDarkness;   // global scalar, tune at runtime
+
 #include "topo_common.glsl"
 
 // ================== HEX CELL TEST ==================
@@ -258,32 +263,12 @@ void main() {
         worldPos = cameraPos + rayDir * dist;
     } 
     else {
-        vec2 screen = gl_FragCoord.xy;
-        screen.y = viewportSize.y - screen.y;
-        float x_ndc = (screen.x / viewportSize.x) * 2.0 - 1.0;
-        float y_ndc = 1.0 - (screen.y / viewportSize.y) * 2.0;
-
-        float f = tan(fovY * 0.5);
-        vec3 rayDir = normalize(invRotationMatrix * vec3(x_ndc * f * aspectRatio, y_ndc * f, -1.0));
-
-        if (rayDir.y >= -0.001) {
-            gl_FragColor = vec4(skyColorForRay(rayDir), 1.0);
-            return;
-        }
-
-        float t = -cameraPos.y / rayDir.y;
-        if (t < nearPlane || t > farPlane * 1.3) {
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-            return;
-        }
-
-        dist = t;
-        worldPos = cameraPos + rayDir * t;
-        worldPos.y = length(worldPos.xz) * 0.000008;
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+        return;
     }
 
     // ================== LIGHTING ==================
-    float _h; // height not needed here, normal is what matters
+    float _h;
     vec3 normal;
     if (isTerrainHit) {
         heightAndNormal(worldPos.xz, _h, normal);
@@ -302,7 +287,24 @@ void main() {
     float nightFactor = smoothstep(-5.0, -15.0, sunElevationDeg);
     float sunVis = smoothstep(-4.0, 8.0, sunElevationDeg);
 
-    float diff = max(dot(normal, sunDirNorm), 0.0) * sunVis;
+    float orbShadow = 1.0;
+    if (u_shadowOrbCount > 0) {
+        vec3 sunN = normalize(sunDir);
+        for (int i = 0; i < 24; i++) {
+            if (i >= u_shadowOrbCount) break;
+            vec3 toOrb = u_shadowOrbPos[i] - worldPos;
+            float along = dot(toOrb, sunN);
+            if (along <= 0.0) continue;
+            vec3 perp = toOrb - along * sunN;
+            float perpDist = length(perp);
+            float r = u_shadowOrbRadius[i];
+            float maxShadowLength = 800.0;
+            float shadowReach = 1.0 - smoothstep(0.0, maxShadowLength, along);
+            float shadow = (1.0 - smoothstep(r * 0.6, r * 1.3, perpDist)) * shadowReach;
+            orbShadow = min(orbShadow, 1.0 - shadow * u_shadowDarkness);
+        }
+    }
+    float diff = max(dot(normal, sunDirNorm), 0.0) * sunVis * orbShadow;
 
     vec3 ambient = ambientStrength * mix(1.0, 0.07, nightFactor) * terrainBaseColor;
 

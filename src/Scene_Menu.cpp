@@ -73,6 +73,8 @@ void Scene_Menu::activateSelectedMenuItem()
 
 void Scene_Menu::onExit()
 {
+    auto& track = Assets::Instance().getMusic("MusicTitle");
+    AudioManager::Instance().music.stopAll();
 }
 
 void Scene_Menu::onEnter()

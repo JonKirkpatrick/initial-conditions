@@ -2,6 +2,9 @@ Texture   CompassBezel   images/gui_elements/Compass_Bezel_QHD.png
 Texture   CompassDisc    images/gui_elements/Compass_Disc_QHD.png
 Texture   CompassTape    images/gui_elements/Compass_Tape_QHD.png
 Texture   MapRing        images/gui_elements/Map_Ring_QHD.png
+Texture   HLOff          images/gui_elements/HL_Off.png
+Texture   HLOn           images/gui_elements/HL_On.png
+Texture   HLAuto         images/gui_elements/HL_Auto.png
 Music     MusicTitle     music/title_menu.mp3
 Music     MusicTitleLate music/title_menu_late.mp3
 Music     MusicTopDown   music/top_down_music.mp3
@@ -15,6 +18,8 @@ Sound     SlimeHit       sounds/slimehit.mp3
 Sound     SlimeKill      sounds/slimekill.mp3
 Sound     Sword          sounds/swordswing.mp3
 Sound     Wood           sounds/woodchop.mp3
+Sound     FootLeft       sounds/left_foot.wav
+Sound     FootRight      sounds/right_foot.wav
 Font      Mario          fonts/mario.ttf
 Font      Megaman        fonts/megaman.ttf
 Font      Tech           fonts/tech.ttf

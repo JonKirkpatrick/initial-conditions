@@ -85,7 +85,8 @@ void main()
     flashlightShaded *= lampStrength;
 
     // Atmospheric perspective: mirror topo_final's smooth dusk/night rolloff.
-    float distNormalized = clamp(u_orbDepthNorm, 0.0, 1.0);
+    float atmosphereMaxDist = 0.5; // treat 30% of farPlane as "fully atmospheric"
+    float distNormalized = clamp(u_orbDepthNorm / atmosphereMaxDist, 0.0, 1.0);
     float atmosphereStrength = pow(distNormalized, 1.7);
 
     vec3 sunDirNorm = normalize(sunDir);

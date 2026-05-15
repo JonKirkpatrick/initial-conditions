@@ -63,13 +63,17 @@ void HUD::init(const sf::Vector2u& windowSize)
     
     // Center compass horizontally, position at top
     float compassX = (windowSize.x - compassDisplayW) * 0.5f;
-    float compassY = 1.f * scale;  // Position below headlight widget
+    float compassY = 1.f * scale;
     
     m_compassDisc->setPosition({compassX, compassY});
     m_compassTape->setPosition({compassX + 40.f * m_compassScale, compassY});  // Tape offset for layering
     m_compassBezel->setPosition({compassX, compassY});
 
     m_minimapRing = std::make_unique<sf::Sprite>(Assets::Instance().getTexture("MapRing"));
+    m_headlightIcon = std::make_unique<sf::Sprite>(Assets::Instance().getTexture("HLOff"));
+    float headlightY = 300.f;
+    float headlightX = windowSize.x - 150.f;
+    m_headlightIcon->setPosition({headlightX, headlightY});
 
 }
 
@@ -84,6 +88,7 @@ void HUD::update(sf::RenderWindow& window, const HUD_Data& data)
     m_minimapTex = data.minimapTex;
     m_playerWorldPos = data.position;
     m_homeWorldPos = data.homeLocation;
+    updateHeadlightIcon();
     
     sf::Vector2f output(0.f, 0.f);
 
@@ -119,6 +124,21 @@ void HUD::update(sf::RenderWindow& window, const HUD_Data& data)
         m_isDragging = false;
         m_joystickKnob.setPosition(m_basePos);
     }
+}
+
+void HUD::updateHeadlightIcon()
+{
+    const char* textureName = "HLAuto";
+    switch (m_headlightState)
+    {
+    case 0: textureName = "HLOff"; break;
+    case 1: textureName = "HLOn"; break;
+    case 2: 
+    default:
+        textureName = m_headlightEnabled ? "HLOn" : "HLAuto";
+        break;
+    }
+    m_headlightIcon->setTexture(Assets::Instance().getTexture(textureName));
 }
 
 void HUD::drawMiniMap(sf::RenderWindow& window)
@@ -167,61 +187,10 @@ void HUD::drawMiniMap(sf::RenderWindow& window)
 
 void HUD::drawHeadlightWidget(sf::RenderWindow& window)
 {
-    sf::Vector2u winSize = window.getSize();
-    float scale = static_cast<float>(winSize.y) / 1080.f;
-
-    const char* stateText = "AUTO";
-    sf::Color accent = sf::Color(234, 226, 206, 240);
-    sf::Color badgeFill = sf::Color(38, 40, 42, 210);
-
-    switch (m_headlightState)
+    if (m_headlightIcon)
     {
-    case 0:
-        stateText = "OFF";
-        accent = sf::Color(176, 164, 149, 240);
-        break;
-    case 1:
-        stateText = "ON";
-        accent = sf::Color(245, 225, 98, 240);
-        break;
-    case 2:
-    default:
-        stateText = "AUTO";
-        accent = sf::Color(198, 230, 205, 240);
-        break;
+        window.draw(*m_headlightIcon);
     }
-
-    if (m_headlightEnabled)
-    {
-        accent = sf::Color(245, 225, 98, 245);
-        badgeFill = sf::Color(56, 50, 34, 220);
-    }
-    else if (m_headlightState == 2)
-    {
-        badgeFill = sf::Color(38, 50, 42, 210);
-    }
-
-    float boxW = 118.f * scale;
-    float boxH = 28.f * scale;
-    sf::Vector2f boxPos(16.f * scale, 16.f * scale);
-
-    sf::RectangleShape badge({boxW, boxH});
-    badge.setPosition(boxPos);
-    badge.setFillColor(badgeFill);
-    badge.setOutlineThickness(1.f * scale);
-    badge.setOutlineColor(accent);
-    window.draw(badge);
-
-    sf::CircleShape dot(5.f * scale);
-    dot.setOrigin({5.f * scale, 5.f * scale});
-    dot.setPosition(boxPos + sf::Vector2f(14.f * scale, boxH * 0.5f));
-    dot.setFillColor(accent);
-    window.draw(dot);
-
-    sf::Text text(Assets::Instance().getFont("Tech"), std::string("HL ") + stateText, static_cast<unsigned int>(14.f * scale));
-    text.setFillColor(sf::Color(244, 238, 224, 245));
-    text.setPosition(boxPos + sf::Vector2f(28.f * scale, 4.f * scale));
-    window.draw(text);
 }
 
 sf::Vector2f HUD::getJoystickAxis() const
