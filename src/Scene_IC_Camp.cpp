@@ -981,7 +981,6 @@ void Scene_IC_Camp::sGUI()
                 std::vector<std::string> entityLabels;
                 for (auto e : entities)
                 {
-                    //Vec2f gridPos = midPixelToGrid(e->get<CTransform>().pos, e);
                     entityLabels.push_back(e->tag() + " " + std::to_string(e->id()) + " " + std::to_string(int(1)) + "," + std::to_string(int(0)));
                 }
                 const char* currentEntity = entityLabels[currentEntityIndex].c_str();
