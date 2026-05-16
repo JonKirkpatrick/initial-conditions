@@ -314,7 +314,14 @@ void Scene_IC_Camp::updateShadowOrbs()
         auto& orbTransform = orb->get<CTransform3D>();
         auto& orbData      = orb->get<COrb>();
 
-        sf::Vector3f relative    = orbTransform.pos - transform.pos;
+        // Recompute bob using the exact same phase the visual uses
+        float currentPhase = std::fmod(orbData.bobPhase, 1.0f);
+        float bobOffset = std::sin(currentPhase * 6.2831853f) * orbData.bobMagnitude;
+        sf::Vector3f shadowWorldPos = orbTransform.pos;
+        shadowWorldPos.y = heightAt(shadowWorldPos.x, shadowWorldPos.z) 
+                           + orbData.heightAboveGround + bobOffset;
+
+        sf::Vector3f relative    = shadowWorldPos - transform.pos;
         sf::Vector3f cameraSpace = Camera::worldToCamera(relative, transform.pitch, transform.yaw, transform.roll);
 
         if (cameraSpace.z >= -cameraData.nearPlane) continue;
@@ -324,7 +331,7 @@ void Scene_IC_Camp::updateShadowOrbs()
                         relative.z * relative.z);
         if (depth > SHADOW_CUTOFF_DIST) continue;
 
-        candidates.push_back({ orbTransform.pos, orbData.radius, depth });
+        candidates.push_back({ shadowWorldPos, orbData.radius, depth });
     }
 
     std::sort(candidates.begin(), candidates.end(), [](const CandidateOrb& a, const CandidateOrb& b) {
@@ -845,6 +852,9 @@ void Scene_IC_Camp::sRender() {
     auto inverseRotationMatrix = toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll));
     window.clear(sf::Color::Transparent);
     runTopDownPass();
+    updateShadowOrbs();
+    uploadShadowOrbsToShader(m_finalShader);
+
 
     if (m_useDepthStepDebug) {
         runDepthStepPass(inverseRotationMatrix);
@@ -1331,9 +1341,6 @@ void Scene_IC_Camp::renderOrbs() {
         return a.depthSort > b.depthSort;
     });
 
-    updateShadowOrbs();
-    uploadShadowOrbsToShader(m_finalShader);
-
     auto drawOrbBillboard = [&](const OrbDrawItem& item) {
         auto& orbData = item.entity->get<COrb>();
 
@@ -1384,8 +1391,8 @@ void Scene_IC_Camp::renderOrbs() {
         m_orbShader.setUniform("u_orbDepthNorm", item.depthNorm);
         m_orbShader.setUniform("u_orbRadiusPx", radiusPx);
         m_orbShader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-        m_orbShader.setUniform("headlampIntensity", 6.5f);
-        m_orbShader.setUniform("headlampRange", 7500.0f);
+        m_orbShader.setUniform("headlampIntensity", 5.5f);
+        m_orbShader.setUniform("headlampRange", 8500.0f);
         m_orbShader.setUniform("headlampConeCos", 0.920504853f);
         orbTexture.draw(shadedRect, states);
         orbTexture.display();
