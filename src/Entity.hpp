@@ -9,6 +9,7 @@ class EntityManager;
 typedef std::tuple<
     CTransform3D,
     CPlayer,
+    CBob,
     CCamera,
     CInput,
     COrb,

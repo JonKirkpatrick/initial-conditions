@@ -58,11 +58,12 @@ void Scene_IC_Camp::updateCamera(float dt)
 {
     auto& camTransform = m_camera->get<CTransform3D>();
     auto& playerTransform = m_player->get<CTransform3D>();
-    auto& playerState = m_player->get<CPlayer>();
+    auto& playerPhysics = m_player->get<CPhysics>();
+    auto& playerBob = m_player->get<CBob>();
     auto& cameraData = m_camera->get<CCamera>();
 
     // Smooth crouch transition
-    float targetCrouch = playerState.crouching ? 1.0f : 0.0f;
+    float targetCrouch = playerPhysics.isCrouching ? 1.0f : 0.0f;
     m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt;
     m_crouchFactor = std::clamp(m_crouchFactor, 0.0f, 1.0f);
 
@@ -87,7 +88,7 @@ void Scene_IC_Camp::updateCamera(float dt)
     // moveFactor gates the bob entirely when nearly still (0..1 over first unit of speed)
     float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
 
-    float phase = playerState.bobAccumulator * 6.2831853f;
+    float phase = playerBob.accumulator * 6.2831853f;
 
     // === Bob Parameters ===
     float baseFrequency = 1.0f;
@@ -101,7 +102,7 @@ void Scene_IC_Camp::updateCamera(float dt)
     float verticalAmplitude = 6.2f + (4.8f - 6.2f) * t;
 
     // Crouch reduces amplitude as a postural state regardless of speed
-    if (playerState.crouching)
+    if (playerPhysics.isCrouching)
     {
         lateralAmplitude  *= (1.0f - m_crouchFactor * 0.45f);
         verticalAmplitude *= (1.0f - m_crouchFactor * 0.55f);
@@ -235,28 +236,34 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
 void Scene_IC_Camp::spawnPlayer()
 {
     m_player = m_entityManager.addEntity("player");
+    
     m_player->add<CPlayer>();
     m_player->add<CTransform3D>(
-        sf::Vector3f(m_playerConfig.POSITION_X, Scene_IC_Camp::heightAt(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z), m_playerConfig.POSITION_Z),
-        sf::Vector3f(0.f, 0.f, 0.f),
-        sf::Vector3f(1.f, 1.f, 1.f),
-        0.f, 0.f, 0.f
+        sf::Vector3f(m_playerConfig.POSITION_X, 
+                     Scene_IC_Camp::heightAt(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z), 
+                     m_playerConfig.POSITION_Z)
     );
+    
     m_player->add<CInput>();
     m_player->add<CPhysics>();
+    m_player->add<CBob>(1.0f, 6.0f, 5.5f);   // rate, vertical mag, lateral mag
+
+    // Optional: set initial values
+    auto& phys = m_player->get<CPhysics>();
+    phys.onGround = true;
 }
 
 void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius, float bobRate, float bobMagnitude)
 {
     auto orb = m_entityManager.addEntity("orb");
     sf::Vector2f worldPos = hexToWorld(hexQ, hexR);
+    
     orb->add<CTransform3D>(
-        sf::Vector3f(worldPos.x, heightAt(worldPos.x, worldPos.y) + 100.0f, worldPos.y),
-        sf::Vector3f(0.f, 0.f, 0.f),
-        sf::Vector3f(1.f, 1.f, 1.f),
-        0.f, 0.f, 0.f
+        sf::Vector3f(worldPos.x, heightAt(worldPos.x, worldPos.y) + 100.0f, worldPos.y)
     );
-    orb->add<COrb>(color, radius, bobRate, bobMagnitude, 100.0f);
+    
+    orb->add<COrb>(color, radius, 100.0f);
+    orb->add<CBob>(bobRate, bobMagnitude, 0.0f);   // orbs only bob vertically
 }
 
 void Scene_IC_Camp::spawnDebugOrbs(int count)
@@ -309,14 +316,15 @@ void Scene_IC_Camp::updateShadowOrbs()
 
     for (auto orb : m_entityManager.getEntities("orb"))
     {
-        if (!orb->has<COrb>() || !orb->has<CTransform3D>()) continue;
+        if (!orb->has<COrb>() || !orb->has<CTransform3D>() || !orb->has<CBob>()) continue;
 
         auto& orbTransform = orb->get<CTransform3D>();
         auto& orbData      = orb->get<COrb>();
+        auto& orbBob       = orb->get<CBob>();
 
-        // Recompute bob using the exact same phase the visual uses
-        float currentPhase = std::fmod(orbData.bobPhase, 1.0f);
-        float bobOffset = std::sin(currentPhase * 6.2831853f) * orbData.bobMagnitude;
+        float currentPhase = std::fmod(orbBob.accumulator, 1.0f);
+        float bobOffset = std::sin(currentPhase * 6.2831853f) * orbBob.magnitude;
+
         sf::Vector3f shadowWorldPos = orbTransform.pos;
         shadowWorldPos.y = heightAt(shadowWorldPos.x, shadowWorldPos.z) 
                            + orbData.heightAboveGround + bobOffset;
@@ -535,7 +543,6 @@ void Scene_IC_Camp::sMovement(float dt)
             if (!p.onGround)
                 t.velocity.y -= p.gravity * dt;
 
-            t.prevPos = t.pos;
             t.pos += t.velocity * dt;
 
             // Friction
@@ -546,7 +553,6 @@ void Scene_IC_Camp::sMovement(float dt)
         else
         {
             // Kinematic movement (orbs, etc.)
-            t.prevPos = t.pos;
             t.pos += t.velocity * dt;
         }
 
@@ -557,23 +563,22 @@ void Scene_IC_Camp::sMovement(float dt)
 
 void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
 {
-    if (!e->has<CTransform3D>() || !e->has<CInput>() || !e->has<CPlayer>() || !e->has<CPhysics>())
+    if (!e->has<CTransform3D>() || !e->has<CInput>() || 
+        !e->has<CPhysics>() || !e->has<CBob>()) 
         return;
 
     auto& t       = e->get<CTransform3D>();
     auto& input   = e->get<CInput>();
-    auto& player  = e->get<CPlayer>();
     auto& phys    = e->get<CPhysics>();
+    auto& bob     = e->get<CBob>();
 
-    // Crouch state
-    player.crouching = input.crouch;
-    bool sprinting = input.sprint && !player.crouching;
+    // Locomotion state
+    phys.isCrouching = input.crouch;
+    phys.isSprinting = input.sprint && !phys.isCrouching;
 
     float moveSpeed = m_playerConfig.MOVE_SPEED;
-    if (sprinting)                moveSpeed *= 3.0f;
-    else if (player.crouching)    moveSpeed *= 0.6f;
-
-    player.sprinting = sprinting;
+    if (phys.isSprinting)        moveSpeed *= 3.0f;
+    else if (phys.isCrouching)   moveSpeed *= 0.6f;
 
     float sampleDist = 10.0f; // cm — tune to your terrain scale
     sf::Vector3f fwd = Camera::getForwardXZ(e); // already normalised XZ
@@ -657,62 +662,37 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
         t.velocity.z = 0.0f;
     }
     // === Jumping ===
-    if (input.jump && phys.onGround && !player.crouching)
+    if (input.jump && phys.onGround && !phys.isCrouching)
     {
         t.velocity.y = phys.jumpSpeed;
         phys.onGround = false;
-        player.onGround = false;
     }
 
-    // Legacy sync
-    player.moveSpeed = moveSpeed;
-    player.rotSpeed  = m_playerConfig.ROTATION_SPEED;
-
-    // Bob - driven by actual horizontal speed so slope and terrain are accounted for naturally
+    // === Bobbing ===
     float horizSpeed = std::sqrt(t.velocity.x * t.velocity.x + t.velocity.z * t.velocity.z);
+    updateBob(e, dt, horizSpeed);   // uses complex player path
 
-    if (horizSpeed > 1.0f)
-    {
-        // Normalise against base move speed — sprint naturally pushes this above 1.0,
-        // slope naturally pulls it below. Clamp to [0, 3] to match max sprint multiplier.
-        float speedFraction = std::clamp(horizSpeed / m_playerConfig.MOVE_SPEED, 0.0f, 3.0f);
-
-        // Bob rate scales continuously with speed. 0.020f is the base (walking) rate,
-        // and we allow it to scale up toward sprint pace proportionally.
-        float baseRate = 0.020f * std::sqrt(speedFraction);
-
-        // Crouch reduces rate as a postural choice independent of speed
-        if (player.crouching)
-            baseRate *= 0.625f; // mirrors the 0.0125 / 0.020 ratio from before
-
-        player.bobAccumulator = std::fmod(
-            player.bobAccumulator + baseRate * 60.0f * dt,
-            1.0f
-        );
-    }
-
-    // === Footsteps ===
+    // Footsteps
+    auto& bobComp = e->get<CBob>();
     if (horizSpeed > 1.0f && phys.onGround)
     {
-        float currentPhase = player.bobAccumulator;
+        float currentPhase = bobComp.accumulator;
 
         // Trigger footsteps at roughly 0.0 and 0.5 in the cycle
         bool shouldStep = false;
         bool isLeft = true;
-        bool isSprinting = sprinting;
-        bool isCrouching = player.crouching;
+        bool isSprinting = phys.isSprinting;
+        bool isCrouching = phys.isCrouching;
 
-
-        // Cross 0.0 / 1.0 boundary
+        // ... rest of your existing footstep logic unchanged ...
         if ((m_lastStepPhase > 0.8f && currentPhase < 0.2f) ||
             (m_lastStepPhase < 0.2f && currentPhase > 0.8f))
         {
             shouldStep = true;
-            isLeft = true;                    // Adjust based on your audio feel
+            isLeft = true;
         }
-        // Cross 0.5 boundary
         else if ((m_lastStepPhase < 0.45f && currentPhase >= 0.45f) ||
-                (m_lastStepPhase > 0.55f && currentPhase <= 0.55f))
+                 (m_lastStepPhase > 0.55f && currentPhase <= 0.55f))
         {
             shouldStep = true;
             isLeft = false;
@@ -721,14 +701,60 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
         if (shouldStep)
         {
             const std::string& soundName = isLeft ? "FootLeft" : "FootRight";
-            
             float volume = isSprinting ? 75.f : (isCrouching ? 30.f : 45.f);
-            
             AudioManager::Instance().sfx.playSound(Assets::Instance().getSound(soundName), volume);
         }
 
         m_lastStepPhase = currentPhase;
     }
+}
+
+// Unified bob update for any entity with CBob
+void Scene_IC_Camp::updateBob(std::shared_ptr<Entity> e, float dt, float horizSpeed=0.0f)
+{
+    if (!e->has<CBob>() || !e->has<CTransform3D>()) 
+        return;
+
+    auto& bob = e->get<CBob>();
+    auto& t   = e->get<CTransform3D>();
+
+    bool isPlayer = e->tag() == "player";
+
+    if (isPlayer)
+    {
+        // Complex player bobbing
+        float speedFraction = std::clamp(horizSpeed / m_playerConfig.MOVE_SPEED, 0.0f, 3.0f);
+        float baseRate = 0.020f * std::sqrt(speedFraction);
+
+        auto& phys = e->get<CPhysics>();
+        if (phys.isCrouching)
+            baseRate *= 0.625f;
+
+        bob.accumulator = std::fmod(bob.accumulator + baseRate * 60.0f * dt, 1.0f);
+    }
+    else
+    {
+        // Simple constant-rate bobbing (orbs, etc.)
+        bob.accumulator = std::fmod(bob.accumulator + bob.rate * dt, 1.0f);
+    }
+}
+
+void Scene_IC_Camp::updateOrbBobbing(std::shared_ptr<Entity> e, float dt)
+{
+    if (e->tag() != "orb") return;
+
+    auto& t = e->get<CTransform3D>();
+    auto& orb = e->get<COrb>();
+
+    updateBob(e, dt);  // uses simple path
+
+    auto& bob = e->get<CBob>();
+    float bobOffset = std::sin(bob.accumulator * 6.2831853f) * bob.magnitude;
+
+    float groundY = heightAt(t.pos.x, t.pos.z);
+    t.pos.y = groundY + orb.heightAboveGround + bobOffset;
+
+    t.velocity.y = 0.0f;
 }
 
 void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
@@ -742,14 +768,14 @@ void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
         return;
     }
 
-    // Normal entities / player
+    // Player / other physics entities
     float groundY = heightAt(t.pos.x, t.pos.z);
 
     if (e->has<CPhysics>())
     {
         auto& p = e->get<CPhysics>();
 
-        const float groundSkin = 10.f; // tune to taste — depends on your world units
+        const float groundSkin = 10.f;
 
         if (t.pos.y < groundY)
         {
@@ -760,7 +786,7 @@ void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
                 p.onGround = true;
             }
         }
-        else if (t.pos.y <= groundY + groundSkin) // within skin = still on ground
+        else if (t.pos.y <= groundY + groundSkin)
         {
             p.onGround = true;
         }
@@ -773,22 +799,6 @@ void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
     {
         t.pos.y = groundY;
     }
-}
-
-void Scene_IC_Camp::updateOrbBobbing(std::shared_ptr<Entity> e, float dt)
-{
-    if (!e->has<COrb>() || !e->has<CTransform3D>()) return;
-
-    auto& orb = e->get<COrb>();
-    auto& t   = e->get<CTransform3D>();
-
-    orb.bobPhase = std::fmod(orb.bobPhase + orb.bobRate * dt, 1.0f);
-    float bobOffset = std::sin(orb.bobPhase * 6.2831853f) * orb.bobMagnitude;
-
-    float groundY = heightAt(t.pos.x, t.pos.z);
-    t.pos.y = groundY + orb.heightAboveGround + bobOffset;
-
-    t.velocity.y = 0.0f; // orbs float
 }
 
 // This picks out one of the 16 terrain layers to render a sedamentary stripe pattern on.

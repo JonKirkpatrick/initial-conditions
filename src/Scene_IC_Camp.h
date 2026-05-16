@@ -159,6 +159,7 @@ protected:
     bool shouldHeadlightsBeOn() const;
     HeadlightState m_headlightState = HeadlightState::Auto;
     void updateShadowOrbs();
+    void updateBob(std::shared_ptr<Entity> e, float dt, float horizSpeed /*= 0.0f*/);
 
     // Convenience wrappers around Topography namespace functions
     float heightAt(float x, float z) const {
