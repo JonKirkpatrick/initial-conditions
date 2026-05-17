@@ -4,7 +4,6 @@
 #include <string>
 #include <array>
 #include <memory>
-#include "Vec2.hpp"
 #include "Assets.h"
 #include "Animation.hpp"
 #include "Theme.h"

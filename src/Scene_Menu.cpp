@@ -5,6 +5,7 @@
 #include "ComponentTypes.hpp"
 #include "Action.hpp"
 #include "InputBindings.h"
+#include <SFML/Graphics.hpp>
 #include "Theme.h"
 #include <cmath>
            
@@ -30,7 +31,7 @@ void Scene_Menu::init()
     m_menuBackground.setSmooth(true);
 }
 
-std::optional<size_t> Scene_Menu::hitTestMenuIndex(const Vec2i& mousePosition) const
+std::optional<size_t> Scene_Menu::hitTestMenuIndex(const sf::Vector2i& mousePosition) const
 {
     sf::Vector2f mappedMouse = m_game.window().mapPixelToCoords(
         sf::Vector2i(mousePosition.x, mousePosition.y)
@@ -175,7 +176,7 @@ void Scene_Menu::sRender()
     m_game.window().clear(Theme::color(Theme::ColorRole::BackgroundBase));
     sf::Sprite backgroundSprite(m_menuBackground);
     backgroundSprite.setPosition({0, 0});
-    Vec2f scale(
+    sf::Vector2f scale(
         static_cast<float>(m_game.window().getSize().x) / static_cast<float>(m_menuBackground.getSize().x),
         static_cast<float>(m_game.window().getSize().y) / static_cast<float>(m_menuBackground.getSize().y)
     );
@@ -191,9 +192,9 @@ void Scene_Menu::sRender()
 
     menuText.setString(m_title);
     menuText.setFillColor(Theme::color("major-title"));
-    Vec2f titlePosition(m_game.window().getSize().x / 2 - menuText.getGlobalBounds().size.x / 2, 184);
+    sf::Vector2f titlePosition(m_game.window().getSize().x / 2 - menuText.getGlobalBounds().size.x / 2, 184);
     menuTextShadow.setString(m_title);
-    menuTextShadow.setPosition(titlePosition + Vec2f(3, 3)); // slight offset for shadow effect
+    menuTextShadow.setPosition(titlePosition + sf::Vector2f(3, 3)); // slight offset for shadow effect
     m_game.window().draw(menuTextShadow);
     menuText.setPosition(titlePosition);
     m_game.window().draw(menuText);
@@ -251,7 +252,7 @@ void Scene_Menu::sRender()
             hoverPulseY = -3.0f * height;
         }
 
-        Vec2f itemPosition(
+        sf::Vector2f itemPosition(
             m_game.window().getSize().x / 2 - menuText.getGlobalBounds().size.x / 2,
             325 + i * 72 + hoverPulseY
         );
@@ -259,8 +260,8 @@ void Scene_Menu::sRender()
         menuText.setFillColor(finalColor);
         
         menuTextShadow.setString(m_menuStrings[i]);
-        const Vec2f baseShadowOffset = Vec2f(3, 3);
-        const Vec2f shadowOffset = baseShadowOffset + Vec2f(3.0f, 3.0f) * height;
+        const sf::Vector2f baseShadowOffset = sf::Vector2f(3, 3);
+        const sf::Vector2f shadowOffset = baseShadowOffset + sf::Vector2f(3.0f, 3.0f) * height;
         float alphaFactor = 1.0f - (height * height * 0.3f);
         sf::Color shadowColor = Theme::color("shadow");
         shadowColor.a = static_cast<uint8_t>(shadowColor.a * alphaFactor);

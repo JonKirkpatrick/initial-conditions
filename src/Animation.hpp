@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Assets.h"
-#include "Vec2.hpp"
 
 #include <vector>
 #include <SFML/Graphics.hpp>
@@ -15,7 +14,7 @@ class Animation
     size_t      m_frameWidth;               // width of each frame
     size_t      m_frameHeight;              // height of each frame
 
-    Vec2f       m_originOffset;             // origin offset for drawing
+    sf::Vector2f       m_originOffset;             // origin offset for drawing
     size_t      m_currentFrame = 0;         // the current frame of animation being played
     size_t      m_frameCount;               // total number of frames in the animation
     size_t      m_frameTimer = 0;           // timer to track frame duration
@@ -58,7 +57,7 @@ public:
 
     void setOriginOffset(size_t offsetX, size_t offsetY)
     {
-        m_originOffset = Vec2f(float(offsetX), float(offsetY));
+        m_originOffset = sf::Vector2f(float(offsetX), float(offsetY));
         m_textureRect.position.x = int(m_originOffset.x);
         m_textureRect.position.y = int(m_originOffset.y);
     }

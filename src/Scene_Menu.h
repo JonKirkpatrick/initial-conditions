@@ -27,7 +27,7 @@ protected:
     void onEnter();
     void onExit();
     void sDoAction(const Action& action);
-    std::optional<size_t> hitTestMenuIndex(const Vec2i& mousePosition) const;
+    std::optional<size_t> hitTestMenuIndex(const sf::Vector2i& mousePosition) const;
     void activateSelectedMenuItem();
 
 public:

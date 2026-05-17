@@ -191,20 +191,20 @@ void GameEngine::sUserInput()
             if (m_mouseCaptured) {
                 sf::Vector2u size = m_window.getSize();
                 sf::Vector2i center(size.x / 2, size.y / 2);
-                Vec2f delta(mm->position.x - center.x, mm->position.y - center.y);
+                sf::Vector2f delta(mm->position.x - center.x, mm->position.y - center.y);
                 if (delta.x != 0 || delta.y != 0) {
                     currentScene()->doAction(Action(InputAction::MouseMove, "LOOK", delta));
                     sf::Mouse::setPosition(center, m_window);
                 }
             } else {
                 currentScene()->doAction(Action(InputAction::MouseMove, "START",
-                                                Vec2i(mm->position.x, mm->position.y)));
+                                                sf::Vector2i(mm->position.x, mm->position.y)));
             }
         }
 
         if (const auto* mm = event->getIf<sf::Event::MouseWheelScrolled>())
         {
-            const Vec2i mpos(mm->position.x, mm->position.y);
+            const sf::Vector2i mpos(mm->position.x, mm->position.y);
             currentScene()->doAction(Action(InputAction::MouseWheelScroll, "START", mm->delta, mpos));
         }
     }
