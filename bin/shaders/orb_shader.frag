@@ -2,12 +2,11 @@ uniform vec3 sunDir;
 uniform vec4 sunColor;
 uniform vec4 orbColor;
 uniform vec2 u_texSize;
+uniform vec2 u_quadOrigin;
 uniform sampler2D u_bakeTex;
 uniform vec2 u_viewportSize;
-uniform vec2 u_screenCenter;
 uniform vec3 u_orbCenterView;
 uniform float u_orbDepthNorm;
-uniform float u_orbRadiusPx;
 uniform float headlampIntensity;
 uniform float headlampRange;
 uniform float headlampConeCos; // cos(angle) of headlamp cone (for cutoff)
@@ -15,16 +14,17 @@ uniform float headlampEnabled; // 1.0 when headlights are on, 0.0 when off
 
 void main()
 {
-    // Compute UVs from the offscreen orb texture fragment coordinate directly.
-    // This keeps the shaded orb independent of SFML shape texcoord behavior.
-    vec2 uv = gl_FragCoord.xy / u_texSize;
-    uv.y = 1.0 - uv.y;
+    // Convert gl_FragCoord (OpenGL bottom-left Y-up) to SFML window coords (top-left Y-down)
+    vec2 fragScreenSFML = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
 
-    // Per-pixel occlusion: compute this fragment's screen position
-    vec2 local = (uv - vec2(0.5)) * 2.0 * u_orbRadiusPx; // offset from center in px
-    vec2 fragScreen = u_screenCenter + local;
-    vec2 fragScreenUv = fragScreen / u_viewportSize;
+    // Local position inside the billboard quad (SFML coords)
+    vec2 localSFML = fragScreenSFML - u_quadOrigin;
+    vec2 uv = localSFML / u_texSize;
+
+    // Per-pixel occlusion using correct screen position
+    vec2 fragScreenUv = fragScreenSFML / u_viewportSize;
     fragScreenUv.y = 1.0 - fragScreenUv.y;
+
     vec4 topo = texture2D(u_bakeTex, fragScreenUv);
     if (topo.a >= 0.5) {
         float terrainNorm = topo.r + topo.g / 255.0 + topo.b / (255.0 * 255.0);
@@ -33,17 +33,13 @@ void main()
         }
     }
 
-    // Map to -1 to 1 range, centered.
     vec2 pos = (uv - vec2(0.5)) * 2.0;
     float dist = length(pos);
     
-    // Early discard for pixels outside the circle
     if (dist > 1.0) {
         discard;
     }
     
-    // Reconstruct 3D sphere normal from 2D circle position
-    // Using hemisphere projection
     float z = sqrt(1.0 - dist * dist);
     vec3 normal = normalize(vec3(pos.x, -pos.y, z));
     
@@ -85,7 +81,7 @@ void main()
     flashlightShaded *= lampStrength;
 
     // Atmospheric perspective: mirror topo_final's smooth dusk/night rolloff.
-    float atmosphereMaxDist = 0.5; // treat 30% of farPlane as "fully atmospheric"
+    float atmosphereMaxDist = 0.5;
     float distNormalized = clamp(u_orbDepthNorm / atmosphereMaxDist, 0.0, 1.0);
     float atmosphereStrength = pow(distNormalized, 1.7);
 

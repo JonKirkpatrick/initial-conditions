@@ -1379,11 +1379,8 @@ void Scene_IC_Camp::renderOrbs() {
 
         const float radiusPx = item.radiusPx;
         const float diameterPx = radiusPx * 2.0f;
-        constexpr float ORB_TEXTURE_SCALE = 1.5f;
-        constexpr unsigned int ORB_TEXTURE_MIN = 64u;
-        constexpr unsigned int ORB_TEXTURE_MAX = 512u;
-        unsigned int orbTextureSize = static_cast<unsigned int>(std::ceil(diameterPx * ORB_TEXTURE_SCALE));
-        orbTextureSize = std::clamp(orbTextureSize, ORB_TEXTURE_MIN, ORB_TEXTURE_MAX);
+        const sf::Vector2f quadOrigin(item.screenPos.x - radiusPx, item.screenPos.y - radiusPx);
+        const sf::Vector2f quadSize(diameterPx, diameterPx);
 
         sf::Vector3f sunDirView = Camera::worldToCamera(
             sf::Vector3f(m_sunDirection.x, m_sunDirection.y, m_sunDirection.z),
@@ -1392,19 +1389,9 @@ void Scene_IC_Camp::renderOrbs() {
             transform.roll
         );
 
-        static sf::RenderTexture orbTexture;
-        static bool orbTextureInitialized = false;
-        if (!orbTextureInitialized || orbTexture.getSize().x != orbTextureSize || orbTexture.getSize().y != orbTextureSize) {
-            orbTexture = sf::RenderTexture({orbTextureSize, orbTextureSize});
-            orbTexture.setSmooth(true);
-            orbTextureInitialized = true;
-        }
-
-        orbTexture.clear(sf::Color::Transparent);
-
-        sf::RectangleShape shadedRect{sf::Vector2f(float(orbTextureSize), float(orbTextureSize))};
-        shadedRect.setPosition(sf::Vector2f(0.f, 0.f));
-        shadedRect.setFillColor(sf::Color::White);
+        sf::RectangleShape billboard(quadSize);
+        billboard.setPosition(quadOrigin);
+        billboard.setFillColor(sf::Color::White);
 
         sf::RenderStates states;
         states.shader = &m_orbShader;
@@ -1416,27 +1403,17 @@ void Scene_IC_Camp::renderOrbs() {
             orbData.color.b / 255.0f,
             orbData.color.a / 255.0f
         ));
-        m_orbShader.setUniform("u_texSize", sf::Glsl::Vec2(float(orbTextureSize), float(orbTextureSize)));
+        m_orbShader.setUniform("u_texSize", sf::Glsl::Vec2(diameterPx, diameterPx));
+        m_orbShader.setUniform("u_quadOrigin", sf::Glsl::Vec2(quadOrigin.x, quadOrigin.y));
         m_orbShader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
         m_orbShader.setUniform("u_viewportSize", sf::Glsl::Vec2(float(windowSize.x), float(windowSize.y)));
-        m_orbShader.setUniform("u_screenCenter", sf::Glsl::Vec2(item.screenPos.x, item.screenPos.y));
         m_orbShader.setUniform("u_orbCenterView", sf::Glsl::Vec3(item.cameraSpacePos.x, item.cameraSpacePos.y, item.cameraSpacePos.z));
         m_orbShader.setUniform("u_orbDepthNorm", item.depthNorm);
-        m_orbShader.setUniform("u_orbRadiusPx", radiusPx);
         m_orbShader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
         m_orbShader.setUniform("headlampIntensity", 5.5f);
         m_orbShader.setUniform("headlampRange", 8500.0f);
         m_orbShader.setUniform("headlampConeCos", 0.920504853f);
-        orbTexture.draw(shadedRect, states);
-        orbTexture.display();
-
-        sf::Sprite shadedSprite(orbTexture.getTexture());
-        shadedSprite.setOrigin(sf::Vector2f(float(orbTextureSize) * 0.5f, float(orbTextureSize) * 0.5f));
-        shadedSprite.setPosition(item.screenPos);
-        float spriteScale = (radiusPx * 2.0f) / float(orbTextureSize);
-        shadedSprite.setScale(sf::Vector2f(spriteScale, spriteScale));
-
-        window.draw(shadedSprite);
+        window.draw(billboard, states);
     };
 
     for (const auto& orbItem : orbDrawItems) {
