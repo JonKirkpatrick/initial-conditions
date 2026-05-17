@@ -25,6 +25,16 @@ static sf::Vector3f forwardFromTransform(const CTransform3D& transform)
     return Camera::cameraToWorld(sf::Vector3f(0.f, 0.f, -1.f), transform.pitch, transform.yaw, transform.roll);
 }
 
+static float length(const sf::Vector3f& v)
+{
+    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+static float dot(const sf::Vector3f& a, const sf::Vector3f& b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
 Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     : Scene(game)
     , m_levelPath(levelPath)
@@ -47,8 +57,9 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
     loadLevel(m_levelPath);
-    spawnCamera();
     spawnPlayer();
+    spawnCamera();
+    updateCamera(0.001f);
     spawnDebugOrbs(8000);
 
     // Sync legacy tuple components into SoA before any code reads from the new storage.
@@ -82,7 +93,6 @@ void Scene_IC_Camp::updateCamera(float dt)
     sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
 
     sf::Vector3f forward = forwardFromTransform(playerTransform);
-    forward.y = 0.f;
     forward = Camera::normalize(forward);
     sf::Vector3f right(forward.z, 0.f, -forward.x);
 
@@ -148,7 +158,7 @@ bool Scene_IC_Camp::shouldHeadlightsBeOn() const
         return true;
     case HeadlightState::Auto:
     default:
-        return m_sunDirection.y < 0.12f || m_sunIntensity < 0.75f;
+        return m_sunDirection.y < 0.12f || m_sunIntensity < 0.5f;
     }
 }
 
@@ -197,10 +207,7 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
     {
         if (str == "Camera")
         {
-            file >> m_cameraConfig.PITCH
-                 >> m_cameraConfig.YAW
-                 >> m_cameraConfig.ROLL
-                 >> m_cameraConfig.FOVY
+            file >> m_cameraConfig.FOVY
                  >> m_cameraConfig.NEAR_PLANE
                  >> m_cameraConfig.FAR_PLANE;
         }
@@ -215,8 +222,8 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
         }
         if (str == "TerrainLayer")
         {
-            float centerX = 0.f;
-            float centerY = 0.f;
+            int centerX = 0;
+            int centerY = 0;
             float radius = 0.f;
             float falloffWidth = 0.f;
             float topoHeight = 0.f;
@@ -230,10 +237,10 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
             if (terrainLayerIndex < static_cast<int>(m_terrainLayers.size()))
             {
                 TerrainLayer& layer = m_terrainLayers[terrainLayerIndex++];
-                layer.center = sf::Vector2f(centerX, centerY);
-                layer.radius = radius;
-                layer.falloffWidth = falloffWidth;
-                layer.topoHeight = topoHeight;
+                layer.center = hexToWorld(centerX, centerY);
+                layer.radius = radius * 100.f;
+                layer.falloffWidth = falloffWidth * 100.f;
+                layer.topoHeight = topoHeight * 100.f;
             }
         }
         if (str == "DateTimePlace")
@@ -244,20 +251,20 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
         }
     }
     std::srand(std::time(0));
-    m_homeLocationXZ = sf::Vector2f(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
+    m_homeLocationXZ = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
 }
 
 void Scene_IC_Camp::spawnPlayer()
 {
     m_player = m_entityManager.addEntity("player");
-    
+    m_playerConfig.HEIGHT_OFFSET *= 100.f; // convert from metres to cm
+    m_playerConfig.EYE_OFFSET *= 100.f;    // convert from metres to cm
+    m_playerConfig.MOVE_SPEED *= 100.f;    // convert from m/s to cm/s
+    m_playerConfig.ROTATION_SPEED = m_playerConfig.ROTATION_SPEED * 3.14159265f / 180.f;
+    sf::Vector2f playerPosition = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
+    sf::Vector3f spawnPos(playerPosition.x, heightAt(playerPosition.x, playerPosition.y), playerPosition.y);
     m_entityManager.addPlayer(m_player, CPlayer());
-    m_entityManager.addTransform(m_player, CTransform3D(
-        sf::Vector3f(m_playerConfig.POSITION_X, 
-                     Scene_IC_Camp::heightAt(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z), 
-                     m_playerConfig.POSITION_Z)
-        ));
-    
+    m_entityManager.addTransform(m_player, CTransform3D(spawnPos));
     m_entityManager.addInput(m_player, CInput());
     m_entityManager.addPhysics(m_player, CPhysics());
     m_entityManager.addBob(m_player, CBob(1.0f, 6.0f, 5.5f));   // rate, vertical mag, lateral mag
@@ -405,6 +412,10 @@ void Scene_IC_Camp::uploadShadowOrbsToShader(sf::Shader& shader)
 void Scene_IC_Camp::spawnCamera()
 {
     m_camera = m_entityManager.addEntity("camera");
+    float pi = 3.14159265f;
+    m_cameraConfig.FOVY = m_cameraConfig.FOVY * pi / 180.0f;
+    m_cameraConfig.NEAR_PLANE *= 100.f; // convert from metres to cm
+    m_cameraConfig.FAR_PLANE  *= 100.f; // convert from metres to cm
     m_entityManager.addCamera(m_camera, CCamera(
         m_cameraConfig.FOVY,
         float(m_cameraConfig.VIEWPORT_WIDTH)/m_cameraConfig.VIEWPORT_HEIGHT,
@@ -412,14 +423,7 @@ void Scene_IC_Camp::spawnCamera()
         m_cameraConfig.FAR_PLANE,
         sf::Vector2u(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT)
         ));
-    m_entityManager.addTransform(m_camera, CTransform3D(
-        sf::Vector3f(m_cameraConfig.POSITION_X, m_cameraConfig.POSITION_Y, m_cameraConfig.POSITION_Z),
-        sf::Vector3f(0.f, 0.f, 0.f),
-        sf::Vector3f(1.f, 1.f, 1.f),
-        m_cameraConfig.PITCH,
-        m_cameraConfig.YAW,
-        m_cameraConfig.ROLL
-    ));
+    m_entityManager.addTransform(m_camera, CTransform3D());
 }
 
 void Scene_IC_Camp::onEnter() {
@@ -601,107 +605,109 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
         !m_entityManager.hasPhysics(e) || !m_entityManager.hasBob(e))
         return;
 
-    auto& t       = m_entityManager.getTransform(e);
-    auto& input   = m_entityManager.getInput(e);
-    auto& phys    = m_entityManager.getPhysics(e);
-    auto& bob     = m_entityManager.getBob(e);
+    auto& t     = m_entityManager.getTransform(e);
+    auto& input = m_entityManager.getInput(e);
+    auto& phys  = m_entityManager.getPhysics(e);
+    auto& bob   = m_entityManager.getBob(e);
 
-    // Locomotion state
+    // === Locomotion State ===
     phys.isCrouching = input.crouch;
     phys.isSprinting = input.sprint && !phys.isCrouching;
 
     float moveSpeed = m_playerConfig.MOVE_SPEED;
-    if (phys.isSprinting)        moveSpeed *= 3.0f;
-    else if (phys.isCrouching)   moveSpeed *= 0.6f;
+    if (phys.isSprinting) moveSpeed *= 3.0f;
+    else if (phys.isCrouching) moveSpeed *= 0.6f;
 
-    float sampleDist = 10.0f; // cm — tune to your terrain scale
-    auto& playerTransform = m_entityManager.getTransform(e);
-    sf::Vector3f fwd = forwardFromTransform(playerTransform);
-    fwd.y = 0.f;
-    fwd = Camera::normalize(fwd); // already normalised XZ
+    // === Terrain Info ===
+    sf::Vector3f flatForward = forwardFromTransform(t);
+    flatForward.y = 0.0f;
+    flatForward = Camera::normalize(flatForward);
 
-    float hAhead  = heightAt(t.pos.x + fwd.x * sampleDist, t.pos.z + fwd.z * sampleDist);
-    float hBehind = heightAt(t.pos.x - fwd.x * sampleDist, t.pos.z - fwd.z * sampleDist);
+    sf::Vector3f normal = terrainNormal(t.pos.x, t.pos.z);
 
-    float slope = (hAhead - hBehind) / (2.0f * sampleDist); // rise over run
-
-    float slopeBoost;
-    if (slope >= 0.0f)
-    {
-        // Uphill — simple penalty as before
-        slopeBoost = -std::clamp(slope * 2.0f, 0.0f, 0.4f);
-    }
+    sf::Vector3f terrainForward = flatForward - normal * dot(flatForward, normal);
+    if (length(terrainForward) > 0.001f)
+        terrainForward = Camera::normalize(terrainForward);
     else
+        terrainForward = flatForward;
+
+    sf::Vector3f right = {-terrainForward.z, 0.0f, terrainForward.x};
+
+    // === Slope-based speed modifier - Subtle version ===
+    float slopeFactor = 1.0f;
+    float slopeCos = dot(terrainForward, normal);
+    float slopeAngle = std::acos(std::clamp(slopeCos, -1.0f, 1.0f));
+
+    if (slopeAngle > 0.06f)   // small deadzone
     {
-        // Downhill — peaks around 15% grade then falls off
-        float grade = -slope; // positive for downhill
-        float peak  = 0.15f;  // grade at which you're fastest
-        float boost = (grade / peak) * std::exp(1.0f - grade / peak) * 0.25f;
-        slopeBoost  = std::clamp(boost, -0.5f, 0.25f);
-        // negative slopeBoost = penalty (too steep), positive = speed gain (gentle decline)
+        float grade = std::tan(slopeAngle);
+
+        if (slopeCos < 0.0f) // === DOWNHILL ===
+        {
+            // Very gentle momentum boost
+            slopeFactor = 1.0f + std::clamp(grade * 0.65f, 0.0f, 0.22f);
+        }
+        else // === UPHILL ===
+        {
+            // Very gentle retardation
+            slopeFactor = 1.0f - std::clamp(grade * 1.1f, 0.0f, 0.18f);
+        }
     }
 
-    float slopeScale = 1.0f + slopeBoost;
-
-    moveSpeed *= slopeScale;
-
-    // === Rotation ===
-    // Apply mouse look: invert signs so moving mouse right increases yaw and
-    // moving mouse up increases pitch (match user expectations / conventions)
-    t.yaw   += input.mouseDelta.x * 0.002f;
+    moveSpeed *= slopeFactor;
+    // === Rotation (unchanged) ===
+    t.yaw += input.mouseDelta.x * 0.002f;
     t.pitch += input.mouseDelta.y * 0.002f;
-    input.mouseDelta = { 0.f, 0.f };
+    input.mouseDelta = {0.f, 0.f};
 
     if (input.strafe)
     {
-        if (input.left)  t.yaw += m_playerConfig.ROTATION_SPEED * dt;
-        if (input.right) t.yaw -= m_playerConfig.ROTATION_SPEED * dt;
+        if (input.left) t.yaw -= m_playerConfig.ROTATION_SPEED * dt;
+        if (input.right) t.yaw += m_playerConfig.ROTATION_SPEED * dt;
     }
-
     t.pitch = std::clamp(t.pitch, -1.57f, 1.57f);
 
     // === Movement Direction ===
-    sf::Vector3f forward = forwardFromTransform(t);
-    forward.y = 0.f;
-    forward = Camera::normalize(forward);
-    sf::Vector3f right   = {-forward.z, 0.0f, forward.x};
-
     sf::Vector3f moveDir(0.f, 0.f, 0.f);
-    if (input.forward)  moveDir += forward;
-    if (input.backward) moveDir -= forward;
+    if (input.forward)  moveDir += terrainForward;
+    if (input.backward) moveDir -= terrainForward;
     if (!input.strafe)
     {
         if (input.left)  moveDir -= right;
         if (input.right) moveDir += right;
     }
 
-    // === Kinematic Horizontal Movement with Air Control ===
-    float currentSpeed = std::sqrt(t.velocity.x*t.velocity.x + t.velocity.z*t.velocity.z);
-
-    if (moveDir.x != 0.0f || moveDir.z != 0.0f)
+    // === Apply Movement ===
+    if (length(moveDir) > 0.001f)
     {
         sf::Vector3f desired = Camera::normalize(moveDir) * moveSpeed;
 
         if (phys.onGround)
         {
-            // Full ground control (snappy)
-            t.velocity.x = desired.x;
-            t.velocity.z = desired.z;
+            // === KEY CHANGE: Velocity now follows the slope naturally ===
+            sf::Vector3f desiredOnPlane = desired - normal * dot(desired, normal);
+            if (length(desiredOnPlane) > 0.001f)
+                desiredOnPlane = Camera::normalize(desiredOnPlane) * moveSpeed;
+
+            t.velocity.x = desiredOnPlane.x;
+            t.velocity.z = desiredOnPlane.z;
+            t.velocity.y = desiredOnPlane.y;   // ← This is the important line
         }
         else
         {
-            // Limited air control
-            float airControl = 0.25f;                    // ← tune this (0.2 ~ 0.4 feels good)
-            t.velocity.x = t.velocity.x * (1.0f - airControl) + desired.x * airControl;
-            t.velocity.z = t.velocity.z * (1.0f - airControl) + desired.z * airControl;
+            const float airControl = 0.25f;
+            t.velocity.x = std::lerp(t.velocity.x, desired.x, airControl);
+            t.velocity.z = std::lerp(t.velocity.z, desired.z, airControl);
+            // y velocity is left alone (gravity does its thing)
         }
     }
     else if (phys.onGround)
     {
-        // Stop on ground when no input
         t.velocity.x = 0.0f;
         t.velocity.z = 0.0f;
+        t.velocity.y = 0.0f;
     }
+
     // === Jumping ===
     if (input.jump && phys.onGround && !phys.isCrouching)
     {
@@ -709,43 +715,67 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
         phys.onGround = false;
     }
 
-    // === Bobbing ===
-    float horizSpeed = std::sqrt(t.velocity.x * t.velocity.x + t.velocity.z * t.velocity.z);
-    updateBob(e, dt, horizSpeed);   // uses complex player path
+    // === Much gentler ground handling ===
+    const float terrainHeight = heightAt(t.pos.x, t.pos.z);
 
-    // Footsteps
-    auto& bobComp = m_entityManager.getBob(e);
+    if (phys.onGround)
+    {
+        float heightDiff = t.pos.y - terrainHeight;
+
+        if (heightDiff < -20.0f)                    // penetrated ground
+        {
+            t.pos.y = terrainHeight;
+            t.velocity.y = 0.0f;
+        }
+        else if (heightDiff > 60.0f)                // lost contact
+        {
+            phys.onGround = false;
+        }
+        else
+        {
+            // Very light correction only
+            t.pos.y = std::lerp(t.pos.y, terrainHeight, 0.35f);   // ← soft follow
+            t.velocity.y = std::min(t.velocity.y, 0.0f);
+        }
+    }
+    else
+    {
+        // Landing detection
+        if (t.velocity.y <= 0.0f && t.pos.y <= terrainHeight + 12.0f)
+        {
+            t.pos.y = terrainHeight;
+            t.velocity.y = 0.0f;
+            phys.onGround = true;
+        }
+    }
+
+    // === Bobbing & Footsteps (unchanged) ===
+    float horizSpeed = std::sqrt(t.velocity.x*t.velocity.x + t.velocity.z*t.velocity.z);
+    updateBob(e, dt, horizSpeed);
+
     if (horizSpeed > 1.0f && phys.onGround)
     {
+        auto& bobComp = m_entityManager.getBob(e);
         float currentPhase = bobComp.accumulator;
-
-        // Trigger footsteps at roughly 0.0 and 0.5 in the cycle
         bool shouldStep = false;
-        bool isLeft = true;
-        bool isSprinting = phys.isSprinting;
-        bool isCrouching = phys.isCrouching;
+        bool isLeft = false;
 
-        // ... rest of your existing footstep logic unchanged ...
-        if ((m_lastStepPhase > 0.8f && currentPhase < 0.2f) ||
-            (m_lastStepPhase < 0.2f && currentPhase > 0.8f))
+        if ((m_lastStepPhase > 0.8f && currentPhase < 0.2f) || (m_lastStepPhase < 0.2f && currentPhase > 0.8f))
         {
-            shouldStep = true;
-            isLeft = true;
+            shouldStep = true; isLeft = true;
         }
         else if ((m_lastStepPhase < 0.45f && currentPhase >= 0.45f) ||
                  (m_lastStepPhase > 0.55f && currentPhase <= 0.55f))
         {
-            shouldStep = true;
-            isLeft = false;
+            shouldStep = true; isLeft = false;
         }
 
         if (shouldStep)
         {
             const std::string& soundName = isLeft ? "FootLeft" : "FootRight";
-            float volume = isSprinting ? 75.f : (isCrouching ? 30.f : 45.f);
+            float volume = phys.isSprinting ? 75.f : (phys.isCrouching ? 30.f : 45.f);
             AudioManager::Instance().sfx.playSound(Assets::Instance().getSound(soundName), volume);
         }
-
         m_lastStepPhase = currentPhase;
     }
 }
@@ -839,28 +869,6 @@ void Scene_IC_Camp::resolveEntityPosition(SoAEntityHandle e, float dt)
     {
         t.pos.y = groundY;
     }
-}
-
-// This picks out one of the 16 terrain layers to render a sedamentary stripe pattern on.
-// It chooses the layer with the highest ratio of topoHeight to falloffWidth, which tends to produce the most visually striking stripes.
-int Scene_IC_Camp::selectStripeLayerIndex() const {
-    int bestIndex = -1;
-    float bestScore = -1.0f;
-
-    for (int i = 0; i < 16; ++i) {
-        if ((m_activeLayerMask & (1u << i)) == 0) continue;
-
-        const TerrainLayer& layer = m_terrainLayers[i];
-        if (layer.falloffWidth <= 1e-6f) continue;
-
-        float score = layer.topoHeight / layer.falloffWidth;
-        if (score > bestScore) {
-            bestScore = score;
-            bestIndex = i;
-        }
-    }
-
-    return bestIndex;
 }
 
 // This is used already, but will become a far more central function as I start building out the orb system.
@@ -1257,7 +1265,6 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     sf::Vector2u winSize = m_game.window().getSize();
     sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
     sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
-    m_stripeLayerIndex = selectStripeLayerIndex();
 
     m_finalShader.setUniform("viewportSize",  sf::Glsl::Vec2(winSize.x, winSize.y));
     m_finalShader.setUniform("m_hexSize",     m_hexSize);
@@ -1273,11 +1280,12 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_finalShader.setUniform("ambientStrength", 0.3f);
     m_finalShader.setUniform("baseColor", colorToShader(Theme::color("best-brown")));
     m_finalShader.setUniform("gridColor", colorToShader(m_gridColor));
+    m_finalShader.setUniform("u_heightMax",    m_topdownMaxHeight);
+    m_finalShader.setUniform("u_reliefExaggeration", 1.5f);
     uploadTerrainLayersToShader(m_finalShader, "layer");
     m_finalShader.setUniform("topoTex", m_bakeTexture.getTexture());
     m_finalShader.setUniform("cursorMode", m_cursorMode);
     m_finalShader.setUniform("hoveredHex", sf::Glsl::Vec2((float)hex.x, (float)hex.y));
-    m_finalShader.setUniform("u_stripeLayerIndex", m_stripeLayerIndex);
     const bool headlampOn = shouldHeadlightsBeOn();
     m_finalShader.setUniform("headlampOn", headlampOn);
     m_finalShader.setUniform("headlampIntensity", 4.f);

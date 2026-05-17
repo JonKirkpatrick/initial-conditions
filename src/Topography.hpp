@@ -140,4 +140,16 @@ namespace Topography {
         return mask;
     }
 
+    inline sf::Vector3f terrainNormal(float x, float z, const std::array<TerrainLayer, 16>& layers, uint32_t activeLayerMask, float epsilon = 50.0f)
+    {
+        float dhdx = Topography::heightAt(x + epsilon, z, layers, activeLayerMask) - Topography::heightAt(x - epsilon, z, layers, activeLayerMask);
+        float dhdz = Topography::heightAt(x, z + epsilon, layers, activeLayerMask) - Topography::heightAt(x, z - epsilon, layers, activeLayerMask);
+
+        sf::Vector3f n(-dhdx, 2.0f * epsilon, -dhdz);
+        float lenSq = n.x*n.x + n.y*n.y + n.z*n.z;
+        if (lenSq < 1e-12f) return {0.f, 1.f, 0.f};
+        float invLen = 1.0f / std::sqrt(lenSq);
+        return n * invLen;
+    }
+
 } // namespace Topography

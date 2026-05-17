@@ -15,7 +15,8 @@ class Scene_IC_Camp : public Scene {
 
     struct PlayerConfig
     {
-        float MOVE_SPEED, ROTATION_SPEED, HEIGHT_OFFSET, EYE_OFFSET, POSITION_X, POSITION_Z;
+        float MOVE_SPEED, ROTATION_SPEED, HEIGHT_OFFSET, EYE_OFFSET;
+        int POSITION_X, POSITION_Z;
     };
 
     using TerrainLayer = Topography::TerrainLayer;
@@ -153,7 +154,6 @@ protected:
     sf::Vector2f hexToWorld(int q, int r) const;
     sf::Vector3f screenToWorld(sf::Vector2i mousePos) const;
     void uploadWarpParametersToShader(sf::Shader& shader) const;
-    int selectStripeLayerIndex() const;
 
     // Time, Date and Location
     float m_gameTimeOfDay; // Hours between 0 and 24
@@ -204,6 +204,9 @@ protected:
     }
     float evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const {
         return Topography::evaluateLayerHeightAt(layer, x, z);
+    }
+    sf::Vector3f terrainNormal(float x, float z, float epsilon = 50.0f) const {
+        return Topography::terrainNormal(x, z, m_terrainLayers, m_activeLayerMask, epsilon);
     }
 
 public:

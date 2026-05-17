@@ -29,7 +29,8 @@ uniform vec2 layer_center[16];
 uniform float layer_radius[16];
 uniform float layer_falloffWidth[16];
 uniform float layer_topoHeight[16];
-uniform int u_stripeLayerIndex;
+uniform float u_heightMax;
+uniform float u_reliefExaggeration;
 
 uniform int u_shadowOrbCount;
 uniform vec3 u_shadowOrbPos[64];
@@ -58,86 +59,52 @@ vec2 hexAt(vec2 p) {
     return vec2(rq, rr);
 }
 
-// Return normalized position within the 2*t falloff band (0..1) for the selected layer,
-// or -1.0 if outside the target middle band. The normal argument is retained for call-site
-// compatibility, but the stripe mask itself is driven only by the warped layer band.
-float evaluateLayerStripe(vec2 xz, vec3 normal) {
-    vec2 warpedXZ = warpXZ(xz);
+// ================== TOPOGRAPHIC COLORING (from minimap) ==================
+vec3 topoColour(float normHeight, float shade) {
+    // Classic topo palette — 6 stops from lowland green to peak white
+    vec3 c0 = vec3(0.467, 0.631, 0.388); // deep green       (0.00)
+    vec3 c1 = vec3(0.647, 0.753, 0.447); // mid green        (0.15)
+    vec3 c2 = vec3(0.827, 0.816, 0.510); // yellow-tan       (0.35)
+    vec3 c3 = vec3(0.784, 0.667, 0.392); // warm ochre       (0.55)
+    vec3 c4 = vec3(0.651, 0.529, 0.408); // brown            (0.72)
+    vec3 c5 = vec3(0.820, 0.800, 0.788); // grey-white rock  (1.00)
 
-    for (int i = 0; i < 16; ++i) {
-        if (i != u_stripeLayerIndex) continue;
-        if (u_activeLayerEnabled[i] < 0.5) continue;
+    vec3 base;
+    if      (normHeight < 0.15) base = mix(c0, c1, normHeight / 0.15);
+    else if (normHeight < 0.35) base = mix(c1, c2, (normHeight - 0.15) / 0.20);
+    else if (normHeight < 0.55) base = mix(c2, c3, (normHeight - 0.35) / 0.20);
+    else if (normHeight < 0.72) base = mix(c3, c4, (normHeight - 0.55) / 0.17);
+    else                        base = mix(c4, c5, (normHeight - 0.72) / 0.28);
 
-        vec2  delta   = warpedXZ - layer_center[i];
-        float dist    = length(delta);
-        float radius  = layer_radius[i];
-        float falloff = layer_falloffWidth[i];
-        float d       = dist - radius; // 0 .. 2*falloff outward
+    // Lighting
+    float ambient = 0.38;
+    float diffuse = 0.62;
+    float light   = ambient + diffuse * shade;
 
-        float bandWidth = 2.0 * falloff;
-        if (bandWidth <= 1e-6) return -1.0;
+    // Warm/cool tint
+    vec3 litTint   = vec3(1.04, 1.01, 0.96);
+    vec3 shadeTint = vec3(0.85, 0.88, 0.94);
+    vec3 tint      = mix(shadeTint, litTint, shade);
 
-        // Only consider outward band [0, 2*falloff]
-        if (d < 0.0 || d > bandWidth) return -1.0;
-
-        // normalized position inside the outward band (0..1)
-        float pos = d / bandWidth;
-
-        // Return only when within the middle 20% (0.4..0.6) as requested
-        if (pos >= 0.25 && pos <= 0.75) {
-            return (pos - 0.25) / 0.5; // remap to 0..1 across the selected sub-band
-        }
-    }
-    return -1.0;
+    return clamp(base * light * tint, 0.0, 1.0);
 }
 
-// ================== SLOPE-BASED TERRAIN COLORING ==================
-vec3 getTerrainColor(vec3 normal, vec3 baseColor, vec2 xz) {
-    // Dust-covered barren surface: grey-brown on flat, brown on slopes
-    vec3 baseColorBarren = vec3(0.40, 0.38, 0.33);  // Grey-brown dust on flats
-    vec3 bandColor = vec3(1.0, 1.0, 1.0);  // Bright white for visibility during tuning
-    
-    float slopeThreshold = 0.98;   // Higher = only on very flat areas
-    float blendSharpness = 0.08;   // Controls transition smoothness
-    
-    // normal.y = 1.0 on perfectly flat, decreases as slope increases
-    float flatness = smoothstep(slopeThreshold - blendSharpness, 
-                                slopeThreshold + blendSharpness, 
-                                normal.y);
+// ================== MAIN TERRAIN COLOR ==================
+vec3 getTerrainColor(vec3 normal, vec2 xz) {
+    float h;
+    vec3 dummyNormal;
+    heightAndNormal(xz, h, dummyNormal);
 
+    float normH = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
 
-    // Stripe based only on band proportion (evaluateLayerStripe returns -1.0 if no stripe)
-    float stripePos = evaluateLayerStripe(xz, normal);
-        vec3 slopeColor = baseColor;
+    // Exaggerate: push mid-values toward the high end of the palette
+    float exaggeratedH = pow(normH, 1.0 / max(u_reliefExaggeration, 0.01));
 
-        if (stripePos >= 0.0) {
-            // === YOUR ORIGINAL STRIPE COLOR LOGIC — UNCHANGED ===
-            vec3 col0 = vec3(0.65, 0.58, 0.50);
-            vec3 col1 = vec3(0.48, 0.34, 0.30);
-            vec3 col2 = vec3(0.65, 0.28, 0.20);
-            float centers[3];
-            centers[0] = 0.25;
-            centers[1] = 0.5;
-            centers[2] = 0.85;
-            float sigma = 0.05;
-            float w0 = exp(-pow((stripePos - centers[0]) / sigma, 2.0));
-            float w1 = exp(-pow((stripePos - centers[1]) / sigma, 2.0));
-            float w2 = exp(-pow((stripePos - centers[2]) / sigma, 2.0));
-            float total = w0 + w1 + w2 + 1e-6;
-            vec3 stripeColor = (w0 * col0 + w1 * col1 + w2 * col2) / total;
+    vec3 lightDir = normalize(sunDir);
+    float shade = clamp(dot(normal, lightDir), 0.0, 1.0);
 
-            // === NEW: Soft fade only at the outer edges of the whole band ===
-            float edgeFade = smoothstep(0.0, 0.18, stripePos) * 
-                             smoothstep(1.0, 0.82, stripePos);
-
-            // Apply fade to the blend amount
-            float stripeBlend = smoothstep(0.0, 1.0, 0.2) * edgeFade;   // keep your original base strength
-
-            slopeColor = mix(baseColor, stripeColor, stripeBlend);
-        }
-
-        return mix(slopeColor, baseColorBarren, flatness);
-    }
+    return topoColour(exaggeratedH, shade);  // use exaggeratedH, not normH
+}
 
 // ================== HEX GRID ==================
 float hexGrid(vec2 p) {
@@ -275,10 +242,16 @@ void main() {
     } else {
         normal = vec3(0.0, 1.0, 0.0);
     }
-
-    // === SLOPE COLORING ===
+    float slopeMag = length(normal.xz);
+    float steepened = slopeMag * u_reliefExaggeration;
+    vec3 exagNormal = normalize(vec3(normal.x * u_reliefExaggeration,
+                                    normal.y,
+                                    normal.z * u_reliefExaggeration));
+    normal = exagNormal;
+    
+    // === TOPOGRAPHIC COLORING ===
     vec3 terrainBaseColor = isTerrainHit ? 
-                            getTerrainColor(normal, baseColor, worldPos.xz) : 
+                            getTerrainColor(normal, worldPos.xz) : 
                             baseColor;
 
     vec3 sunDirNorm = normalize(sunDir);
@@ -355,8 +328,12 @@ void main() {
     vec3 diffuse = diff * sunColor.rgb * terrainBaseColor + headlampContribution;
 
     // Moonlight
+    vec3 topoLuma = vec3(dot(terrainBaseColor, vec3(0.299, 0.587, 0.114)));
+    vec3 nightTopoTint = mix(topoLuma, terrainBaseColor, 0.35); // partly retain hue
+    vec3 moonTint = vec3(0.55, 0.68, 0.90); // keep some cool moonlight character
+
     float moonlightFill = nightFactor * 0.08;
-    ambient += moonlightFill * vec3(0.6, 0.75, 1.0) * terrainBaseColor;
+    ambient += moonlightFill * mix(moonTint, nightTopoTint, 0.5) * nightTopoTint;
 
     vec3 viewDir = normalize(cameraPos - worldPos);
     vec3 halfDir = normalize(sunDirNorm + viewDir);
@@ -384,7 +361,9 @@ void main() {
 
     float desat = atmosphereStrength * mix(0.38, 0.75, nightFactor);
     finalColor = mix(finalColor, vec3(dot(finalColor, vec3(0.299, 0.587, 0.114))), desat);
-    finalColor *= mix(1.0, 0.35, nightFactor);
+    float normH = clamp(_h / max(u_heightMax, 1.0), 0.0, 1.0);
+    float nightFloor = mix(0.32, 0.48, normH * normH); // peaks brighter at night
+    finalColor *= mix(1.0, nightFloor, nightFactor);
 
     // ================== HEX GRID ==================
     float gridFade = pow(clamp(1.0 - (dist / farPlane), 0.0, 1.0), 2.0);
