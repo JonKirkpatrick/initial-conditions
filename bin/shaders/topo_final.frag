@@ -32,8 +32,8 @@ uniform float layer_topoHeight[16];
 uniform int u_stripeLayerIndex;
 
 uniform int u_shadowOrbCount;
-uniform vec3 u_shadowOrbPos[24];
-uniform float u_shadowOrbRadius[24];
+uniform vec3 u_shadowOrbPos[64];
+uniform float u_shadowOrbRadius[64];
 uniform float u_shadowDarkness;   // global scalar, tune at runtime
 
 #include "topo_common.glsl"
@@ -290,7 +290,7 @@ void main() {
     float orbShadow = 1.0;
     if (u_shadowOrbCount > 0) {
         vec3 sunN = normalize(sunDir);
-        for (int i = 0; i < 24; i++) {
+        for (int i = 0; i < 64; i++) {
             if (i >= u_shadowOrbCount) break;
             vec3 toOrb = u_shadowOrbPos[i] - worldPos;
             float along = dot(toOrb, sunN);

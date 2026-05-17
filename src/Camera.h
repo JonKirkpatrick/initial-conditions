@@ -4,7 +4,6 @@
 #include <SFML/System/Vector3.hpp>
 #include <array>
 #include <vector>
-#include <tuple>
 #include <memory>
 
 // forward declarations to avoid heavy includes in this header
@@ -15,7 +14,6 @@ namespace Camera
 {
     sf::Vector3f worldToCamera(const sf::Vector3f& world, float pitch, float yaw, float roll);
     sf::Vector3f cameraToWorld(const sf::Vector3f& camera, float pitch, float yaw, float roll);
-    // New overloads accepting SoA-backed components directly
     bool worldToScreen(const CTransform3D& cameraTransform, const CCamera& cameraData, const sf::Vector3f& world, sf::Vector2f& screenOut);
     sf::Vector3f screenToWorld(const CTransform3D& cameraTransform, const CCamera& cameraData, sf::Vector2f screen);
     sf::Vector3f getForwardXZ(const CTransform3D& cameraTransform);

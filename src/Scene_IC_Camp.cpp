@@ -283,29 +283,46 @@ void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float r
 void Scene_IC_Camp::spawnDebugOrbs(int count)
 {
     static const std::vector<sf::Color> palette = {
-        sf::Color(240, 208,  96, 190),  // warm yellow
-        sf::Color(120, 194, 255, 170),  // ice blue
-        sf::Color(255, 140,  80, 180),  // ember orange
-        sf::Color(160, 255, 160, 175),  // pale green
-        sf::Color(220, 130, 255, 185),  // soft violet
+        sf::Color(240, 208,  96, 190),
+        sf::Color(120, 194, 255, 170),
+        sf::Color(255, 140,  80, 180),
+        sf::Color(160, 255, 160, 175),
+        sf::Color(220, 130, 255, 185),
     };
 
-    std::mt19937 rng(42); // fixed seed for reproducibility
+    std::mt19937 rng(42);
     std::uniform_real_distribution<float> hexQDist(-100.0f, 100.0f);
     std::uniform_real_distribution<float> hexRDist(-100.0f, 100.0f);
     std::uniform_real_distribution<float> radiusDist(20.0f, 80.0f);
     std::uniform_real_distribution<float> bobRateDist(0.5f, 3.0f);
     std::uniform_real_distribution<float> bobMagDist(4.0f, 12.0f);
 
-    for (int i = 0; i < count; ++i)
+    struct PairHash {
+        std::size_t operator()(const std::pair<int,int>& p) const noexcept {
+            return std::hash<int>{}(p.first) ^ (std::hash<int>{}(p.second) << 16);
+        }
+    };
+    std::unordered_set<std::pair<int,int>, PairHash> usedCoords;
+
+    int spawned = 0;
+    int maxAttempts = count * 10; // prevent infinite loop if grid is saturated
+    int attempts = 0;
+
+    while (spawned < count && attempts < maxAttempts)
     {
+        ++attempts;
         int hexQ = static_cast<int>(hexQDist(rng));
         int hexR = static_cast<int>(hexRDist(rng));
-        const sf::Color& color = palette[i % palette.size()];
-        float radius     = radiusDist(rng);
-        float bobRate    = bobRateDist(rng);
-        float bobMag     = bobMagDist(rng);
+
+        if (!usedCoords.insert({hexQ, hexR}).second)
+            continue; // already taken, retry
+
+        const sf::Color& color = palette[spawned % palette.size()];
+        float radius  = radiusDist(rng);
+        float bobRate = bobRateDist(rng);
+        float bobMag  = bobMagDist(rng);
         spawnOrb(hexQ, hexR, color, radius, bobRate, bobMag);
+        ++spawned;
     }
 }
 
@@ -316,7 +333,7 @@ void Scene_IC_Camp::updateShadowOrbs()
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
 
-    constexpr int   MAX_SHADOW_ORBS    = 24;
+    constexpr int   MAX_SHADOW_ORBS    = 64;
     constexpr float SHADOW_CUTOFF_DIST = 5000.0f; // 50 metres in cm
 
     struct CandidateOrb {
@@ -1368,7 +1385,6 @@ void Scene_IC_Camp::renderOrbs()
     const float focalLengthPx = (static_cast<float>(winSize.y) * 0.5f) /
                                 std::tan(camData.fovY * 0.5f);
 
-    // Fast SoA iteration
     m_entityManager.forEachOrbWithTransform([&](SoAEntityHandle, CTransform3D& orbTransform, COrb& orbData)
     {
         sf::Vector2f screenPos;

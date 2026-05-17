@@ -189,7 +189,6 @@ public:
     COrb& getOrb(SoAEntityHandle h) { return m_compOrb.get(h); }
     void removeOrb(SoAEntityHandle h) { m_compOrb.remove(h); }
     template<typename F> void forEachOrb(F&& f) { m_compOrb.each([this,&f](uint32_t entIndex, COrb& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
-    // In EntityManager.hpp
     template<typename F>
     void forEachOrbWithTransform(F&& func)
     {
