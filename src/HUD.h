@@ -7,7 +7,7 @@
 #include "Vec2.hpp"
 #include "Assets.h"
 #include "Animation.hpp"
-#include "Entity.hpp"
+#include "Theme.h"
 
 struct HUD_Data
 {

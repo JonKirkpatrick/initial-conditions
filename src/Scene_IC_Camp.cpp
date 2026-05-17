@@ -20,6 +20,11 @@ static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matr
     return sf::Glsl::Mat3(flattened);
 }
 
+static sf::Vector3f forwardFromTransform(const CTransform3D& transform)
+{
+    return Camera::cameraToWorld(sf::Vector3f(0.f, 0.f, -1.f), transform.pitch, transform.yaw, transform.roll);
+}
+
 Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     : Scene(game)
     , m_levelPath(levelPath)
@@ -45,6 +50,10 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnCamera();
     spawnPlayer();
     spawnDebugOrbs(1000);
+
+    // Sync legacy tuple components into SoA before any code reads from the new storage.
+    m_entityManager.update();
+
     Topography::setWarpParameters(m_warpScale, m_warpStrength);
     m_topdownMaxHeight = computeSceneMaxHeight();
     buildHud();
@@ -56,11 +65,11 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 
 void Scene_IC_Camp::updateCamera(float dt) 
 {
-    auto& camTransform = m_camera->get<CTransform3D>();
-    auto& playerTransform = m_player->get<CTransform3D>();
-    auto& playerPhysics = m_player->get<CPhysics>();
-    auto& playerBob = m_player->get<CBob>();
-    auto& cameraData = m_camera->get<CCamera>();
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& playerTransform = m_entityManager.getTransform(m_player);
+    auto& playerPhysics = m_entityManager.getPhysics(m_player);
+    auto& playerBob = m_entityManager.getBob(m_player);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
 
     // Smooth crouch transition
     float targetCrouch = playerPhysics.isCrouching ? 1.0f : 0.0f;
@@ -72,7 +81,9 @@ void Scene_IC_Camp::updateCamera(float dt)
 
     sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
 
-    sf::Vector3f forward = Camera::getForwardXZ(m_player);
+    sf::Vector3f forward = forwardFromTransform(playerTransform);
+    forward.y = 0.f;
+    forward = Camera::normalize(forward);
     sf::Vector3f right(forward.z, 0.f, -forward.x);
 
     float horizontalSpeed = std::sqrt(
@@ -146,8 +157,11 @@ void Scene_IC_Camp::updateHUDData()
     // Use a constant for clarity
     const float RAD_TO_DEG = 180.0f / 3.14159265f;
 
-    sf::Vector3f currentLocation = m_player->get<CTransform3D>().pos;
-    sf::Vector3f forward = Camera::getForwardXZ(m_player);
+    auto& playerTransform = m_entityManager.getTransform(m_player);
+    sf::Vector3f currentLocation = playerTransform.pos;
+    sf::Vector3f forward = forwardFromTransform(playerTransform);
+    forward.y = 0.f;
+    forward = Camera::normalize(forward);
 
     float currentHeading = -std::atan2(forward.x, forward.z) * RAD_TO_DEG;
 
@@ -237,19 +251,19 @@ void Scene_IC_Camp::spawnPlayer()
 {
     m_player = m_entityManager.addEntity("player");
     
-    m_player->add<CPlayer>();
-    m_player->add<CTransform3D>(
+    m_entityManager.addPlayer(m_player, CPlayer());
+    m_entityManager.addTransform(m_player, CTransform3D(
         sf::Vector3f(m_playerConfig.POSITION_X, 
                      Scene_IC_Camp::heightAt(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z), 
                      m_playerConfig.POSITION_Z)
-    );
+        ));
     
-    m_player->add<CInput>();
-    m_player->add<CPhysics>();
-    m_player->add<CBob>(1.0f, 6.0f, 5.5f);   // rate, vertical mag, lateral mag
+    m_entityManager.addInput(m_player, CInput());
+    m_entityManager.addPhysics(m_player, CPhysics());
+    m_entityManager.addBob(m_player, CBob(1.0f, 6.0f, 5.5f));   // rate, vertical mag, lateral mag
 
     // Optional: set initial values
-    auto& phys = m_player->get<CPhysics>();
+    auto& phys = m_entityManager.getPhysics(m_player);
     phys.onGround = true;
 }
 
@@ -258,12 +272,12 @@ void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float r
     auto orb = m_entityManager.addEntity("orb");
     sf::Vector2f worldPos = hexToWorld(hexQ, hexR);
     
-    orb->add<CTransform3D>(
+    m_entityManager.addTransform(orb, CTransform3D(
         sf::Vector3f(worldPos.x, heightAt(worldPos.x, worldPos.y) + 100.0f, worldPos.y)
-    );
+        ));
     
-    orb->add<COrb>(color, radius, 100.0f);
-    orb->add<CBob>(bobRate, bobMagnitude, 0.0f);   // orbs only bob vertically
+    m_entityManager.addOrb(orb, COrb(color, radius, 100.0f));
+    m_entityManager.addBob(orb, CBob(bobRate, bobMagnitude, 0.0f));   // orbs only bob vertically
 }
 
 void Scene_IC_Camp::spawnDebugOrbs(int count)
@@ -299,8 +313,8 @@ void Scene_IC_Camp::updateShadowOrbs()
 {
     m_shadowOrbList.clear();
 
-    auto& transform  = m_camera->get<CTransform3D>();
-    auto& cameraData = m_camera->get<CCamera>();
+    auto& transform  = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
 
     constexpr int   MAX_SHADOW_ORBS    = 24;
     constexpr float SHADOW_CUTOFF_DIST = 5000.0f; // 50 metres in cm
@@ -316,11 +330,11 @@ void Scene_IC_Camp::updateShadowOrbs()
 
     for (auto orb : m_entityManager.getEntities("orb"))
     {
-        if (!orb->has<COrb>() || !orb->has<CTransform3D>() || !orb->has<CBob>()) continue;
+        if (!m_entityManager.hasOrb(orb) || !m_entityManager.hasTransform(orb) || !m_entityManager.hasBob(orb)) continue;
 
-        auto& orbTransform = orb->get<CTransform3D>();
-        auto& orbData      = orb->get<COrb>();
-        auto& orbBob       = orb->get<CBob>();
+        auto& orbTransform = m_entityManager.getTransform(orb);
+        auto& orbData      = m_entityManager.getOrb(orb);
+        auto& orbBob       = m_entityManager.getBob(orb);
 
         float currentPhase = std::fmod(orbBob.accumulator, 1.0f);
         float bobOffset = std::sin(currentPhase * 6.2831853f) * orbBob.magnitude;
@@ -374,25 +388,25 @@ void Scene_IC_Camp::uploadShadowOrbsToShader(sf::Shader& shader)
 void Scene_IC_Camp::spawnCamera()
 {
     m_camera = m_entityManager.addEntity("camera");
-    m_camera->add<CCamera>(
+    m_entityManager.addCamera(m_camera, CCamera(
         m_cameraConfig.FOVY,
         float(m_cameraConfig.VIEWPORT_WIDTH)/m_cameraConfig.VIEWPORT_HEIGHT,
         m_cameraConfig.NEAR_PLANE,
         m_cameraConfig.FAR_PLANE,
         sf::Vector2u(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT)
-    );
-    m_camera->add<CTransform3D>(
+        ));
+    m_entityManager.addTransform(m_camera, CTransform3D(
         sf::Vector3f(m_cameraConfig.POSITION_X, m_cameraConfig.POSITION_Y, m_cameraConfig.POSITION_Z),
         sf::Vector3f(0.f, 0.f, 0.f),
         sf::Vector3f(1.f, 1.f, 1.f),
         m_cameraConfig.PITCH,
         m_cameraConfig.YAW,
         m_cameraConfig.ROLL
-    );
+    ));
 }
 
 void Scene_IC_Camp::onEnter() {
-    m_player->get<CInput>().mouseDelta = {0.f, 0.f};
+    m_entityManager.getInput(m_player).mouseDelta = {0.f, 0.f};
     sf::Vector2u size = m_game.window().getSize();
     sf::Mouse::setPosition(
         sf::Vector2i(size.x / 2, size.y / 2), 
@@ -452,7 +466,7 @@ void Scene_IC_Camp::update() {
 }
 
 void Scene_IC_Camp::sDoAction(const Action& action) {
-    auto& input = m_player->get<CInput>();
+    auto& input = m_entityManager.getInput(m_player);
 
     if (action.type() == "ANALOG") {
         if (action.name() == InputAction::CameraYawRight) {
@@ -480,7 +494,7 @@ void Scene_IC_Camp::sDoAction(const Action& action) {
                 captureBake();
             }
             sf::Vector2u size = m_game.window().getSize();
-            m_player->get<CInput>().mouseDelta = {0.f, 0.f};
+            m_entityManager.getInput(m_player).mouseDelta = {0.f, 0.f};
             sf::Mouse::setPosition(
                 sf::Vector2i(size.x / 2, size.y / 2), 
                 m_game.window()
@@ -525,52 +539,55 @@ void Scene_IC_Camp::sMovement(float dt)
 {
     for (auto e : m_entityManager.getEntities())
     {
-        if (!e->has<CTransform3D>()) continue;
-        auto& t = e->get<CTransform3D>();
+        if (!m_entityManager.hasTransform(e)) continue;
+        auto& t = m_entityManager.getTransform(e);
 
         // 1. Player-specific input handling
-        if (e->tag() == "player")
+        if (m_entityManager.getTag(e) == "player")
         {
             handlePlayerMovement(e, dt);
         }
 
-        // 2. Physics integration
-        if (e->has<CPhysics>())
+        // Kinematic movement for entities without physics (orbs, etc.)
+        if (!m_entityManager.hasPhysics(e))
         {
-            auto& p = e->get<CPhysics>();
-
-            // Gravity
-            if (!p.onGround)
-                t.velocity.y -= p.gravity * dt;
-
-            t.pos += t.velocity * dt;
-
-            // Friction
-            float friction = p.onGround ? p.groundFriction : p.airFriction;
-            t.velocity.x *= std::max(0.0f, 1.0f - friction * dt);
-            t.velocity.z *= std::max(0.0f, 1.0f - friction * dt);
-        }
-        else
-        {
-            // Kinematic movement (orbs, etc.)
             t.pos += t.velocity * dt;
         }
+
+        // Note: physics integration moved to SoA-accelerated loop below
 
         // 3. Ground resolution + special cases
         resolveEntityPosition(e, dt);
     }
+
+    // SoA-accelerated physics integration for entities with CPhysics
+    m_entityManager.forEachPhysics([this, dt](SoAEntityHandle e, CPhysics& p){
+        if (!m_entityManager.hasTransform(e)) return;
+        auto& t = m_entityManager.getTransform(e);
+
+        // Gravity
+        if (!p.onGround)
+            t.velocity.y -= p.gravity * dt;
+
+        t.pos += t.velocity * dt;
+
+        // Friction
+        float friction = p.onGround ? p.groundFriction : p.airFriction;
+        t.velocity.x *= std::max(0.0f, 1.0f - friction * dt);
+        t.velocity.z *= std::max(0.0f, 1.0f - friction * dt);
+    });
 }
 
-void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
+void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 {
-    if (!e->has<CTransform3D>() || !e->has<CInput>() || 
-        !e->has<CPhysics>() || !e->has<CBob>()) 
+    if (!m_entityManager.hasTransform(e) || !m_entityManager.hasInput(e) ||
+        !m_entityManager.hasPhysics(e) || !m_entityManager.hasBob(e))
         return;
 
-    auto& t       = e->get<CTransform3D>();
-    auto& input   = e->get<CInput>();
-    auto& phys    = e->get<CPhysics>();
-    auto& bob     = e->get<CBob>();
+    auto& t       = m_entityManager.getTransform(e);
+    auto& input   = m_entityManager.getInput(e);
+    auto& phys    = m_entityManager.getPhysics(e);
+    auto& bob     = m_entityManager.getBob(e);
 
     // Locomotion state
     phys.isCrouching = input.crouch;
@@ -581,7 +598,10 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
     else if (phys.isCrouching)   moveSpeed *= 0.6f;
 
     float sampleDist = 10.0f; // cm — tune to your terrain scale
-    sf::Vector3f fwd = Camera::getForwardXZ(e); // already normalised XZ
+    auto& playerTransform = m_entityManager.getTransform(e);
+    sf::Vector3f fwd = forwardFromTransform(playerTransform);
+    fwd.y = 0.f;
+    fwd = Camera::normalize(fwd); // already normalised XZ
 
     float hAhead  = heightAt(t.pos.x + fwd.x * sampleDist, t.pos.z + fwd.z * sampleDist);
     float hBehind = heightAt(t.pos.x - fwd.x * sampleDist, t.pos.z - fwd.z * sampleDist);
@@ -609,8 +629,10 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
     moveSpeed *= slopeScale;
 
     // === Rotation ===
-    t.yaw   -= input.mouseDelta.x * 0.002f;
-    t.pitch -= input.mouseDelta.y * 0.002f;
+    // Apply mouse look: invert signs so moving mouse right increases yaw and
+    // moving mouse up increases pitch (match user expectations / conventions)
+    t.yaw   += input.mouseDelta.x * 0.002f;
+    t.pitch += input.mouseDelta.y * 0.002f;
     input.mouseDelta = { 0.f, 0.f };
 
     if (input.strafe)
@@ -622,7 +644,9 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
     t.pitch = std::clamp(t.pitch, -1.57f, 1.57f);
 
     // === Movement Direction ===
-    sf::Vector3f forward = Camera::getForwardXZ(e);
+    sf::Vector3f forward = forwardFromTransform(t);
+    forward.y = 0.f;
+    forward = Camera::normalize(forward);
     sf::Vector3f right   = {-forward.z, 0.0f, forward.x};
 
     sf::Vector3f moveDir(0.f, 0.f, 0.f);
@@ -673,7 +697,7 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
     updateBob(e, dt, horizSpeed);   // uses complex player path
 
     // Footsteps
-    auto& bobComp = e->get<CBob>();
+    auto& bobComp = m_entityManager.getBob(e);
     if (horizSpeed > 1.0f && phys.onGround)
     {
         float currentPhase = bobComp.accumulator;
@@ -710,15 +734,15 @@ void Scene_IC_Camp::handlePlayerMovement(std::shared_ptr<Entity> e, float dt)
 }
 
 // Unified bob update for any entity with CBob
-void Scene_IC_Camp::updateBob(std::shared_ptr<Entity> e, float dt, float horizSpeed=0.0f)
+void Scene_IC_Camp::updateBob(SoAEntityHandle e, float dt, float horizSpeed=0.0f)
 {
-    if (!e->has<CBob>() || !e->has<CTransform3D>()) 
+    if (!m_entityManager.hasBob(e) || !m_entityManager.hasTransform(e))
         return;
 
-    auto& bob = e->get<CBob>();
-    auto& t   = e->get<CTransform3D>();
+    auto& bob = m_entityManager.getBob(e);
+    auto& t   = m_entityManager.getTransform(e);
 
-    bool isPlayer = e->tag() == "player";
+    bool isPlayer = m_entityManager.getTag(e) == "player";
 
     if (isPlayer)
     {
@@ -726,7 +750,7 @@ void Scene_IC_Camp::updateBob(std::shared_ptr<Entity> e, float dt, float horizSp
         float speedFraction = std::clamp(horizSpeed / m_playerConfig.MOVE_SPEED, 0.0f, 3.0f);
         float baseRate = 0.020f * std::sqrt(speedFraction);
 
-        auto& phys = e->get<CPhysics>();
+        auto& phys = m_entityManager.getPhysics(e);
         if (phys.isCrouching)
             baseRate *= 0.625f;
 
@@ -739,16 +763,15 @@ void Scene_IC_Camp::updateBob(std::shared_ptr<Entity> e, float dt, float horizSp
     }
 }
 
-void Scene_IC_Camp::updateOrbBobbing(std::shared_ptr<Entity> e, float dt)
+void Scene_IC_Camp::updateOrbBobbing(SoAEntityHandle e, float dt)
 {
-    if (e->tag() != "orb") return;
-
-    auto& t = e->get<CTransform3D>();
-    auto& orb = e->get<COrb>();
+    if (m_entityManager.getTag(e) != "orb") return;
+    auto& t = m_entityManager.getTransform(e);
+    auto& orb = m_entityManager.getOrb(e);
 
     updateBob(e, dt);  // uses simple path
 
-    auto& bob = e->get<CBob>();
+    auto& bob = m_entityManager.getBob(e);
     float bobOffset = std::sin(bob.accumulator * 6.2831853f) * bob.magnitude;
 
     float groundY = heightAt(t.pos.x, t.pos.z);
@@ -757,12 +780,12 @@ void Scene_IC_Camp::updateOrbBobbing(std::shared_ptr<Entity> e, float dt)
     t.velocity.y = 0.0f;
 }
 
-void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
+void Scene_IC_Camp::resolveEntityPosition(SoAEntityHandle e, float dt)
 {
-    if (!e->has<CTransform3D>()) return;
-    auto& t = e->get<CTransform3D>();
+    if (!m_entityManager.hasTransform(e)) return;
+    auto& t = m_entityManager.getTransform(e);
 
-    if (e->tag() == "orb")
+    if (m_entityManager.getTag(e) == "orb")
     {
         updateOrbBobbing(e, dt);
         return;
@@ -771,9 +794,9 @@ void Scene_IC_Camp::resolveEntityPosition(std::shared_ptr<Entity> e, float dt)
     // Player / other physics entities
     float groundY = heightAt(t.pos.x, t.pos.z);
 
-    if (e->has<CPhysics>())
+    if (m_entityManager.hasPhysics(e))
     {
-        auto& p = e->get<CPhysics>();
+        auto& p = m_entityManager.getPhysics(e);
 
         const float groundSkin = 10.f;
 
@@ -858,7 +881,7 @@ sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
 
 void Scene_IC_Camp::sRender() {
     auto& window = m_game.window();
-    auto& transform = m_camera->get<CTransform3D>();
+    auto& transform = m_entityManager.getTransform(m_camera);
     auto inverseRotationMatrix = toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll));
     window.clear(sf::Color::Transparent);
     runTopDownPass();
@@ -908,7 +931,7 @@ void Scene_IC_Camp::sGUI()
             sf::Vector3f worldPos = screenToWorld(mousePos);
             sf::Vector2i hexCoords = worldToHex(worldPos.x, worldPos.z);
 
-            auto& playerTransform = m_player->get<CTransform3D>();
+            auto& playerTransform = m_entityManager.getTransform(m_player);
             sf::Vector3f rel = worldPos - playerTransform.pos;
             float dist = std::sqrt(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
 
@@ -917,9 +940,9 @@ void Scene_IC_Camp::sGUI()
             ImGui::Text("Hex coords: (%d, %d)", hexCoords.x, hexCoords.y);
             ImGui::Text("Distance: %.1f", dist);
             ImGui::Text("Camera Forward: (%.2f, %.2f, %.2f)", 
-                Camera::getForward(m_camera).x, 
-                Camera::getForward(m_camera).y, 
-                Camera::getForward(m_camera).z);
+                forwardFromTransform(m_entityManager.getTransform(m_camera)).x, 
+                forwardFromTransform(m_entityManager.getTransform(m_camera)).y, 
+                forwardFromTransform(m_entityManager.getTransform(m_camera)).z);
 
             ImGui::EndTabItem();
         }
@@ -973,15 +996,15 @@ void Scene_IC_Camp::sGUI()
                 }
                 ImGui::EndCombo();
             }
-            std::vector<std::shared_ptr<Entity>> entities;
-            if (tags[currentTagIndex] == "ALL") entities = m_entities.getEntities();
-            else entities = m_entities.getEntities(tags[currentTagIndex]);
+            std::vector<SoAEntityHandle> entities;
+            if (tags[currentTagIndex] == "ALL") entities = m_entityManager.getEntities();
+            else entities = m_entityManager.getEntities(tags[currentTagIndex]);
             if (!entities.empty())
             {
                 std::vector<std::string> entityLabels;
                 for (auto e : entities)
                 {
-                    entityLabels.push_back(e->tag() + " " + std::to_string(e->id()) + " " + std::to_string(int(1)) + "," + std::to_string(int(0)));
+                    entityLabels.push_back(m_entityManager.getTag(e) + " " + std::to_string(int(e.index)) + " " + std::to_string(int(1)) + "," + std::to_string(int(0)));
                 }
                 const char* currentEntity = entityLabels[currentEntityIndex].c_str();
                 if (ImGui::BeginCombo("Entities", currentEntity))
@@ -999,14 +1022,14 @@ void Scene_IC_Camp::sGUI()
                 if (!entities.empty())
                 {
                     auto entity = entities[currentEntityIndex];
-                    ImGui::Text("ID: %d", int(entity->id()));
-                    ImGui::Text("Tag: %s", entity->tag().c_str());
+                    ImGui::Text("ID: %d", int(entity.index));
+                    ImGui::Text("Tag: %s", m_entityManager.getTag(entity).c_str());
                     ImGui::Button("Destroy Entity");
                     if (ImGui::IsItemClicked())
                     {
-                        if (entity->tag() != "player")
+                        if (m_entityManager.getTag(entity) != "player")
                         {
-                            entity->destroy();
+                            m_entityManager.destroyEntity(entity);
                             currentEntityIndex = 0;
                         }
                     }
@@ -1085,8 +1108,8 @@ void Scene_IC_Camp::uploadWarpParametersToShader(sf::Shader& shader) const {
 // This is the heart of the rendering system: it runs a fullscreen shader that raymarches the terrain to produce a depth value for each pixel, 
 // which is stored in m_bakeTexture.  This is then sampled in the final pass to composite the terrain with the sky and orbs.
 void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
-    auto& transform = m_camera->get<CTransform3D>();
-    auto& cameraData = m_camera->get<CCamera>();
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u bakeSize = m_bakeTexture.getSize();
 
     // Compute which layers are close enough to affect raymarching
@@ -1120,8 +1143,8 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
 // It operates in a similar fashion to the bake shader, but reserves the red channel to encode the number of
 // steps taken instead of providing 24 bit precision for depth.
 void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
-    auto& transform = m_camera->get<CTransform3D>();
-    auto& cameraData = m_camera->get<CCamera>();
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u outputSize = m_renderTexture.getSize();
 
     m_depthStepShader.setUniform("viewportSize",  sf::Glsl::Vec2(outputSize.x, outputSize.y));
@@ -1156,8 +1179,8 @@ void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix
 // shader can sample this instead of expensive raymarching steps until the ray is close enough to the ground
 // to warrant the full reaymarching.
 void Scene_IC_Camp::runTopDownPass() {
-    auto& transform = m_camera->get<CTransform3D>();
-    auto& cameraData = m_camera->get<CCamera>();
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u texSize = m_topdownTexture.getSize();
     sf::Vector2u winSize = m_game.window().getSize();
     m_topdownMaxHeight = computeSceneMaxHeight();
@@ -1212,8 +1235,8 @@ void Scene_IC_Camp::runTopDownPass() {
 
 // This pass uses the baked depthmap alone to produce a final shaded image.
 void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
-    auto& transform = m_camera->get<CTransform3D>();
-    auto& cameraData = m_camera->get<CCamera>();
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u winSize = m_game.window().getSize();
     sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
     sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
@@ -1253,10 +1276,11 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
 
 // Draws the sky background.
 void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& rotationMatrix) {
+    auto& cameraData = m_entityManager.getCamera(m_camera);
     m_sky.setUniform("viewportSize",  sf::Glsl::Vec2(m_game.window().getSize().x, m_game.window().getSize().y));
-    m_sky.setUniform("fovY",          m_camera->get<CCamera>().fovY);
-    m_sky.setUniform("aspectRatio",   m_camera->get<CCamera>().aspectRatio);
-    auto transform = m_camera->get<CTransform3D>();
+    m_sky.setUniform("fovY",          cameraData.fovY);
+    m_sky.setUniform("aspectRatio",   cameraData.aspectRatio);
+    auto transform = m_entityManager.getTransform(m_camera);
     m_sky.setUniform("invRotationMatrix", rotationMatrix);
     m_sky.setUniform("sunDir", m_sunDirection);
     m_renderTexture.clear(sf::Color::Transparent);
@@ -1294,14 +1318,14 @@ void Scene_IC_Camp::renderTopDownViewer(sf::RenderWindow& window) {
 
 void Scene_IC_Camp::renderOrbs() {
     auto& window = m_game.window();
-    auto& transform = m_camera->get<CTransform3D>();
-    auto& cameraData = m_camera->get<CCamera>();
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
     const sf::Vector2u windowSize = m_bakeTexture.getSize();
     window.setView(window.getView());
 
     struct OrbDrawItem
     {
-        std::shared_ptr<Entity> entity;
+        SoAEntityHandle entity;
         sf::Vector2f screenPos;
         sf::Vector3f cameraSpacePos;
         float radiusPx;
@@ -1313,15 +1337,15 @@ void Scene_IC_Camp::renderOrbs() {
     orbDrawItems.reserve(m_entityManager.getEntities("orb").size());
 
     for (auto orb : m_entityManager.getEntities("orb")) {
-        if (!orb->has<COrb>() || !orb->has<CTransform3D>()) {
+        if (!m_entityManager.hasOrb(orb) || !m_entityManager.hasTransform(orb)) {
             continue;
         }
 
-        auto& orbTransform = orb->get<CTransform3D>();
-        auto& orbData = orb->get<COrb>();
+        auto& orbTransform = m_entityManager.getTransform(orb);
+        auto& orbData = m_entityManager.getOrb(orb);
 
         sf::Vector2f screenPos;
-        if (!Camera::worldToScreen(m_camera, orbTransform.pos, screenPos)) {
+        if (!Camera::worldToScreen(transform, cameraData, orbTransform.pos, screenPos)) {
             continue;
         }
 
@@ -1351,7 +1375,7 @@ void Scene_IC_Camp::renderOrbs() {
     });
 
     auto drawOrbBillboard = [&](const OrbDrawItem& item) {
-        auto& orbData = item.entity->get<COrb>();
+        auto& orbData = m_entityManager.getOrb(item.entity);
 
         const float radiusPx = item.radiusPx;
         const float diameterPx = radiusPx * 2.0f;
@@ -1428,7 +1452,7 @@ void Scene_IC_Camp::updateMinimapTexture()
         m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
     }
 
-    const sf::Vector3f playerPos = m_player->get<CTransform3D>().pos;
+    const sf::Vector3f playerPos = m_entityManager.getTransform(m_player).pos;
     const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
     const float center   = texSize * 0.5f;
     const float worldRadius = 25600.f;
@@ -1552,7 +1576,7 @@ sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
         return { 0.f, 0.f, 0.f };
     }
 
-    auto& cam = m_camera->get<CTransform3D>();
+    auto& cam = m_entityManager.getTransform(m_camera);
     auto& camConfig = m_cameraConfig;
 
     if (position.x < 0 || position.y < 0 ||

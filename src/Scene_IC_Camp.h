@@ -2,6 +2,7 @@
 #include "Scene.h"
 #include "HUD.h"
 #include "Topography.hpp"
+#include "SoAEntityManager.hpp"
 #include <SFML/System.hpp>
 
 class Scene_IC_Camp : public Scene {
@@ -33,8 +34,8 @@ class Scene_IC_Camp : public Scene {
     
 protected:
     std::string m_levelPath;
-    std::shared_ptr<Entity> m_camera;
-    std::shared_ptr<Entity> m_player;
+    SoAEntityHandle m_camera;
+    SoAEntityHandle m_player;
     CameraConfig m_cameraConfig;
     PlayerConfig m_playerConfig;
     std::unique_ptr<HUD>    m_hud;
@@ -54,8 +55,8 @@ protected:
     float m_lastStepPhase = 0.0f;
 
     sf::Vector2f m_homeLocationXZ{0.f, 0.f};
-    void resolveEntityPosition(std::shared_ptr<Entity> e, float dt);
-    void handlePlayerMovement(std::shared_ptr<Entity> player, float dt);
+    void resolveEntityPosition(SoAEntityHandle e, float dt);
+    void handlePlayerMovement(SoAEntityHandle player, float dt);
 
     // Shaders and render textures
     sf::Shader& m_bakeShader = Assets::Instance().getShader("TopoBake");
@@ -86,7 +87,7 @@ protected:
     float m_crouchFactor = 0.0f;        // 0.0 = standing, 1.0 = fully crouched
 
     // Orb bobbing
-    void updateOrbBobbing(std::shared_ptr<Entity> e, float dt);
+    void updateOrbBobbing(SoAEntityHandle e, float dt);
 
     // FPS display
     sf::Clock m_fpsClock;
@@ -159,7 +160,7 @@ protected:
     bool shouldHeadlightsBeOn() const;
     HeadlightState m_headlightState = HeadlightState::Auto;
     void updateShadowOrbs();
-    void updateBob(std::shared_ptr<Entity> e, float dt, float horizSpeed /*= 0.0f*/);
+    void updateBob(SoAEntityHandle e, float dt, float horizSpeed /*= 0.0f*/);
 
     // Convenience wrappers around Topography namespace functions
     float heightAt(float x, float z) const {

@@ -2,7 +2,7 @@
 #include "Scene_IC_Camp.h"
 #include "Assets.h"
 #include "GameEngine.h"
-#include "Components.hpp"
+#include "ComponentTypes.hpp"
 #include "Action.hpp"
 #include "InputBindings.h"
 #include "Theme.h"

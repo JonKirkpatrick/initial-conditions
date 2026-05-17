@@ -1,6 +1,6 @@
 #pragma once
 #include "Assets.h"
-class Entity;
+#include "SoAEntityManager.hpp"
 
 struct SliderElements 
 {
@@ -29,8 +29,8 @@ struct ActionList
     std::string friendlyName;
     std::string realName;
     sf::Keyboard::Scancode actionCode;
-    std::shared_ptr<Entity> textAction;
-    std::shared_ptr<Entity> textKey;
+    SoAEntityHandle textAction;
+    SoAEntityHandle textKey;
     sf::IntRect boundingBox;
 };
 

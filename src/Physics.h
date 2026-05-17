@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Entity.hpp"
+// No Entity.hpp required; Physics operates on SoA components via EntityManager
 
 namespace Physics
 {    

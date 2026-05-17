@@ -4,6 +4,7 @@
 #include "Assets.h"
 #include "Animation.hpp"
 #include "Action.hpp"
+#include "Theme.h"
 
 HUD::HUD(const sf::Vector2u& windowSize)
 {
