@@ -31,6 +31,35 @@ class Scene_IC_Camp : public Scene {
         sf::Vector3f worldPos;
         float radius;
     };
+
+    struct OrbBatch
+    {
+        static constexpr int MAX_BATCH_SIZE = 64;
+
+        std::vector<sf::Vector3f> centersView;
+        std::vector<sf::Glsl::Vec4> colors;
+        std::vector<float> depthNorms;
+        std::vector<sf::Vector2f> quadOrigins;
+        std::vector<sf::Vector2f> texSizes;
+
+        void clear()
+        {
+            centersView.clear();
+            colors.clear();
+            depthNorms.clear();
+            quadOrigins.clear();
+            texSizes.clear();
+        }
+
+        void reserve(size_t n)
+        {
+            centersView.reserve(n);
+            colors.reserve(n);
+            depthNorms.reserve(n);
+            quadOrigins.reserve(n);
+            texSizes.reserve(n);
+        }
+    };
     
 protected:
     std::string m_levelPath;
@@ -155,6 +184,7 @@ protected:
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
     void uploadShadowOrbsToShader(sf::Shader& shader);
+    void uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch, const sf::Vector3f& sunDirView);
     void spawnDebugOrbs(int count);
     std::array<TerrainLayer, 16> m_terrainLayers{};
     bool shouldHeadlightsBeOn() const;

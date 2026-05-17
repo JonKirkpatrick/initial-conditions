@@ -189,7 +189,20 @@ public:
     COrb& getOrb(SoAEntityHandle h) { return m_compOrb.get(h); }
     void removeOrb(SoAEntityHandle h) { m_compOrb.remove(h); }
     template<typename F> void forEachOrb(F&& f) { m_compOrb.each([this,&f](uint32_t entIndex, COrb& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
-
+    // In EntityManager.hpp
+    template<typename F>
+    void forEachOrbWithTransform(F&& func)
+    {
+        m_compOrb.each([&](uint32_t entIndex, COrb& orbData)
+        {
+            SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex);
+            if (m_compTransform.has(h))
+            {
+                CTransform3D& transform = m_compTransform.get(h);
+                func(h, transform, orbData);
+            }
+        });
+    }
     const EntityVec& getEntities() const { return m_activeEntities; }
     const EntityVec& getEntities(const std::string& tag) const { return m_entitiesByTag.at(tag); }
     const EntityMap& getEntityMap() const { return m_entitiesByTag; }

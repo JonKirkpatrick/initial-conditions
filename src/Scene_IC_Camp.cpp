@@ -49,7 +49,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnCamera();
     spawnPlayer();
-    spawnDebugOrbs(1000);
+    spawnDebugOrbs(8000);
 
     // Sync legacy tuple components into SoA before any code reads from the new storage.
     m_entityManager.update();
@@ -1316,108 +1316,143 @@ void Scene_IC_Camp::renderTopDownViewer(sf::RenderWindow& window) {
         window.draw(viewer);
 }
 
-void Scene_IC_Camp::renderOrbs() {
+// Helper to upload one batch to the shader
+void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch,
+                                           const sf::Vector3f& sunDirView)
+{
+    int size = static_cast<int>(batch.centersView.size());
+    shader.setUniform("u_batchSize", size);
+
+    if (size > 0)
+    {
+        shader.setUniformArray("u_orbCenterView", batch.centersView.data(), size);
+        shader.setUniformArray("u_orbColor",      batch.colors.data(), size);
+        shader.setUniformArray("u_orbDepthNorm",  batch.depthNorms.data(), size);
+        shader.setUniformArray("u_quadOrigin",    batch.quadOrigins.data(), size);
+        shader.setUniformArray("u_texSize",       batch.texSizes.data(), size);
+    }
+
+    shader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
+    shader.setUniform("sunColor", m_sunColor);
+    shader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
+    shader.setUniform("u_viewportSize", sf::Glsl::Vec2(
+        static_cast<float>(m_bakeTexture.getSize().x),
+        static_cast<float>(m_bakeTexture.getSize().y)));
+
+    shader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+    shader.setUniform("headlampIntensity", 5.5f);
+    shader.setUniform("headlampRange", 8500.0f);
+    shader.setUniform("headlampConeCos", 0.920504853f);
+}
+
+void Scene_IC_Camp::renderOrbs()
+{
     auto& window = m_game.window();
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    const sf::Vector2u windowSize = m_bakeTexture.getSize();
-    window.setView(window.getView());
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& camData = m_entityManager.getCamera(m_camera);
+    const sf::Vector2u winSize = m_bakeTexture.getSize();
 
     struct OrbDrawItem
     {
-        SoAEntityHandle entity;
         sf::Vector2f screenPos;
         sf::Vector3f cameraSpacePos;
         float radiusPx;
         float depthSort;
         float depthNorm;
+        sf::Color color;
     };
 
     std::vector<OrbDrawItem> orbDrawItems;
-    orbDrawItems.reserve(m_entityManager.getEntities("orb").size());
+    orbDrawItems.reserve(8192);
 
-    for (auto orb : m_entityManager.getEntities("orb")) {
-        if (!m_entityManager.hasOrb(orb) || !m_entityManager.hasTransform(orb)) {
-            continue;
-        }
+    const float focalLengthPx = (static_cast<float>(winSize.y) * 0.5f) /
+                                std::tan(camData.fovY * 0.5f);
 
-        auto& orbTransform = m_entityManager.getTransform(orb);
-        auto& orbData = m_entityManager.getOrb(orb);
-
+    // Fast SoA iteration
+    m_entityManager.forEachOrbWithTransform([&](SoAEntityHandle, CTransform3D& orbTransform, COrb& orbData)
+    {
         sf::Vector2f screenPos;
-        if (!Camera::worldToScreen(transform, cameraData, orbTransform.pos, screenPos)) {
-            continue;
-        }
+        if (!Camera::worldToScreen(camTransform, camData, orbTransform.pos, screenPos))
+            return;
 
-        sf::Vector3f relative = orbTransform.pos - transform.pos;
-        sf::Vector3f cameraSpace = Camera::worldToCamera(relative, transform.pitch, transform.yaw, transform.roll);
-        if (cameraSpace.z >= -cameraData.nearPlane) {
-            continue;
-        }
+        sf::Vector3f relative = orbTransform.pos - camTransform.pos;
+        sf::Vector3f cameraSpace = Camera::worldToCamera(
+            relative, camTransform.pitch, camTransform.yaw, camTransform.roll);
+
+        if (cameraSpace.z >= -camData.nearPlane) return;
 
         float depth = std::abs(cameraSpace.z);
-        if (depth <= 0.0001f) {
-            continue;
-        }
+        if (depth <= 0.0001f) return;
 
-        float focalLengthPx = (float(windowSize.y) * 0.5f) / std::tan(cameraData.fovY * 0.5f);
         float radiusPx = orbData.radius * focalLengthPx / depth;
-        if (radiusPx <= 0.5f) {
-            continue;
-        }
+        if (radiusPx <= 0.5f) return;
 
-        float depthNorm = std::clamp((depth - cameraData.nearPlane) / (cameraData.farPlane - cameraData.nearPlane), 0.0f, 1.0f);
-        orbDrawItems.push_back({orb, screenPos, cameraSpace, radiusPx, depth, depthNorm});
-    }
+        float depthNorm = std::clamp(
+            (depth - camData.nearPlane) / (camData.farPlane - camData.nearPlane), 0.0f, 1.0f);
 
-    std::sort(orbDrawItems.begin(), orbDrawItems.end(), [](const OrbDrawItem& a, const OrbDrawItem& b) {
-        return a.depthSort > b.depthSort;
+        orbDrawItems.push_back({screenPos, cameraSpace, radiusPx, depth, depthNorm, orbData.color});
     });
 
-    auto drawOrbBillboard = [&](const OrbDrawItem& item) {
-        auto& orbData = m_entityManager.getOrb(item.entity);
+    if (orbDrawItems.empty()) return;
 
-        const float radiusPx = item.radiusPx;
-        const float diameterPx = radiusPx * 2.0f;
-        const sf::Vector2f quadOrigin(item.screenPos.x - radiusPx, item.screenPos.y - radiusPx);
-        const sf::Vector2f quadSize(diameterPx, diameterPx);
+    std::sort(orbDrawItems.begin(), orbDrawItems.end(),
+        [](const OrbDrawItem& a, const OrbDrawItem& b) { return a.depthSort > b.depthSort; });
 
-        sf::Vector3f sunDirView = Camera::worldToCamera(
-            sf::Vector3f(m_sunDirection.x, m_sunDirection.y, m_sunDirection.z),
-            transform.pitch,
-            transform.yaw,
-            transform.roll
-        );
+    sf::Vector3f sunDirView = Camera::worldToCamera(
+        m_sunDirection, camTransform.pitch, camTransform.yaw, camTransform.roll);
 
-        sf::RectangleShape billboard(quadSize);
-        billboard.setPosition(quadOrigin);
-        billboard.setFillColor(sf::Color::White);
+    constexpr int BATCH_SIZE = 64;
+    OrbBatch batch;
+    batch.reserve(BATCH_SIZE);
 
-        sf::RenderStates states;
-        states.shader = &m_orbShader;
-        m_orbShader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
-        m_orbShader.setUniform("sunColor", m_sunColor);
-        m_orbShader.setUniform("orbColor", sf::Glsl::Vec4(
-            orbData.color.r / 255.0f,
-            orbData.color.g / 255.0f,
-            orbData.color.b / 255.0f,
-            orbData.color.a / 255.0f
-        ));
-        m_orbShader.setUniform("u_texSize", sf::Glsl::Vec2(diameterPx, diameterPx));
-        m_orbShader.setUniform("u_quadOrigin", sf::Glsl::Vec2(quadOrigin.x, quadOrigin.y));
-        m_orbShader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
-        m_orbShader.setUniform("u_viewportSize", sf::Glsl::Vec2(float(windowSize.x), float(windowSize.y)));
-        m_orbShader.setUniform("u_orbCenterView", sf::Glsl::Vec3(item.cameraSpacePos.x, item.cameraSpacePos.y, item.cameraSpacePos.z));
-        m_orbShader.setUniform("u_orbDepthNorm", item.depthNorm);
-        m_orbShader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-        m_orbShader.setUniform("headlampIntensity", 5.5f);
-        m_orbShader.setUniform("headlampRange", 8500.0f);
-        m_orbShader.setUniform("headlampConeCos", 0.920504853f);
-        window.draw(billboard, states);
-    };
+    sf::VertexArray vertices(sf::PrimitiveType::Triangles, 0);  // We'll append manually
 
-    for (const auto& orbItem : orbDrawItems) {
-        drawOrbBillboard(orbItem);
+    for (size_t i = 0; i < orbDrawItems.size(); ++i)
+    {
+        const auto& item = orbDrawItems[i];
+        const float r = item.radiusPx;
+        const sf::Vector2f origin(item.screenPos.x - r, item.screenPos.y - r);
+        const sf::Vector2f size(r * 2.f, r * 2.f);
+
+        // Encode orb index in red channel (0-63)
+        uint8_t idx = static_cast<uint8_t>(batch.centersView.size());
+        sf::Color indexColor(idx, 0, 0, 255);
+
+        // Two triangles per quad
+        sf::Vertex v1(origin, indexColor);
+        sf::Vertex v2({origin.x + size.x, origin.y}, indexColor);
+        sf::Vertex v3({origin.x + size.x, origin.y + size.y}, indexColor);
+        sf::Vertex v4({origin.x, origin.y + size.y}, indexColor);
+
+        vertices.append(v1);
+        vertices.append(v2);
+        vertices.append(v3);
+
+        vertices.append(v1);
+        vertices.append(v3);
+        vertices.append(v4);
+
+        // Batch data
+        batch.centersView.push_back(item.cameraSpacePos);
+        batch.colors.emplace_back(
+            item.color.r / 255.f, item.color.g / 255.f,
+            item.color.b / 255.f, item.color.a / 255.f);
+        batch.depthNorms.push_back(item.depthNorm);
+        batch.quadOrigins.push_back(origin);
+        batch.texSizes.emplace_back(size);
+
+        // Flush when batch is full or at end
+        if (batch.centersView.size() == BATCH_SIZE || i == orbDrawItems.size() - 1)
+        {
+            uploadOrbBatchToShader(m_orbShader, batch, sunDirView);
+
+            sf::RenderStates states;
+            states.shader = &m_orbShader;
+            window.draw(vertices, states);
+
+            vertices.clear();
+            batch.clear();
+        }
     }
 }
 
