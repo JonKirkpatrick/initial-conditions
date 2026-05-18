@@ -142,13 +142,13 @@ protected:
     float m_stepCountNormalizationMax = 255.0f;
 
     // Debug-only threshold for heightmap-to-raymarching transition in the depth/step shader
-    float m_heightmapTransitionThreshold = 350.0f;
+    float m_heightmapTransitionThreshold = 350.0f; // 3.5m any lower and we tend to skip right over small terrain features, any higher and we stop benefiting from the heightmap cache.
     float m_warpScale = 0.00020f;
     float m_warpStrength = 2415.0f;
-    int m_stripeLayerIndex = -1;
 
     // Active layer bitmask for culling (bit i = layer i enabled)
     uint32_t m_activeLayerMask = 0xFFFF;
+    
     sf::Glsl::Vec3 colorToShader(const sf::Color& color);
     sf::Vector2i worldToHex(float x, float z) const;
     sf::Vector2f hexToWorld(int q, int r) const;

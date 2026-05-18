@@ -2,7 +2,6 @@
 #include <SFML/System.hpp>
 #include <cmath>
 #include "Assets.h"
-#include "Animation.hpp"
 #include "Action.hpp"
 #include "Theme.h"
 

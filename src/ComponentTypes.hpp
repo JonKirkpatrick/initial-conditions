@@ -1,12 +1,10 @@
 #pragma once
 
-#include "Animation.hpp"
 #include "Assets.h"
 #include "Theme.h"
 #include <array>
 #include <SFML/Graphics.hpp>
 
-// Core transform for all entities (POD-style)
 struct CTransform3D
 {
     sf::Vector3f pos      = { 0.0f, 0.0f, 0.0f };
@@ -26,7 +24,6 @@ struct CTransform3D
         : pos(p), velocity(vel), scale(sc), pitch(pPitch), yaw(pYaw), roll(pRoll) {}
 };
 
-// Physics + Locomotion state (POD)
 struct CPhysics
 {
     float gravity         = 981.0f;
@@ -45,7 +42,6 @@ struct CPhysics
     CPhysics() = default;
 };
 
-// Bobbing behavior (POD)
 struct CBob
 {
     float accumulator = 0.0f;   // phase [0, 1)
@@ -58,13 +54,11 @@ struct CBob
         : rate(r), magnitude(mag), lateralMag(lat) {}
 };
 
-// Player identity / player-only data (POD)
 struct CPlayer
 {
     CPlayer() = default;
 };
 
-// Camera (POD)
 struct CCamera
 {
     float fovY = 3.14159265f / 4.f;
@@ -78,7 +72,6 @@ struct CCamera
         : fovY(fovY), aspectRatio(aspectRatio), nearPlane(nearPlane), farPlane(farPlane), viewportSize(viewportSize) {}
 };
 
-// Input (only attached to player) (POD)
 struct CInput
 {
     bool forward  = false;
@@ -98,7 +91,6 @@ struct CInput
     CInput() = default;
 };
 
-// Orb (POD)
 struct COrb
 {
     sf::Color color = sf::Color::White;

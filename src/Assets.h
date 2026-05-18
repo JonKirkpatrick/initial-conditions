@@ -9,8 +9,6 @@
 #include <iostream>
 #include <fstream>
 
-class Animation;
-
 struct RowConfigData {
     bool advanceRow;
     size_t xOffset;
@@ -30,7 +28,6 @@ struct SpriteSheetDescriptor {
 class Assets
 {
     std::map<std::string, sf::Texture>      m_textureMap;
-    std::map<std::string, Animation>        m_animationMap;
     std::map<std::string, sf::Font>         m_fontMap;
     std::map<std::string, sf::SoundBuffer>  m_soundBufferMap;
     std::map<std::string, sf::Sound>        m_soundMap;
@@ -38,7 +35,6 @@ class Assets
     std::map<std::string, std::unique_ptr<sf::Shader>> m_shaderMap;
 
     void addTexture(const std::string& textureName, const std::string& path, bool smooth = false);
-    void addAnimation(const std::string& animationName, const std::string& textureName, size_t frameCount = 1, size_t speed = 0);
     void addFont(const std::string& fontName, const std::string& path);
     void addSound(const std::string& soundName, const std::string& path);
     void addMusic(const std::string& musicName, const std::string& path);
@@ -56,16 +52,12 @@ public:
     Assets& operator=(const Assets&) = delete;
 
     void loadFromFile(const std::string& path);
-    void buildAnimationsFromDescriptor(const SpriteSheetDescriptor& desc);
 
     const sf::Texture& getTexture(const std::string& textureName) const;
-    const Animation& getAnimation(const std::string& animationName) const;
     const sf::Font& getFont(const std::string& fontName) const;
     sf::Sound& getSound(const std::string& soundName);
     sf::Music& getMusic(const std::string& musicName);
     sf::Shader& getShader(const std::string& shaderName);
 
     const std::map<std::string, sf::Texture>& getTextures() const;
-    const std::map<std::string, Animation>& getAnimations() const;
-
 };

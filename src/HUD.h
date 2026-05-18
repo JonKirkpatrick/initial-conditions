@@ -5,7 +5,6 @@
 #include <array>
 #include <memory>
 #include "Assets.h"
-#include "Animation.hpp"
 #include "Theme.h"
 
 struct HUD_Data

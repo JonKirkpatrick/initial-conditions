@@ -43,7 +43,7 @@ namespace Topography {
     // Terrain Query Functions
     // ============================================================================
 
-    /// Mask calculation in C++ matching GLSL `maskFromD` (user-specified formulas).
+    /// Mask calculation in C++ matching GLSL `maskFromD`.
     static inline float maskFromD_Cpp(float d, float falloff) {
         const float k = 1e-10f;
         float t = falloff;

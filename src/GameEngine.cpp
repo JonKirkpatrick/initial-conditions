@@ -44,7 +44,6 @@ void GameEngine::loadDefaultBindings()
 
     registerAction(sf::Keyboard::Scancode::P,       InputAction::Pause);
     registerAction(sf::Keyboard::Scancode::Escape,  InputAction::Quit);
-    registerAction(sf::Keyboard::Scancode::Y,       InputAction::ToggleFollow);     // This is for the follow camera mode.
     registerAction(sf::Keyboard::Scancode::F,       InputAction::ToggleCursor);     // This is for toggling mouse look on and off.
     registerAction(sf::Keyboard::Scancode::F12,     InputAction::ShowGui);          // This is to toggle ImGUI on and off.
     registerAction(sf::Keyboard::Scancode::A,       InputAction::MoveLeft);

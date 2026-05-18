@@ -972,23 +972,6 @@ void Scene_IC_Camp::sGUI()
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Animations"))
-        {
-            if (ImGui::CollapsingHeader("Animations", ImGuiTreeNodeFlags_DefaultOpen))
-            {
-                ImGui::Indent();
-                int count = 0;
-                for (const auto& [name, anim] : Assets::Instance().getAnimations())
-                {
-                    count++;
-                    ImGui::ImageButton(name.c_str(), anim.getSprite(), sf::Vector2f(32, 32));
-                    if ((count % 6) != 0 && count != Assets::Instance().getAnimations().size()) { ImGui::SameLine(); }
-                }
-                ImGui::Unindent();
-            }
-            ImGui::EndTabItem();
-        }
-
         if (ImGui::BeginTabItem("Entity Manager"))
         {
             auto& m_entities = m_entityManager;
@@ -1403,6 +1386,7 @@ void Scene_IC_Camp::renderOrbs()
         sf::Vector3f cameraSpace = Camera::worldToCamera(
             relative, camTransform.pitch, camTransform.yaw, camTransform.roll);
 
+        // Cull orbs behind the camera or too close to it.  -z is forward in camera space.
         if (cameraSpace.z >= -camData.nearPlane) return;
 
         float depth = std::abs(cameraSpace.z);

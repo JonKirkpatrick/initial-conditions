@@ -7,19 +7,18 @@ uniform float headlampRange;
 uniform float headlampConeCos; // cos(angle) of headlamp cone (for cutoff)
 uniform float headlampEnabled; // 1.0 when headlights are on, 0.0 when off
 
-// This is a test of batching the orbs
 // === Batching support ===
 uniform int u_batchSize;
 uniform vec3  u_orbCenterView[64];
 uniform vec4  u_orbColor[64];
-uniform float u_orbDepthNorm[64];
-uniform vec2  u_quadOrigin[64];
+uniform float u_orbDepthNorm[64];   // the normalized depth into the scene
+uniform vec2  u_quadOrigin[64];     // top left of orb in screen space
 uniform vec2  u_texSize[64];        // diameter in pixels per orb
 
 void main()
 {
     // Find which orb this fragment belongs to
-    int orbIndex = int(gl_Color.r * 255.0 + 0.5);   // We'll set this via vertex attribute or gl_InstanceID if using instanced drawing
+    int orbIndex = int(gl_Color.r * 255.0 + 0.5);
 
     if (orbIndex >= u_batchSize) {
         discard;
@@ -30,6 +29,7 @@ void main()
     vec3 orbCenter  = u_orbCenterView[orbIndex];
     float depthNorm = u_orbDepthNorm[orbIndex];
     vec4 orbColor   = u_orbColor[orbIndex];
+
     // Convert gl_FragCoord (OpenGL bottom-left Y-up) to SFML window coords (top-left Y-down)
     vec2 fragScreenSFML = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
 
@@ -37,10 +37,11 @@ void main()
     vec2 localSFML = fragScreenSFML - quadOrigin;
     vec2 uv = localSFML / texSize;
 
-    // Per-pixel occlusion using correct screen position
+    // Per-pixel occlusion using screen position
     vec2 fragScreenUv = fragScreenSFML / u_viewportSize;
     fragScreenUv.y = 1.0 - fragScreenUv.y;
 
+    // Here "norm" is refering to normalized.  It's how deep in the scene the pixel is.
     vec4 topo = texture2D(u_bakeTex, fragScreenUv);
     if (topo.a >= 0.5) {
         float terrainNorm = topo.r + topo.g / 255.0 + topo.b / (255.0 * 255.0);

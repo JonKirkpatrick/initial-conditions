@@ -1,5 +1,4 @@
 #include "Assets.h"
-#include "Animation.hpp"
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <map>
@@ -28,16 +27,6 @@ void Assets::addTexture(const std::string& textureName, const std::string& path,
     }
 }
 
-void Assets::addAnimation(const std::string& animationName, const std::string& textureName, size_t frameCount, size_t speed)
-{
-    m_animationMap[animationName] = Animation(animationName, textureName);
-    m_animationMap[animationName].setFrameCount(frameCount);
-    m_animationMap[animationName].setAnimationSpeed(speed);
-    size_t frameWidth = m_textureMap[textureName].getSize().x / frameCount;
-    size_t frameHeight = m_textureMap[textureName].getSize().y;
-    m_animationMap[animationName].setFrameSize(frameWidth, frameHeight);
-}
-           
 void Assets::addFont(const std::string& fontName, const std::string& path)
 {
     m_fontMap[fontName] = sf::Font();
@@ -61,13 +50,6 @@ void Assets::loadFromFile(const std::string& path)
             std::string name, path;
             file >> name >> path;
             addTexture(name, path, false);
-        }
-        else if (str == "Animation")
-        {
-            std::string name, texture;
-            size_t frameCount, speed;
-            file >> name >> texture >> frameCount >> speed;
-            addAnimation(name, texture, frameCount, speed);
         }
         else if (str == "Font")
         {
@@ -101,46 +83,12 @@ void Assets::loadFromFile(const std::string& path)
     }
 }
 
-void Assets::buildAnimationsFromDescriptor(const SpriteSheetDescriptor& desc)
-{
-    size_t yOffset = 0;
-
-    for (const auto& rc : desc.rowConfigs)
-    {
-        if (rc.advanceRow)
-        {
-            yOffset += rc.frameHeight;
-            continue;
-        }
-        Animation anim(rc.action, desc.textureName);
-        
-        anim.setFrameCount(rc.frameCount);
-        anim.setOriginOffset(rc.xOffset, yOffset);
-        anim.setFrameSize(rc.frameWidth, rc.frameHeight);
-
-        for (size_t i = 0; i < rc.frameCount; ++i)
-        {
-            anim.setFrameSpeed(i, rc.frames[i]);
-            anim.setOffset(i, rc.offsets[i]);
-        }
-
-        m_animationMap[rc.action] = std::move(anim);
-    }
-}
-           
 const sf::Texture& Assets::getTexture(const std::string& textureName) const
 {
     assert(m_textureMap.find(textureName) != m_textureMap.end());
     return m_textureMap.at(textureName);
 }
            
-const Animation& Assets::getAnimation(const std::string& animationName) const
-{
-    assert(m_animationMap.find(animationName) != m_animationMap.end());
-    return m_animationMap.at(animationName);
-}
-           
-
 const sf::Font& Assets::getFont(const std::string& fontName) const
 {
     assert(m_fontMap.find(fontName) != m_fontMap.end());
@@ -150,11 +98,6 @@ const sf::Font& Assets::getFont(const std::string& fontName) const
 const std::map<std::string, sf::Texture>& Assets::getTextures() const
 {
     return m_textureMap;
-}
-
-const std::map<std::string, Animation>& Assets::getAnimations() const
-{
-    return m_animationMap;
 }
 
 void Assets::addSound(const std::string& soundName, const std::string& path)
