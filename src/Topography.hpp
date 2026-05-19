@@ -140,6 +140,7 @@ namespace Topography {
         return mask;
     }
 
+    /// Compute terrain normal via central differences.
     inline sf::Vector3f terrainNormal(float x, float z, const std::array<TerrainLayer, 16>& layers, uint32_t activeLayerMask, float epsilon = 50.0f)
     {
         float dhdx = Topography::heightAt(x + epsilon, z, layers, activeLayerMask) - Topography::heightAt(x - epsilon, z, layers, activeLayerMask);

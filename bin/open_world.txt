@@ -1,19 +1,19 @@
 Camera 45.0 0.001 500.0
 Player 3.00 45.0 1.72 0.20 0 0
 DateTimePlace 8.0 220 47.5
-TerrainLayer 100 -50 50.0 7.0 2.0
-TerrainLayer 92 -13 65.0 15.0 2.5
-TerrainLayer 71 26 80.0 23.0 3.0
-TerrainLayer 38 61 95.0 7.0 3.5
+TerrainLayer 100 -50 50.0 27.0 12.5
+TerrainLayer 92 -13 65.0 15.0 12.5
+TerrainLayer 71 26 80.0 23.0 22.0
+TerrainLayer 38 61 95.0 67.0 17.0
 TerrainLayer 0 87 50.0 15.0 4.0
-TerrainLayer -38 99 65.0 23.0 4.5
-TerrainLayer -71 97 80.0 7.0 5.0
-TerrainLayer -92 79 95.0 15.0 5.5
+TerrainLayer -38 99 65.0 23.0 11.0
+TerrainLayer -71 97 80.0 71.0 21.0
+TerrainLayer -92 79 95.0 15.0 15.5
 TerrainLayer -100 50 50.0 23.0 2.0
-TerrainLayer -92 13 65.0 7.0 2.5
-TerrainLayer -71 -26 80.0 15.0 3.0
-TerrainLayer -38 -61 95.0 23.0 3.5
-TerrainLayer 0 -87 50.0 7.0 4.0
-TerrainLayer 38 -99 65.0 15.0 4.5
-TerrainLayer 71 -97 80.0 23.0 5.0
-TerrainLayer 92 -79 95.0 7.0 5.5
+TerrainLayer -92 13 65.0 47.0 18.0
+TerrainLayer -71 -26 80.0 25.0 13.0
+TerrainLayer -38 -61 95.0 23.0 23.5
+TerrainLayer 0 -87 50.0 87.0 16.0
+TerrainLayer 38 -99 65.0 25.0 14.5
+TerrainLayer 71 -97 80.0 53.0 15.0
+TerrainLayer 92 -79 95.0 30.0 5.5
