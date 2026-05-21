@@ -205,20 +205,15 @@ vec3 skyColorForRay(vec3 rayDir) {
 void main() {
     vec2 uv = gl_FragCoord.xy / viewportSize;
 
-    vec4 topoC = texture2D(topoTex, uv);
+    vec4 topoC = texture(topoTex, uv);
 
-    float hitC = topoC.a >= 0.5 ? 1.0 : 0.0;
-
-    float coverage = hitC;
-    float terrainAlpha = smoothstep(0.12, 0.88, coverage);
+    bool isTerrainHit = topoC.a >= 0.5;
 
     float dist = 0.0;
     vec3 worldPos;
-    bool isTerrainHit = (hitC > 0.0);
 
     if (isTerrainHit) {
-        float dC = decodeTopoDepth(topoC);
-        float d = dC;
+        float d = decodeTopoDepth(topoC);
         dist = nearPlane + d * (farPlane - nearPlane);
         
         vec2 screen = gl_FragCoord.xy;

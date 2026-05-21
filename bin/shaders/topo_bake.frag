@@ -5,7 +5,6 @@ uniform float nearPlane;
 uniform float fovY;
 uniform float aspectRatio;
 uniform mat3 invRotationMatrix;
-uniform float cameraYaw;
 uniform float u_quality; // 0.05..1.0, scales raymarch cost
 uniform float u_stepSizeScale; // multiplier for base step size (default 1.0)
 uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
@@ -31,20 +30,12 @@ float decodePackedHeight(vec4 c, float maxHeightValue) {
 bool sampleTopdownHeight(in vec2 xz, out float outH) {
     vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
     uv.y = 1.0 - uv.y;
-    
-    // Apply the same -cameraYaw rotation as the top-down shader
-    vec2 uvCentered = uv - vec2(0.5);
-    float cosYaw = cos(-cameraYaw);
-    float sinYaw = sin(-cameraYaw);
-    vec2 uvRotated = vec2(
-        uvCentered.x * cosYaw - uvCentered.y * sinYaw,
-        uvCentered.x * sinYaw + uvCentered.y * cosYaw
-    ) + vec2(0.5);
-    
-    if (any(lessThan(uvRotated, vec2(0.0))) || any(greaterThan(uvRotated, vec2(1.0)))) {
+
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
         return false;
     }
-    vec4 c = texture2D(topoTopdownTex, uvRotated);
+
+    vec4 c = texture2D(topoTopdownTex, uv);
     outH = decodePackedHeight(c, topdownHeightMax);
     return true;
 }
@@ -66,6 +57,8 @@ void main() {
     float t = 0.0;
     float tPrev = 0.0;
     bool isHit = false;
+    float prevDistApprox = -1e20; // sentinel for "no previous"
+    float prevStep = 0.0;
 
     if (rayDir.y > 0.0 && cameraPos.y >= topdownHeightMax) {
         return; // upward ray already starts above the tallest terrain
@@ -82,7 +75,7 @@ void main() {
     float maxStepsF = max(50.0, baseMaxF * q);
     int maxSteps = int(maxStepsF);
 
-    for (int i = 0; i < 1500; ++i) {
+    for (int i = 0; i < maxSteps; ++i) {
         vec3 p = cameraPos + rayDir * t;
         if (t > maxTravel) break;
         if (rayDir.y > 0.0 && p.y > topdownHeightMax) break;
@@ -95,11 +88,29 @@ void main() {
                 float angleScale = max(rayShallowness, minAngle);
                 float ss = clamp(u_stepSizeScale, 0.1, 5.0);
                 float stepApprox = max(20.0 + (1.0 - q) * 50.0, (distApprox / angleScale) * 0.9);
-                stepApprox = clamp(stepApprox * ss, 2.0 * ss, 600.0 * ss);
+                // If the conservative distance estimate is increasing compared to the previous
+                // sample we can safely grow the step size proportionally to the previous step.
+                if (prevDistApprox > -1e19 && distApprox > prevDistApprox) {
+                    // growth factor: be aggressive but bounded
+                    float growthFactor = 1.5;
+                    stepApprox = max(stepApprox, prevStep * growthFactor);
+                }
+                stepApprox = clamp(stepApprox * ss, 2.0 * ss, baseMaxF * ss);
+                // update previous trackers for next iteration
+                prevDistApprox = distApprox;
+                prevStep = stepApprox;
                 tPrev = t;
                 t += stepApprox;
                 continue;
+            } else {
+                // inside transition region: small steps, reset monotonic growth base
+                prevDistApprox = distApprox;
+                prevStep = 0.0;
             }
+        } else {
+            // no topdown sample available; reset monotonic growth tracking
+            prevDistApprox = -1e20;
+            prevStep = 0.0;
         }
 
         float h = heightAt(p.xz);

@@ -61,6 +61,18 @@ class Scene_IC_Camp : public Scene {
             texSizes.reserve(n);
         }
     };
+
+    struct OrbDrawItem
+    {
+        sf::Vector2f screenPos;
+        sf::Vector3f cameraSpacePos;
+        float radiusPx;
+        float orbRadius;
+        sf::Vector3f worldPos;
+        float distSort;
+        float distNorm;
+        sf::Color color;
+    };
     
 protected:
     std::string m_levelPath;
@@ -92,7 +104,7 @@ protected:
     sf::Shader& m_bakeShader = Assets::Instance().getShader("TopoBake");
     sf::Shader& m_depthStepShader = Assets::Instance().getShader("TopoDepthSteps");
     sf::Shader& m_finalShader = Assets::Instance().getShader("TopoFinal");
-    sf::Shader& m_topdownShader = Assets::Instance().getShader("TopoTopDown");
+    sf::Shader& m_topdownShader = Assets::Instance().getShader("MaxMipBase");
     sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
     sf::Shader& m_sky = Assets::Instance().getShader("Sky");
     sf::Shader& m_orbShader = Assets::Instance().getShader("Orb");
@@ -116,8 +128,11 @@ protected:
     // In Scene_IC_Camp.h, in the private section:
     float m_crouchFactor = 0.0f;        // 0.0 = standing, 1.0 = fully crouched
 
-    // Orb bobbing
+    // Orb Stuff
+    std::array<OrbDrawItem, 8192> m_orbDrawItems;
+    int m_orbDrawItemCount = 0;
     void updateOrbBobbing(SoAEntityHandle e, float dt);
+    void sortOrbs();
 
     // FPS display
     sf::Clock m_fpsClock;

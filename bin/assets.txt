@@ -31,6 +31,8 @@ Shader    TopoBake       shaders/topo_bake.frag
 Shader    TopoDepthSteps shaders/topo_depth_steps.frag
 Shader    TopoFinal      shaders/topo_final.frag
 Shader    TopoTopDown    shaders/topo_topdown.frag
+Shader    MaxMipBase     shaders/max_mip_base.frag
+Shader    MaxMipReduce   shaders/max_mip_reduce.frag
 Shader    TopoMiniMap    shaders/minimap_topo.frag
 Shader    Sky            shaders/sky.frag
 Shader    Orb            shaders/orb_shader.frag

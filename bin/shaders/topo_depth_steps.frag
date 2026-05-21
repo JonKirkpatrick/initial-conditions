@@ -5,7 +5,6 @@ uniform float nearPlane;
 uniform float fovY;
 uniform float aspectRatio;
 uniform mat3 invRotationMatrix;
-uniform float cameraYaw;
 uniform float u_quality; // 0.05..1.0, scales raymarch cost
 uniform float u_stepSizeScale; // multiplier for base step size (default 1.0)
 uniform float u_stepContributionScale; // visualization-only multiplier for the step count channel
@@ -34,18 +33,10 @@ bool sampleTopdownHeight(in vec2 xz, out float outH) {
     vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
     uv.y = 1.0 - uv.y;
 
-    vec2 uvCentered = uv - vec2(0.5);
-    float cosYaw = cos(-cameraYaw);
-    float sinYaw = sin(-cameraYaw);
-    vec2 uvRotated = vec2(
-        uvCentered.x * cosYaw - uvCentered.y * sinYaw,
-        uvCentered.x * sinYaw + uvCentered.y * cosYaw
-    ) + vec2(0.5);
-
-    if (any(lessThan(uvRotated, vec2(0.0))) || any(greaterThan(uvRotated, vec2(1.0)))) {
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
         return false;
     }
-    vec4 c = texture2D(topoTopdownTex, uvRotated);
+    vec4 c = texture2D(topoTopdownTex, uv);
     outH = decodePackedHeight(c, topdownHeightMax);
     return true;
 }

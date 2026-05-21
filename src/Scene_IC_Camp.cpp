@@ -67,6 +67,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 
     Topography::setWarpParameters(m_warpScale, m_warpStrength);
     m_topdownMaxHeight = computeSceneMaxHeight();
+    runTopDownPass();
     buildHud();
     updateHUDData();
     updateSunPosition();
@@ -333,62 +334,62 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     }
 }
 
-void Scene_IC_Camp::updateShadowOrbs()
+void Scene_IC_Camp::sortOrbs()
 {
-    m_shadowOrbList.clear();
-
-    auto& transform  = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-
-    constexpr int   MAX_SHADOW_ORBS    = 64;
-    constexpr float SHADOW_CUTOFF_DIST = 5000.0f; // 50 metres in cm
-
-    struct CandidateOrb {
-        sf::Vector3f worldPos;
-        float        radius;
-        float        depth;
-    };
-
-    std::vector<CandidateOrb> candidates;
-    candidates.reserve(m_entityManager.getEntities("orb").size());
+    m_orbDrawItemCount = 0;
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& camData = m_entityManager.getCamera(m_camera);
+    const sf::Vector2u winSize = m_bakeTexture.getSize();
+    const float focalLengthPx = (winSize.y * 0.5f) / std::tan(camData.fovY * 0.5f);
 
     for (auto orb : m_entityManager.getEntities("orb"))
     {
-        if (!m_entityManager.hasOrb(orb) || !m_entityManager.hasTransform(orb) || !m_entityManager.hasBob(orb)) continue;
-
+        if (!m_entityManager.hasOrb(orb) || !m_entityManager.hasTransform(orb)) continue;
         auto& orbTransform = m_entityManager.getTransform(orb);
         auto& orbData      = m_entityManager.getOrb(orb);
-        auto& orbBob       = m_entityManager.getBob(orb);
 
-        float currentPhase = std::fmod(orbBob.accumulator, 1.0f);
-        float bobOffset = std::sin(currentPhase * 6.2831853f) * orbBob.magnitude;
+        sf::Vector3f relative = orbTransform.pos - camTransform.pos;
+        sf::Vector3f cameraSpace = Camera::worldToCamera(
+            relative, camTransform.pitch, camTransform.yaw, camTransform.roll);
+        if (cameraSpace.z >= -camData.nearPlane) continue;
 
-        sf::Vector3f shadowWorldPos = orbTransform.pos;
-        shadowWorldPos.y = heightAt(shadowWorldPos.x, shadowWorldPos.z) 
-                           + orbData.heightAboveGround + bobOffset;
+        sf::Vector2f screenPos;
+        if (!Camera::worldToScreen(camTransform, camData, orbTransform.pos, screenPos)) continue;
 
-        sf::Vector3f relative    = shadowWorldPos - transform.pos;
-        sf::Vector3f cameraSpace = Camera::worldToCamera(relative, transform.pitch, transform.yaw, transform.roll);
+        float dist = std::sqrt(relative.x * relative.x +
+                               relative.y * relative.y +
+                               relative.z * relative.z);
+        float radiusPx = orbData.radius * focalLengthPx / dist;
+        if (radiusPx <= 0.5f) continue;
 
-        if (cameraSpace.z >= -cameraData.nearPlane) continue;
+        float depthNorm = std::clamp(
+            (dist - camData.nearPlane) / (camData.farPlane - camData.nearPlane), 0.0f, 1.0f);
 
-        float depth = std::sqrt(relative.x * relative.x + 
-                        relative.y * relative.y + 
-                        relative.z * relative.z);
-        if (depth > SHADOW_CUTOFF_DIST) continue;
-
-        candidates.push_back({ shadowWorldPos, orbData.radius, depth });
+        m_orbDrawItems[m_orbDrawItemCount++] = {
+            screenPos, cameraSpace, radiusPx, orbData.radius, orbTransform.pos, dist, depthNorm, orbData.color
+        };
     }
 
-    std::sort(candidates.begin(), candidates.end(), [](const CandidateOrb& a, const CandidateOrb& b) {
-        return a.depth < b.depth;
-    });
+    std::sort(m_orbDrawItems.begin(), m_orbDrawItems.begin() + m_orbDrawItemCount,
+        [](const OrbDrawItem& a, const OrbDrawItem& b) {
+            return a.distSort > b.distSort;
+        });
+}
 
-    int count = std::min((int)candidates.size(), MAX_SHADOW_ORBS);
-    m_shadowOrbList.reserve(count);
-    for (int i = 0; i < count; ++i)
+void Scene_IC_Camp::updateShadowOrbs()
+{
+    m_shadowOrbList.clear();
+    constexpr int   MAX_SHADOW_ORBS    = 64;
+    constexpr float SHADOW_CUTOFF_DIST = 5000.0f;
+
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+
+    for (int i = m_orbDrawItemCount - 1; i >= 0 && (int)m_shadowOrbList.size() < MAX_SHADOW_ORBS; --i)
     {
-        m_shadowOrbList.push_back({ candidates[i].worldPos, candidates[i].radius });
+        const auto& item = m_orbDrawItems[i];
+        if (item.distSort > SHADOW_CUTOFF_DIST) continue;
+
+        m_shadowOrbList.push_back({ item.worldPos, item.orbRadius }); // radiusPx is wrong here - see below
     }
 }
 
@@ -472,6 +473,7 @@ void Scene_IC_Camp::update() {
     updateHUDData();
     updateSunPosition();
     updateCamera(dt);
+    sortOrbs();
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
         sGUI();
@@ -909,7 +911,6 @@ void Scene_IC_Camp::sRender() {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto inverseRotationMatrix = toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll));
     window.clear(sf::Color::Transparent);
-    runTopDownPass();
     updateShadowOrbs();
     uploadShadowOrbsToShader(m_finalShader);
 
@@ -1126,7 +1127,6 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
     m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
     m_bakeShader.setUniform("invRotationMatrix", inverseRotationMatrix);
-    m_bakeShader.setUniform("cameraYaw",     transform.yaw);
     m_bakeShader.setUniform("fovY",          cameraData.fovY);
     m_bakeShader.setUniform("aspectRatio",   cameraData.aspectRatio);
     m_bakeShader.setUniform("nearPlane",     cameraData.nearPlane);
@@ -1158,7 +1158,6 @@ void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix
     m_depthStepShader.setUniform("viewportSize",  sf::Glsl::Vec2(outputSize.x, outputSize.y));
     m_depthStepShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
     m_depthStepShader.setUniform("invRotationMatrix", inverseRotationMatrix);
-    m_depthStepShader.setUniform("cameraYaw",     transform.yaw);
     m_depthStepShader.setUniform("fovY",          cameraData.fovY);
     m_depthStepShader.setUniform("aspectRatio",   cameraData.aspectRatio);
     m_depthStepShader.setUniform("nearPlane",     cameraData.nearPlane);
@@ -1182,50 +1181,15 @@ void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix
     m_renderTexture.display();
 }
 
-// This may still benefit from a bit of refinement, but it's intended to aid the bake shader in its job
-// raymarching.  By rendering a top down view bounded by the camera's frustum and farplane, the bake
-// shader can sample this instead of expensive raymarching steps until the ray is close enough to the ground
-// to warrant the full reaymarching.
+// Bake a single fixed world-aligned top-down height map once at startup.
+// The bake shader samples this static texture using a constant UV <-> world relationship.
 void Scene_IC_Camp::runTopDownPass() {
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u texSize = m_topdownTexture.getSize();
-    sf::Vector2u winSize = m_game.window().getSize();
-    m_topdownMaxHeight = computeSceneMaxHeight();
 
-    auto makeFootprintCorner = [&](float sx, float sy) {
-        float x_ndc = (sx / float(winSize.x)) * 2.0f - 1.0f;
-        float y_ndc = 1.0f - (sy / float(winSize.y)) * 2.0f;
-        float f = std::tan(cameraData.fovY * 0.5f);
-        sf::Vector3f rayDir = Camera::cameraToWorld(
-            sf::Vector3f(x_ndc * f * cameraData.aspectRatio, y_ndc * f, -1.0f),
-            transform.pitch, transform.yaw, transform.roll);
-        rayDir = Camera::normalize(rayDir);
-
-        sf::Vector3f world = transform.pos + rayDir * cameraData.farPlane;
-        if (std::abs(rayDir.y) > 1e-5f) {
-            float tGround = -transform.pos.y / rayDir.y;
-            if (tGround > 0.0f) {
-                world = transform.pos + rayDir * std::min(tGround, cameraData.farPlane);
-            }
-        }
-        return sf::Glsl::Vec2(world.x, world.z);
-    };
-
-    sf::Glsl::Vec2 topLeft = makeFootprintCorner(0.f, 0.f);
-    sf::Glsl::Vec2 topRight = makeFootprintCorner(float(winSize.x), 0.f);
-    sf::Glsl::Vec2 bottomLeft = makeFootprintCorner(0.f, float(winSize.y));
-    sf::Glsl::Vec2 bottomRight = makeFootprintCorner(float(winSize.x), float(winSize.y));
-
-    float minX = std::min(std::min(topLeft.x, topRight.x), std::min(bottomLeft.x, bottomRight.x));
-    float maxX = std::max(std::max(topLeft.x, topRight.x), std::max(bottomLeft.x, bottomRight.x));
-    float minZ = std::min(std::min(topLeft.y, topRight.y), std::min(bottomLeft.y, bottomRight.y));
-    float maxZ = std::max(std::max(topLeft.y, topRight.y), std::max(bottomLeft.y, bottomRight.y));
-    m_topdownWorldMin = sf::Vector2f(minX, minZ);
-    m_topdownWorldSize = sf::Vector2f(std::max(1.0f, maxX - minX), std::max(1.0f, maxZ - minZ));
+    m_topdownWorldMin = sf::Vector2f(-75000.f, -75000.f);
+    m_topdownWorldSize = sf::Vector2f(150000.f, 150000.f);
 
     m_topdownShader.setUniform("viewportSize", sf::Glsl::Vec2(texSize.x, texSize.y));
-    m_topdownShader.setUniform("cameraYaw", transform.yaw);
     m_topdownShader.setUniform("worldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
     m_topdownShader.setUniform("worldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
     m_topdownShader.setUniform("heightMax", m_topdownMaxHeight);
@@ -1236,7 +1200,7 @@ void Scene_IC_Camp::runTopDownPass() {
 
     sf::RectangleShape dummyRect(sf::Vector2f(texSize.x, texSize.y));
     m_topdownTexture.clear(sf::Color::Transparent);
-    m_topdownTexture.setSmooth(true);
+    m_topdownTexture.setSmooth(false);
     m_topdownTexture.draw(dummyRect, &m_topdownShader);
     m_topdownTexture.display();
 }
@@ -1248,6 +1212,7 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     sf::Vector2u winSize = m_game.window().getSize();
     sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
     sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
+    const bool headlampOn = shouldHeadlightsBeOn();
 
     m_finalShader.setUniform("viewportSize",  sf::Glsl::Vec2(winSize.x, winSize.y));
     m_finalShader.setUniform("m_hexSize",     m_hexSize);
@@ -1265,18 +1230,18 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_finalShader.setUniform("gridColor", colorToShader(m_gridColor));
     m_finalShader.setUniform("u_heightMax",    m_topdownMaxHeight);
     m_finalShader.setUniform("u_reliefExaggeration", 1.5f);
-    uploadTerrainLayersToShader(m_finalShader, "layer");
     m_finalShader.setUniform("topoTex", m_bakeTexture.getTexture());
     m_finalShader.setUniform("cursorMode", m_cursorMode);
     m_finalShader.setUniform("hoveredHex", sf::Glsl::Vec2((float)hex.x, (float)hex.y));
-    const bool headlampOn = shouldHeadlightsBeOn();
     m_finalShader.setUniform("headlampOn", headlampOn);
     m_finalShader.setUniform("headlampIntensity", 4.f);
     m_finalShader.setUniform("headlampColor", colorToShader(sf::Color(255, 244, 214)));
     m_finalShader.setUniform("headlampRange", 15000.0f);
     uploadActiveLayerMaskToShader(m_finalShader, "u_activeLayerEnabled");
-    m_renderTexture.clear(sf::Color::Transparent);
+    uploadTerrainLayersToShader(m_finalShader, "layer");
+
     sf::RectangleShape dummyRect(sf::Vector2f(winSize.x, winSize.y));
+    m_renderTexture.clear(sf::Color::Transparent);
     m_renderTexture.draw(dummyRect, &m_finalShader);
     m_renderTexture.setSmooth(true);
     m_renderTexture.display();
@@ -1355,56 +1320,11 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
 
 void Scene_IC_Camp::renderOrbs()
 {
+    if (m_orbDrawItemCount == 0) return;
+
     auto& window = m_game.window();
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& camData = m_entityManager.getCamera(m_camera);
-    const sf::Vector2u winSize = m_bakeTexture.getSize();
-
-    struct OrbDrawItem
-    {
-        sf::Vector2f screenPos;
-        sf::Vector3f cameraSpacePos;
-        float radiusPx;
-        float depthSort;
-        float depthNorm;
-        sf::Color color;
-    };
-
-    std::vector<OrbDrawItem> orbDrawItems;
-    orbDrawItems.reserve(8192);
-
-    const float focalLengthPx = (static_cast<float>(winSize.y) * 0.5f) /
-                                std::tan(camData.fovY * 0.5f);
-
-    m_entityManager.forEachOrbWithTransform([&](SoAEntityHandle, CTransform3D& orbTransform, COrb& orbData)
-    {
-        sf::Vector2f screenPos;
-        if (!Camera::worldToScreen(camTransform, camData, orbTransform.pos, screenPos))
-            return;
-
-        sf::Vector3f relative = orbTransform.pos - camTransform.pos;
-        sf::Vector3f cameraSpace = Camera::worldToCamera(
-            relative, camTransform.pitch, camTransform.yaw, camTransform.roll);
-
-        // Cull orbs behind the camera or too close to it.  -z is forward in camera space.
-        if (cameraSpace.z >= -camData.nearPlane) return;
-
-        float depth = std::abs(cameraSpace.z);
-        if (depth <= 0.0001f) return;
-
-        float radiusPx = orbData.radius * focalLengthPx / depth;
-        if (radiusPx <= 0.5f) return;
-
-        float depthNorm = std::clamp(
-            (depth - camData.nearPlane) / (camData.farPlane - camData.nearPlane), 0.0f, 1.0f);
-
-        orbDrawItems.push_back({screenPos, cameraSpace, radiusPx, depth, depthNorm, orbData.color});
-    });
-
-    if (orbDrawItems.empty()) return;
-
-    std::sort(orbDrawItems.begin(), orbDrawItems.end(),
-        [](const OrbDrawItem& a, const OrbDrawItem& b) { return a.depthSort > b.depthSort; });
 
     sf::Vector3f sunDirView = Camera::worldToCamera(
         m_sunDirection, camTransform.pitch, camTransform.yaw, camTransform.roll);
@@ -1412,21 +1332,18 @@ void Scene_IC_Camp::renderOrbs()
     constexpr int BATCH_SIZE = 64;
     OrbBatch batch;
     batch.reserve(BATCH_SIZE);
+    sf::VertexArray vertices(sf::PrimitiveType::Triangles, 0);
 
-    sf::VertexArray vertices(sf::PrimitiveType::Triangles, 0);  // We'll append manually
-
-    for (size_t i = 0; i < orbDrawItems.size(); ++i)
+    for (int i = 0; i < m_orbDrawItemCount; ++i)
     {
-        const auto& item = orbDrawItems[i];
+        const auto& item = m_orbDrawItems[i];
         const float r = item.radiusPx;
         const sf::Vector2f origin(item.screenPos.x - r, item.screenPos.y - r);
         const sf::Vector2f size(r * 2.f, r * 2.f);
 
-        // Encode orb index in red channel (0-63)
         uint8_t idx = static_cast<uint8_t>(batch.centersView.size());
         sf::Color indexColor(idx, 0, 0, 255);
 
-        // Two triangles per quad
         sf::Vertex v1(origin, indexColor);
         sf::Vertex v2({origin.x + size.x, origin.y}, indexColor);
         sf::Vertex v3({origin.x + size.x, origin.y + size.y}, indexColor);
@@ -1435,29 +1352,24 @@ void Scene_IC_Camp::renderOrbs()
         vertices.append(v1);
         vertices.append(v2);
         vertices.append(v3);
-
         vertices.append(v1);
         vertices.append(v3);
         vertices.append(v4);
 
-        // Batch data
         batch.centersView.push_back(item.cameraSpacePos);
         batch.colors.emplace_back(
             item.color.r / 255.f, item.color.g / 255.f,
             item.color.b / 255.f, item.color.a / 255.f);
-        batch.depthNorms.push_back(item.depthNorm);
+        batch.depthNorms.push_back(item.distNorm);
         batch.quadOrigins.push_back(origin);
         batch.texSizes.emplace_back(size);
 
-        // Flush when batch is full or at end
-        if (batch.centersView.size() == BATCH_SIZE || i == orbDrawItems.size() - 1)
+        if (batch.centersView.size() == BATCH_SIZE || i == m_orbDrawItemCount - 1)
         {
             uploadOrbBatchToShader(m_orbShader, batch, sunDirView);
-
             sf::RenderStates states;
             states.shader = &m_orbShader;
             window.draw(vertices, states);
-
             vertices.clear();
             batch.clear();
         }
