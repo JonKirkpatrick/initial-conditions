@@ -137,11 +137,9 @@ public:
     }
 
     // Component shims (SoA handle based)
+
     // Transform
-    void addTransform(SoAEntityHandle h, const CTransform3D& t)
-    {
-        if (!m_soaPool.valid(h)) return; auto v = t; m_compTransform.add(h, v);
-    }
+    void addTransform(SoAEntityHandle h, const CTransform3D& t) { if (!m_soaPool.valid(h)) return; auto v = t; m_compTransform.add(h, v); }
     bool hasTransform(SoAEntityHandle h) const { return m_compTransform.has(h); }
     CTransform3D& getTransform(SoAEntityHandle h) { return m_compTransform.get(h); }
     const CTransform3D& getTransform(SoAEntityHandle h) const { return m_compTransform.get(h); }

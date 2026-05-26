@@ -1306,6 +1306,7 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
     }
 
     shader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
+    shader.setUniform("sunDirWorld", m_sunDirection);
     shader.setUniform("sunColor", m_sunColor);
     shader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
     shader.setUniform("u_viewportSize", sf::Glsl::Vec2(
@@ -1313,9 +1314,9 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
         static_cast<float>(m_bakeTexture.getSize().y)));
 
     shader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-    shader.setUniform("headlampIntensity", 5.5f);
+    shader.setUniform("headlampIntensity", 2.5f);
     shader.setUniform("headlampRange", 8500.0f);
-    shader.setUniform("headlampConeCos", 0.920504853f);
+    shader.setUniform("headlampConeCos", 1.0f);
 }
 
 void Scene_IC_Camp::renderOrbs()

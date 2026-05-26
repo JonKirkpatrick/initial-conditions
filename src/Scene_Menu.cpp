@@ -169,10 +169,6 @@ void Scene_Menu::sDoAction(const Action& action)
 
 void Scene_Menu::sRender()
 {
-    m_game.window().setView(sf::View(sf::FloatRect(
-        {0.f, 0.f},
-        {float(m_game.window().getSize().x), float(m_game.window().getSize().y)}
-    )));
     m_game.window().clear(Theme::color(Theme::ColorRole::BackgroundBase));
     sf::Sprite backgroundSprite(m_menuBackground);
     backgroundSprite.setPosition({0, 0});

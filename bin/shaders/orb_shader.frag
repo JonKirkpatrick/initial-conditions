@@ -1,4 +1,5 @@
 uniform vec3 sunDir;
+uniform vec3 sunDirWorld;
 uniform vec4 sunColor;
 uniform sampler2D u_bakeTex;
 uniform vec2 u_viewportSize;
@@ -68,7 +69,8 @@ void main()
     float sunSpecular = pow(max(0.0, dot(normal, sunHalfDir)), 16.0);
 
     float hemisphere = clamp(0.20 + 0.80 * z, 0.0, 1.0);
-    float sunElevationDeg = asin(clamp(sunLightDir.y, -1.0, 1.0)) * 180.0 / 3.14159265;
+    vec3 sunWorldDir = normalize(sunDirWorld);
+    float sunElevationDeg = asin(clamp(sunWorldDir.y, -1.0, 1.0)) * 180.0 / 3.14159265;
     float sunVisibility = smoothstep(-12.0, 6.0, sunElevationDeg);
     float nightFactor = smoothstep(-5.0, -15.0, sunElevationDeg);
 
@@ -83,9 +85,14 @@ void main()
     // Headlamp cone: screen center beam, using the orb center in view space.
     vec3 orbCenterDir = normalize(orbCenter);
     float centerAngleCos = dot(orbCenterDir, vec3(0.0, 0.0, -1.0));
-    float coneMask = smoothstep(headlampConeCos, min(1.0, headlampConeCos + 0.08), centerAngleCos);
+    float coneSoftness = 0.18;
+    float coneMask = smoothstep(headlampConeCos - coneSoftness,
+                                min(1.0, headlampConeCos + coneSoftness),
+                                centerAngleCos);
     float centerDist = length(orbCenter);
-    float rangeMask = pow(max(0.0, 1.0 - centerDist / max(headlampRange, 0.0001)), 1.6);
+    float rangeT = clamp(centerDist / max(headlampRange, 0.0001), 0.0, 1.0);
+    float rangeMask = 1.0 - smoothstep(0.0, 1.0, rangeT);
+    rangeMask = pow(rangeMask, 1.25);
     float nightBoost = mix(0.20, 1.0, nightFactor);
     float lampStrength = headlampEnabled * headlampIntensity * coneMask * rangeMask * nightBoost;
 
@@ -102,7 +109,7 @@ void main()
     float distNormalized = clamp(depthNorm / atmosphereMaxDist, 0.0, 1.0);
     float atmosphereStrength = pow(distNormalized, 1.7);
 
-    vec3 sunDirNorm = normalize(sunDir);
+    vec3 sunDirNorm = sunWorldDir;
 
     float dayMix = smoothstep(-10.0, 6.0, sunElevationDeg);
     vec3 shaded = ambient;

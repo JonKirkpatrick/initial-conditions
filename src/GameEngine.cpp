@@ -18,7 +18,6 @@ void GameEngine::init(const std::string & path)
     loadDefaultBindings();
     std::cout << "Loading sprite sheets..." << std::endl;
     Assets::Instance().loadFromFile(path);
-    std::cout << "Loading sprite sheets..." << std::endl;
     auto modes = sf::VideoMode::getFullscreenModes();
     if (modes.empty())
     {
@@ -26,12 +25,14 @@ void GameEngine::init(const std::string & path)
         std::exit(1);
     }
     m_window.create(modes[1], "Initial Conditions", sf::Style::None, sf::State::Fullscreen, settings);
-    m_window.setFramerateLimit(60);
-    m_window.setVerticalSyncEnabled(false);
+    m_window.setVerticalSyncEnabled(true);
     m_window.setKeyRepeatEnabled(false);
     m_window.setPosition(sf::Vector2i(0, 0));
     m_window.setSize(sf::Vector2u(modes[1].size.x, modes[1].size.y));
-    sf::View view = m_window.getDefaultView();
+    m_window.setView(sf::View(sf::FloatRect(
+        {0.f, 0.f},
+        {float(m_window.getSize().x), float(m_window.getSize().y)}
+    )));
     
     if (!ImGui::SFML::Init(m_window)) {}
 
