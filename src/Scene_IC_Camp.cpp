@@ -8,6 +8,9 @@
 #include "imgui-SFML.h"
 #include "Camera.h"
 #include <random>
+#include <array>
+#include <filesystem>
+#include <fstream>
 
 // This might need to move somewhere else.  It's just to flatten a 3x3 matrix into column-major order for uploading to the shader, and I need it in multiple places now.
 static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matrix) {
@@ -35,6 +38,84 @@ static float dot(const sf::Vector3f& a, const sf::Vector3f& b)
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+namespace
+{
+    struct CubeFaceSpec
+    {
+        const char* name;
+        GLenum target;
+    };
+
+    constexpr std::array<CubeFaceSpec, 6> SKY_CUBEMAP_FACES = {{
+        {"right",  GL_TEXTURE_CUBE_MAP_POSITIVE_X},
+        {"left",   GL_TEXTURE_CUBE_MAP_NEGATIVE_X},
+        {"up",     GL_TEXTURE_CUBE_MAP_POSITIVE_Y},
+        {"down",   GL_TEXTURE_CUBE_MAP_NEGATIVE_Y},
+        {"back",   GL_TEXTURE_CUBE_MAP_POSITIVE_Z},
+        {"front",  GL_TEXTURE_CUBE_MAP_NEGATIVE_Z},
+    }};
+
+    bool readPfmFile(const std::filesystem::path& path,
+                     int& width,
+                     int& height,
+                     std::vector<float>& pixels)
+    {
+        std::ifstream file(path, std::ios::binary);
+        if (!file)
+        {
+            std::cerr << "Could not open PFM file: " << path << std::endl;
+            return false;
+        }
+
+        std::string magic;
+        file >> magic;
+        if (magic != "PF")
+        {
+            std::cerr << "Unexpected PFM magic in file: " << path << " (" << magic << ")" << std::endl;
+            return false;
+        }
+
+        file >> width >> height;
+        float scale = 1.0f;
+        file >> scale;
+        file.get();
+
+        if (width <= 0 || height <= 0)
+        {
+            std::cerr << "Invalid PFM dimensions in file: " << path << std::endl;
+            return false;
+        }
+
+        pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 3u);
+        file.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size() * sizeof(float)));
+        if (!file)
+        {
+            std::cerr << "Could not read PFM pixel payload: " << path << std::endl;
+            return false;
+        }
+
+        const bool fileLittleEndian = scale < 0.0f;
+        const bool hostLittleEndian = []()
+        {
+            const uint16_t value = 1;
+            return reinterpret_cast<const unsigned char*>(&value)[0] == 1;
+        }();
+
+        if (fileLittleEndian != hostLittleEndian)
+        {
+            auto* bytes = reinterpret_cast<unsigned char*>(pixels.data());
+            for (size_t i = 0; i < pixels.size(); ++i)
+            {
+                std::swap(bytes[i * sizeof(float) + 0], bytes[i * sizeof(float) + 3]);
+                std::swap(bytes[i * sizeof(float) + 1], bytes[i * sizeof(float) + 2]);
+            }
+        }
+
+        return true;
+    }
+
+}
+
 Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     : Scene(game)
     , m_levelPath(levelPath)
@@ -59,6 +140,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
+    initializeSkyCubemap();
     updateCamera(0.001f);
     spawnDebugOrbs(8000);
 
@@ -425,6 +507,79 @@ void Scene_IC_Camp::spawnCamera()
         sf::Vector2u(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT)
         ));
     m_entityManager.addTransform(m_camera, CTransform3D());
+}
+
+void Scene_IC_Camp::initializeSkyCubemap()
+{
+    const std::filesystem::path skyDir = std::filesystem::path("images") / "skymap";
+
+    if (m_skyCubemapHandle != 0)
+    {
+        glDeleteTextures(1, &m_skyCubemapHandle);
+        m_skyCubemapHandle = 0;
+    }
+
+    glGenTextures(1, &m_skyCubemapHandle);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    bool loadedAnyFace = false;
+    for (const auto& face : SKY_CUBEMAP_FACES)
+    {
+        const std::filesystem::path pfmPath = skyDir / (std::string(face.name) + ".pfm");
+
+        int width = 0;
+        int height = 0;
+        std::vector<float> pixels;
+        if (!readPfmFile(pfmPath, width, height, pixels))
+        {
+            std::cerr << "Could not read converted sky face: " << pfmPath << std::endl;
+            continue;
+        }
+
+        if (width != height)
+        {
+            std::cerr << "Sky face is not square: " << pfmPath << std::endl;
+            continue;
+        }
+
+        std::vector<float> flipped(pixels.size());
+        const size_t rowStride = static_cast<size_t>(width) * 3u;
+        for (int y = 0; y < height; ++y)
+        {
+            const size_t srcRow = static_cast<size_t>(y) * rowStride;
+            const size_t dstRow = static_cast<size_t>(height - 1 - y) * rowStride;
+            std::copy_n(pixels.data() + srcRow, rowStride, flipped.data() + dstRow);
+        }
+
+        glTexImage2D(
+            face.target,
+            0,
+            GL_RGB32F,
+            width,
+            height,
+            0,
+            GL_RGB,
+            GL_FLOAT,
+            flipped.data());
+        loadedAnyFace = true;
+    }
+
+    if (!loadedAnyFace)
+    {
+        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+        std::cerr << "Sky cubemap could not be initialized; falling back to procedural sky." << std::endl;
+        m_skyCubemapReady = false;
+        return;
+    }
+
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+    m_skyCubemapReady = true;
 }
 
 void Scene_IC_Camp::onEnter() {
@@ -1256,11 +1411,19 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& rotationMatrix) {
     auto transform = m_entityManager.getTransform(m_camera);
     m_sky.setUniform("invRotationMatrix", rotationMatrix);
     m_sky.setUniform("sunDir", m_sunDirection);
+    m_sky.setUniform("useSkyCubemap", m_skyCubemapReady);
+    m_sky.setUniform("skyExposure", 15.0f);
+
+    if (m_skyCubemapReady && m_skyCubemapHandle != 0)
+    {
+        glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
+    }
+
     m_renderTexture.clear(sf::Color::Transparent);
     m_renderTexture.display();
     m_skyTexture.clear(sf::Color::Transparent);
-    sf::Sprite skySprite(m_renderTexture.getTexture());
-    m_skyTexture.draw(skySprite, &m_sky);
+    sf::RectangleShape skyQuad(sf::Vector2f(m_game.window().getSize().x, m_game.window().getSize().y));
+    m_skyTexture.draw(skyQuad, &m_sky);
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
 }

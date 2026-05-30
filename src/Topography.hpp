@@ -18,8 +18,8 @@ namespace Topography {
         float topoHeight;
     };
 
-    inline float warpScale = 0.00009f;
-    inline float warpStrength = 850.0f;
+    inline float warpScale = 0.00020f;
+    inline float warpStrength = 2415.0f;
 
     inline void setWarpParameters(float scale, float strength) {
         warpScale = scale;

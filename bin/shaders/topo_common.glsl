@@ -38,12 +38,13 @@ float heightAt(vec2 xz) {
         if (u_activeLayerEnabled[i] < 0.5) continue;
 
         vec2  delta   = xz - layer_center[i];
-        float dist    = length(delta);
+        float distSq    = delta.x * delta.x + delta.y * delta.y;
         float radius  = layer_radius[i];
         float falloff = layer_falloffWidth[i];
-
+        float maxR = radius + 2.0 * falloff;
+        if (distSq > maxR * maxR) continue;
+        float dist = sqrt(distSq);
         float d       = dist - radius;
-
         height += layer_topoHeight[i] * maskFromD(d, falloff);
     }
     return height;

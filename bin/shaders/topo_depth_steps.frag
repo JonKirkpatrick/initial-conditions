@@ -7,10 +7,10 @@ uniform float aspectRatio;
 uniform mat3 invRotationMatrix;
 uniform float u_quality; // 0.05..1.0, scales raymarch cost
 uniform float u_stepSizeScale; // multiplier for base step size (default 1.0)
+uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
 uniform float u_stepContributionScale; // visualization-only multiplier for the step count channel
 uniform float u_stepCountNormalizationMax; // fixed divisor for step count normalization
 uniform float u_heightmapTransitionThreshold; // distance above cached heightmap before raymarching
-uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
 uniform sampler2D topoTopdownTex;
 uniform vec2 topdownWorldMin;
 uniform vec2 topdownWorldSize;

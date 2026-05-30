@@ -5,9 +5,9 @@ uniform vec3 sunDir;
 uniform vec4 sunColor;
 uniform mat3 invRotationMatrix;
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-}
+uniform samplerCube skyCubemap;
+uniform bool useSkyCubemap;
+uniform float skyExposure;
 
 void main() {
     vec2 screen = gl_FragCoord.xy;
@@ -66,24 +66,28 @@ void main() {
     float sunDisc = pow(sunDot, 180.0);
     skyColor += sunDisc * vec3(1.0, 0.95, 0.82) * 2.0 * discFactor;
 
-    // ================== STARS ==================
+    // ================== CUBEMAP STARS / DEEP SKY ==================
+    if (useSkyCubemap) {
+        float cubemapFactor = 1.0 - smoothstep(-10.0, -2.0, sunElevation);
+        
+        // 1. Grab raw data and apply exposure
+        vec3 exposedColor = textureCube(skyCubemap, rayDir).rgb * skyExposure;
 
-    float starFactor = smoothstep(-3.0, -10.0, sunElevation);
-    vec2 starUV = rayDir.xz / (rayDir.y + 1.01);
-    vec2 cell = floor(starUV * 800.0);
-    float h = hash(cell);
+        // 2. Atmospheric Extinction (Dim stars near the horizon)
+        float airMass = 1.0 / max(rayDir.y, 0.01); 
+        float extinction = exp(-0.15 * airMass); 
+        exposedColor *= mix(1.0, extinction, cubemapFactor);
 
-    // Very sparse occupancy
-    float starMask = step(0.9975, h);
+        // 3. Tone Mapping (Keep your 32-bit star profiles crisp and sharp)
+        vec3 toneMappedColor = exposedColor / (exposedColor + vec3(1.0));
 
-    // Brightness variation among surviving stars
-    float starBrightness = pow(h, 12.0);
-    float stars = starMask * starBrightness;
-    skyColor += stars * vec3(0.9, 0.95, 1.0) * starFactor;
+        // 4. Blend natively
+        skyColor = mix(skyColor, toneMappedColor, cubemapFactor);
+    }
 
     // ================== HORIZON HAZE ==================
-    float haze = pow(1.0 - clamp(height, 0.0, 1.0), 4.0) * 0.7;
-    skyColor += haze * vec3(0.8, 0.65, 0.55) * 0.6;
+    float haze = pow(1.0 - clamp(height, 0.0, 1.0), 8.0) * 0.08;
+    skyColor += haze * vec3(0.72, 0.66, 0.58) * 0.25;
 
     gl_FragColor = vec4(skyColor, 1.0);
 }

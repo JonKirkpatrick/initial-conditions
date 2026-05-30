@@ -114,6 +114,8 @@ protected:
     sf::RenderTexture m_skyTexture;
     sf::RenderTexture m_minimapTexture;
     sf::Image m_currentBakeImage;
+    unsigned int m_skyCubemapHandle = 0;
+    bool m_skyCubemapReady = false;
     bool m_useDepthStepDebug = false;
     bool m_showTopDownViewer = false;
     float m_topdownMaxHeight = 1.f;
@@ -195,6 +197,7 @@ protected:
     void renderOrbs();
     void renderTopDownViewer(sf::RenderWindow& window);
     void captureBake();
+    void initializeSkyCubemap();
     void updateSunPosition();
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);

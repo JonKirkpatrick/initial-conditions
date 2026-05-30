@@ -141,64 +141,14 @@ float hexGrid(vec2 p) {
     return smoothstep(smoothing, 0.0, distToLine);
 }
 
-float decodeTopoDepth(vec4 topo) {
-    return topo.r + topo.g / 255.0 + topo.b / (255.0 * 255.0);
-}
-
-// Simple hash helper (inlined from sky.frag) to avoid cross-shader dependency
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-}
-
-vec3 skyColorForRay(vec3 rayDir) {
-    vec3 rayNorm = normalize(rayDir);
-    vec3 sunDirNorm = normalize(sunDir);
-    float sunDot = max(dot(rayNorm, sunDirNorm), 0.0);
-    float height = rayNorm.y;
-    float sunElevation = asin(sunDirNorm.y) * 180.0 / 3.14159265;
-
-    float dayFactor      = smoothstep(0.0, 10.0, sunElevation);
-    float nightFactor    = smoothstep(-5.0, -12.0, sunElevation);
-    float twilightFactor = clamp(1.0 - dayFactor - nightFactor, 0.0, 1.0);
-
-    vec3 dayZenith      = vec3(0.25, 0.45, 0.95);
-    vec3 dayHorizon     = vec3(0.70, 0.80, 0.95);
-    vec3 twilightZenith  = vec3(0.45, 0.25, 0.65);
-    vec3 twilightHorizon = vec3(0.95, 0.55, 0.35);
-    vec3 nightColor     = vec3(0.02, 0.01, 0.08);
-
-    float tDay      = pow((height + 1.0) * 0.5, 1.4);
-    float tTwilight = pow((height + 1.0) * 0.5, 1.6);
-
-    vec3 daySky      = mix(dayHorizon, dayZenith, tDay);
-    vec3 twilightSky = mix(twilightHorizon, twilightZenith, tTwilight);
-    vec3 skyColor = daySky * dayFactor
-                  + twilightSky * twilightFactor
-                  + nightColor * nightFactor;
-
-    float golden = pow(sunDot, 8.0) * 0.8 * twilightFactor;
-    skyColor += golden * vec3(1.0, 0.7, 0.4);
-
-    float sunGlow = pow(sunDot, 24.0) * 3.5;
-    vec3 sunLight = sunColor.rgb * sunColor.a;
-    skyColor += sunGlow * sunLight * 0.9;
-
-    float discFactor = smoothstep(-2.0, 2.0, sunElevation);
-    float sunDisc = pow(sunDot, 180.0);
-    skyColor += sunDisc * vec3(1.0, 0.95, 0.82) * 2.0 * discFactor;
-
-    float starFactor = smoothstep(-3.0, -10.0, sunElevation);
-    vec2 starUV = rayNorm.xz / (rayNorm.y + 1.01);
-    vec2 cell = floor(starUV * 800.0);
-    float h = hash(cell);
-    float starMask = step(0.9975, h);
-    float starBrightness = pow(h, 12.0);
-    skyColor += starMask * starBrightness * vec3(0.9, 0.95, 1.0) * starFactor;
-
-    float haze = pow(1.0 - clamp(height, 0.0, 1.0), 4.0) * 0.7;
-    skyColor += haze * vec3(0.8, 0.65, 0.55) * 0.6;
-
-    return skyColor;
+float decodeTopoDepth(vec4 topo)
+{
+    return dot(topo.rgb,
+               vec3(
+                   1.0,
+                   1.0 / 256.0,
+                   1.0 / 65536.0
+               ));
 }
 
 // ================== MAIN ==================

@@ -22,9 +22,16 @@ uniform float layer_topoHeight[16];
 
 #include "topo_common.glsl"
 
-float decodePackedHeight(vec4 c, float maxHeightValue) {
-    float hn = c.r + c.g / 255.0 + c.b / (255.0 * 255.0);
-    return hn * max(maxHeightValue, 1e-6);
+float decodePackedHeight(vec4 rgba, float maxHeightValue)
+{
+    vec3 bytes = floor(rgba.rgb * 255.0 + 0.5);
+
+    float scaled = dot(
+        bytes,
+        vec3(65536.0, 256.0, 1.0)
+    );
+
+    return scaled * (maxHeightValue / 16777215.0);
 }
 
 bool sampleTopdownHeight(in vec2 xz, out float outH) {
@@ -38,6 +45,23 @@ bool sampleTopdownHeight(in vec2 xz, out float outH) {
     vec4 c = texture2D(topoTopdownTex, uv);
     outH = decodePackedHeight(c, topdownHeightMax);
     return true;
+}
+
+vec4 encodeU24(float normalized)
+{
+    normalized = clamp(normalized, 0.0, 1.0);
+
+    normalized = min(normalized, 0.99999994);
+
+    vec3 enc = fract(normalized * vec3(1.0, 256.0, 65536.0));
+
+    enc -= enc.yzz * vec3(
+        1.0 / 256.0,
+        1.0 / 256.0,
+        0.0
+    );
+
+    return vec4(enc, 1.0);
 }
 
 void main() {
@@ -166,9 +190,6 @@ void main() {
     }
 
     float normalized = clamp((t - nearPlane) / (farPlane - nearPlane), 0.0, 1.0);
-    float r = floor(normalized * 255.0) / 255.0;
-    float g = fract(normalized * 255.0);
-    float b = fract(normalized * 255.0 * 255.0);
 
-    gl_FragColor = vec4(r, g, b, 1.0);
+    gl_FragColor = encodeU24(normalized);
 }

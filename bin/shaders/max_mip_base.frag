@@ -11,12 +11,25 @@ uniform float layer_topoHeight[16];
 
 #include "topo_common.glsl"
 
-vec3 packHeight24(float heightValue, float maxHeightValue) {
-    float normalized = clamp(heightValue / max(maxHeightValue, 1e-6), 0.0, 1.0);
-    float scaled = normalized * 16777215.0;
+vec3 packHeight24(float heightValue, float maxHeightValue)
+{
+    float normalized = clamp(
+        heightValue / max(maxHeightValue, 1e-6),
+        0.0,
+        1.0
+    );
+
+    // Prevent overflow at exactly 1.0
+    normalized = min(normalized, 0.99999994);
+
+    float scaled = floor(normalized * 16777215.0);
+
     float r = floor(scaled / 65536.0);
-    float g = floor((scaled - r * 65536.0) / 256.0);
-    float b = floor(scaled - r * 65536.0 - g * 256.0);
+    scaled -= r * 65536.0;
+
+    float g = floor(scaled / 256.0);
+    float b = scaled - g * 256.0;
+
     return vec3(r, g, b) / 255.0;
 }
 
