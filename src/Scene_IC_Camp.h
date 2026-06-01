@@ -73,6 +73,14 @@ class Scene_IC_Camp : public Scene {
         float distNorm;
         sf::Color color;
     };
+
+    struct AstroTime
+    {
+        double julianDate      = 0.0;
+        double julianCenturies = 0.0;  // T from J2000, used everywhere
+        double gmst            = 0.0;  // Greenwich Mean Sidereal Time (degrees)
+        double lst             = 0.0;  // Local Sidereal Time (degrees)
+    };
     
 protected:
     std::string m_levelPath;
@@ -173,9 +181,13 @@ protected:
     void uploadWarpParametersToShader(sf::Shader& shader) const;
 
     // Time, Date and Location
-    float m_gameTimeOfDay; // Hours between 0 and 24
+    double m_gameTimeOfDay; // Hours between 0 and 24
     int m_gameDayOfYear; // Day of the year between 1 and 365
+    int m_gameDayOfMonth; // Day of the month between 1 and 31 (not currently used, but could be for more detailed time control)
+    int m_gameMonth; // Month between 1 and 12 (not currently used, but could be for more detailed time control)
+    int m_gameYear; // Year (not currently used, but could be for more detailed time control)
     float m_latitude; // Newfoundland
+    float m_longitude; // Newfoundland
 
     // Sun parameters
     sf::Glsl::Vec3 m_sunDirection;
@@ -186,6 +198,7 @@ protected:
     // Star parameters
     float m_starRotationMatrix[9];
     float m_epochOffset = 0.0f; // Time offset to simulate star movement (days)
+    AstroTime m_astroTime;
 
     void updateCamera(float dt);
 
@@ -204,6 +217,7 @@ protected:
     void initializeSkyCubemap();
     void updateSunPosition();
     void updateStarRotation();
+    void siderealTime();
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
     void uploadShadowOrbsToShader(sf::Shader& shader);

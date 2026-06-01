@@ -150,6 +150,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     updateHUDData();
     updateSunPosition();
     updateStarRotation();
+    siderealTime();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -326,8 +327,12 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
         if (str == "DateTimePlace")
         {
             file >> m_gameTimeOfDay
+                 >> m_gameYear
                  >> m_gameDayOfYear
-                 >> m_latitude;
+                 >> m_gameDayOfMonth
+                 >> m_gameMonth
+                 >> m_latitude
+                 >> m_longitude;
         }
     }
     std::srand(std::time(0));
@@ -610,17 +615,34 @@ void Scene_IC_Camp::update() {
     // Time advancement — debug rate: 1 in-game hour per 4 real seconds
     // To slow later: replace 1.0f / 4.0f with 1.0f / (4.0f * desiredSlowdown)
     const float realSecondsPerGameHour = 4.0f;
-    m_gameTimeOfDay += dt * (1.0f / realSecondsPerGameHour);
-
+    m_gameTimeOfDay += static_cast<double>(dt) * (1.0f / realSecondsPerGameHour);
     if (m_gameTimeOfDay >= 24.0f)
     {
         m_gameTimeOfDay -= 24.0f;
-        m_gameDayOfYear += 1;
-        if (m_gameDayOfYear > 365)
-            m_gameDayOfYear = 1;
+        m_gameDayOfYear++;
+        m_gameDayOfMonth++;
+
+        // Days per month, accounting for leap year
+        const int daysInMonth[] = { 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+        bool leapYear = (m_gameYear % 4 == 0 && m_gameYear % 100 != 0) || (m_gameYear % 400 == 0);
+        int daysThisMonth = daysInMonth[m_gameMonth] + (leapYear && m_gameMonth == 2 ? 1 : 0);
+
+        if (m_gameDayOfMonth > daysThisMonth)
+        {
+            m_gameDayOfMonth = 1;
+            m_gameMonth++;
+
+            if (m_gameMonth > 12)
+            {
+                m_gameMonth = 1;
+                m_gameYear++;
+                m_gameDayOfYear = 1;
+            }
+        }
     }
     sMovement(dt);
     updateHUDData();
+    siderealTime();
     updateSunPosition();
     updateStarRotation();
     updateCamera(dt);
@@ -1201,11 +1223,17 @@ void Scene_IC_Camp::sGUI()
         if (ImGui::BeginTabItem("Time and Date"))
         {
             bool changed = false;
-            changed |= ImGui::SliderFloat("Time of Day (hours)", &m_gameTimeOfDay, 0.0f, 24.0f);
+            float timeOfDayF = static_cast<float>(m_gameTimeOfDay);
+            if (ImGui::SliderFloat("Time of Day (hours)", &timeOfDayF, 0.0f, 24.0f))
+            {
+                m_gameTimeOfDay = static_cast<double>(timeOfDayF);
+                changed = true;
+            }
             changed |= ImGui::SliderInt("Day of Year", &m_gameDayOfYear, 1, 365);
             changed |= ImGui::SliderFloat("Latitude", &m_latitude, -90.0f, 90.0f);
             changed |= ImGui::SliderFloat("Epoch Offset", &m_epochOffset, -365.0f, 365.0f);
             if (changed) {
+                siderealTime();
                 updateSunPosition();
                 updateStarRotation();
             }
@@ -1663,22 +1691,45 @@ void Scene_IC_Camp::updateSunPosition()
     );
 }
 
+void Scene_IC_Camp::siderealTime()
+{
+    const double DEG2RAD = 3.14159265358979323846 / 180.0;
+
+    double a   = std::floor((14.0 - m_gameMonth) / 12.0);
+    double y   = m_gameYear + 4800.0 - a;
+    double m   = m_gameMonth + 12.0 * a - 3.0;
+    double jdn = m_gameDayOfMonth
+               + std::floor((153.0 * m + 2.0) / 5.0)
+               + 365.0 * y
+               + std::floor(y / 4.0)
+               - std::floor(y / 100.0)
+               + std::floor(y / 400.0)
+               - 32045.0;
+
+    double dayFraction       = (static_cast<double>(m_gameTimeOfDay) / 24.0) - 0.5;
+    double daysSinceJ2000    = (jdn - 2451545.0) + dayFraction;
+
+    m_astroTime.julianDate      = jdn + dayFraction;
+    m_astroTime.julianCenturies = daysSinceJ2000 / 36525.0;
+
+    m_astroTime.gmst = std::fmod(280.46061837 + 360.98564736629 * daysSinceJ2000, 360.0);
+    if (m_astroTime.gmst < 0.0)
+        m_astroTime.gmst += 360.0;
+
+    m_astroTime.lst = std::fmod(m_astroTime.gmst + static_cast<double>(m_longitude), 360.0);
+    if (m_astroTime.lst < 0.0)
+        m_astroTime.lst += 360.0;
+
+    m_epochOffset = static_cast<float>(m_astroTime.lst * DEG2RAD);
+}
+
 void Scene_IC_Camp::updateStarRotation()
 {
-    const float PI = 3.14159265f;
-    const float DEG2RAD = PI / 180.0f;
+    const float DEG2RAD = 3.14159265f / 180.0f;
 
-    // Sidereal time advances ~366.25/365.25 times faster than solar time
-    // Your hour angle already captures time-of-day, so scale it up
-    float hourAngleDeg  = (m_gameTimeOfDay / 24.0f - 0.5f) * 360.0f;
-    float siderealAngle = hourAngleDeg * (366.25f / 365.25f) * DEG2RAD
-                        + m_epochOffset; // tune this to align stars to your skybox
+    float siderealAngle = m_epochOffset;  // LST in radians, set by siderealTime()
+    float latRad        = m_latitude * DEG2RAD;
 
-    float latRad = m_latitude * DEG2RAD;
-
-    // The pole axis in your Y-up, Z-north world is simply:
-    // a unit vector pointing toward celestial north
-    // = (0, sin(lat), cos(lat))  [tilted back from vertical by co-latitude]
     float poleX = 0.0f;
     float poleY = std::sin(latRad);
     float poleZ = std::cos(latRad);
@@ -1690,11 +1741,9 @@ void Scene_IC_Camp::updateStarRotation()
     m_starRotationMatrix[0] = t*poleX*poleX + c;
     m_starRotationMatrix[1] = t*poleX*poleY + s*poleZ;
     m_starRotationMatrix[2] = t*poleX*poleZ - s*poleY;
-
     m_starRotationMatrix[3] = t*poleX*poleY - s*poleZ;
     m_starRotationMatrix[4] = t*poleY*poleY + c;
     m_starRotationMatrix[5] = t*poleY*poleZ + s*poleX;
-
     m_starRotationMatrix[6] = t*poleX*poleZ + s*poleY;
     m_starRotationMatrix[7] = t*poleY*poleZ - s*poleX;
     m_starRotationMatrix[8] = t*poleZ*poleZ + c;
