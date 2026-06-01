@@ -183,6 +183,10 @@ protected:
     float m_sunIntensity = 1.0f;
     float m_atmosphereTint = 0.0f;
 
+    // Star parameters
+    float m_starRotationMatrix[9];
+    float m_epochOffset = 0.0f; // Time offset to simulate star movement (days)
+
     void updateCamera(float dt);
 
     // Main render passes and world updates
@@ -199,6 +203,7 @@ protected:
     void captureBake();
     void initializeSkyCubemap();
     void updateSunPosition();
+    void updateStarRotation();
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
     void uploadShadowOrbsToShader(sf::Shader& shader);

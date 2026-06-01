@@ -38,6 +38,15 @@ static float dot(const sf::Vector3f& a, const sf::Vector3f& b)
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+static sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b)
+{
+    return sf::Vector3f(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    );
+}
+
 namespace
 {
     struct CubeFaceSpec
@@ -55,65 +64,52 @@ namespace
         {"front",  GL_TEXTURE_CUBE_MAP_NEGATIVE_Z},
     }};
 
-    bool readPfmFile(const std::filesystem::path& path,
-                     int& width,
-                     int& height,
-                     std::vector<float>& pixels)
+    bool readRawHalfFile(const std::filesystem::path& path,
+                         int& width,
+                         int& height,
+                         std::vector<uint16_t>& pixels) // Using uint16_t for 16-bit half-floats
     {
-        std::ifstream file(path, std::ios::binary);
+        // 1. Open the file and check size
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file)
         {
-            std::cerr << "Could not open PFM file: " << path << std::endl;
+            std::cerr << "Could not open RAW file: " << path << std::endl;
             return false;
         }
 
-        std::string magic;
-        file >> magic;
-        if (magic != "PF")
+        const std::streamsize fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // 2. Calculate dimensions assuming 3 channels (RGB) of 16-bit (2 bytes) data
+        // Total bytes = width * height * 3 channels * 2 bytes per channel
+        const size_t totalPixels = static_cast<size_t>(fileSize) / (3 * sizeof(uint16_t));
+        
+        // Assuming square cubemap faces (width == height)
+        width = static_cast<int>(std::sqrt(totalPixels));
+        height = width;
+
+        // Sanity check to ensure the file size matches a perfect square RGB layout
+        if (static_cast<size_t>(width) * static_cast<size_t>(height) * 3 * sizeof(uint16_t) != static_cast<size_t>(fileSize))
         {
-            std::cerr << "Unexpected PFM magic in file: " << path << " (" << magic << ")" << std::endl;
+            std::cerr << "Error: RAW file size does not match expected square 3-channel layout: " << path << std::endl;
             return false;
         }
 
-        file >> width >> height;
-        float scale = 1.0f;
-        file >> scale;
-        file.get();
-
-        if (width <= 0 || height <= 0)
-        {
-            std::cerr << "Invalid PFM dimensions in file: " << path << std::endl;
-            return false;
-        }
-
-        pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 3u);
-        file.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size() * sizeof(float)));
+        // 3. Read the payload
+        pixels.resize(totalPixels * 3);
+        file.read(reinterpret_cast<char*>(pixels.data()), fileSize);
+        
         if (!file)
         {
-            std::cerr << "Could not read PFM pixel payload: " << path << std::endl;
+            std::cerr << "Could not read RAW pixel payload: " << path << std::endl;
             return false;
         }
 
-        const bool fileLittleEndian = scale < 0.0f;
-        const bool hostLittleEndian = []()
-        {
-            const uint16_t value = 1;
-            return reinterpret_cast<const unsigned char*>(&value)[0] == 1;
-        }();
-
-        if (fileLittleEndian != hostLittleEndian)
-        {
-            auto* bytes = reinterpret_cast<unsigned char*>(pixels.data());
-            for (size_t i = 0; i < pixels.size(); ++i)
-            {
-                std::swap(bytes[i * sizeof(float) + 0], bytes[i * sizeof(float) + 3]);
-                std::swap(bytes[i * sizeof(float) + 1], bytes[i * sizeof(float) + 2]);
-            }
-        }
+        // Note: Endianness swapping is omitted here. Modern desktop GPUs/CPUs 
+        // and standard exporter tools (like Photoshop/Compressonator) default to Little Endian.
 
         return true;
     }
-
 }
 
 Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
@@ -153,6 +149,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     buildHud();
     updateHUDData();
     updateSunPosition();
+    updateStarRotation();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -530,42 +527,40 @@ void Scene_IC_Camp::initializeSkyCubemap()
     bool loadedAnyFace = false;
     for (const auto& face : SKY_CUBEMAP_FACES)
     {
-        const std::filesystem::path pfmPath = skyDir / (std::string(face.name) + ".pfm");
+        // 1. Point to the new .raw extension
+        const std::filesystem::path rawPath = skyDir / (std::string(face.name) + ".raw");
 
         int width = 0;
         int height = 0;
-        std::vector<float> pixels;
-        if (!readPfmFile(pfmPath, width, height, pixels))
+        
+        // 2. Container switched to uint16_t for half-float data
+        std::vector<uint16_t> pixels; 
+        if (!readRawHalfFile(rawPath, width, height, pixels))
         {
-            std::cerr << "Could not read converted sky face: " << pfmPath << std::endl;
+            std::cerr << "Could not read converted sky face: " << rawPath << std::endl;
             continue;
         }
 
+        // Note: The readRawHalfFile function handles the square shape check, 
+        // but keeping structural consistency with your original fallback check.
         if (width != height)
         {
-            std::cerr << "Sky face is not square: " << pfmPath << std::endl;
+            std::cerr << "Sky face is not square: " << rawPath << std::endl;
             continue;
         }
 
-        std::vector<float> flipped(pixels.size());
-        const size_t rowStride = static_cast<size_t>(width) * 3u;
-        for (int y = 0; y < height; ++y)
-        {
-            const size_t srcRow = static_cast<size_t>(y) * rowStride;
-            const size_t dstRow = static_cast<size_t>(height - 1 - y) * rowStride;
-            std::copy_n(pixels.data() + srcRow, rowStride, flipped.data() + dstRow);
-        }
-
+        // 3. Upload to the GPU utilizing half-floats (No vertical flip needed!)
         glTexImage2D(
             face.target,
             0,
-            GL_RGB32F,
+            GL_RGB16F,        // GPU internal allocation optimized to 16-bit float
             width,
             height,
             0,
             GL_RGB,
-            GL_FLOAT,
-            flipped.data());
+            GL_HALF_FLOAT,    // Tells OpenGL your buffer contains 16-bit half-floats
+            pixels.data());   // Pass original pixels array directly
+        
         loadedAnyFace = true;
     }
 
@@ -627,6 +622,7 @@ void Scene_IC_Camp::update() {
     sMovement(dt);
     updateHUDData();
     updateSunPosition();
+    updateStarRotation();
     updateCamera(dt);
     sortOrbs();
     m_hud->update(m_game.window(), m_hudData);
@@ -1208,7 +1204,11 @@ void Scene_IC_Camp::sGUI()
             changed |= ImGui::SliderFloat("Time of Day (hours)", &m_gameTimeOfDay, 0.0f, 24.0f);
             changed |= ImGui::SliderInt("Day of Year", &m_gameDayOfYear, 1, 365);
             changed |= ImGui::SliderFloat("Latitude", &m_latitude, -90.0f, 90.0f);
-            if (changed) updateSunPosition();
+            changed |= ImGui::SliderFloat("Epoch Offset", &m_epochOffset, -365.0f, 365.0f);
+            if (changed) {
+                updateSunPosition();
+                updateStarRotation();
+            }
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -1412,6 +1412,7 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& rotationMatrix) {
     m_sky.setUniform("invRotationMatrix", rotationMatrix);
     m_sky.setUniform("sunDir", m_sunDirection);
     m_sky.setUniform("useSkyCubemap", m_skyCubemapReady);
+    m_sky.setUniform("starRotationMatrix", sf::Glsl::Mat3(m_starRotationMatrix));
     m_sky.setUniform("skyExposure", 15.0f);
 
     if (m_skyCubemapReady && m_skyCubemapHandle != 0)
@@ -1660,6 +1661,43 @@ void Scene_IC_Camp::updateSunPosition()
         0.65f + warmth * 0.30f,
         m_sunIntensity
     );
+}
+
+void Scene_IC_Camp::updateStarRotation()
+{
+    const float PI = 3.14159265f;
+    const float DEG2RAD = PI / 180.0f;
+
+    // Sidereal time advances ~366.25/365.25 times faster than solar time
+    // Your hour angle already captures time-of-day, so scale it up
+    float hourAngleDeg  = (m_gameTimeOfDay / 24.0f - 0.5f) * 360.0f;
+    float siderealAngle = hourAngleDeg * (366.25f / 365.25f) * DEG2RAD
+                        + m_epochOffset; // tune this to align stars to your skybox
+
+    float latRad = m_latitude * DEG2RAD;
+
+    // The pole axis in your Y-up, Z-north world is simply:
+    // a unit vector pointing toward celestial north
+    // = (0, sin(lat), cos(lat))  [tilted back from vertical by co-latitude]
+    float poleX = 0.0f;
+    float poleY = std::sin(latRad);
+    float poleZ = std::cos(latRad);
+
+    float c = std::cos(siderealAngle);
+    float s = std::sin(siderealAngle);
+    float t = 1.0f - c;
+
+    m_starRotationMatrix[0] = t*poleX*poleX + c;
+    m_starRotationMatrix[1] = t*poleX*poleY + s*poleZ;
+    m_starRotationMatrix[2] = t*poleX*poleZ - s*poleY;
+
+    m_starRotationMatrix[3] = t*poleX*poleY - s*poleZ;
+    m_starRotationMatrix[4] = t*poleY*poleY + c;
+    m_starRotationMatrix[5] = t*poleY*poleZ + s*poleX;
+
+    m_starRotationMatrix[6] = t*poleX*poleZ + s*poleY;
+    m_starRotationMatrix[7] = t*poleY*poleZ - s*poleX;
+    m_starRotationMatrix[8] = t*poleZ*poleZ + c;
 }
 
 void Scene_IC_Camp::captureBake() {

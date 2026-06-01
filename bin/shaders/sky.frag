@@ -6,6 +6,7 @@ uniform vec4 sunColor;
 uniform mat3 invRotationMatrix;
 
 uniform samplerCube skyCubemap;
+uniform mat3 starRotationMatrix;
 uniform bool useSkyCubemap;
 uniform float skyExposure;
 
@@ -71,7 +72,8 @@ void main() {
         float cubemapFactor = 1.0 - smoothstep(-10.0, -2.0, sunElevation);
         
         // 1. Grab raw data and apply exposure
-        vec3 exposedColor = textureCube(skyCubemap, rayDir).rgb * skyExposure;
+        vec3 starDir = starRotationMatrix * rayDir;
+        vec3 exposedColor = textureCube(skyCubemap, starDir).rgb * skyExposure;
 
         // 2. Atmospheric Extinction (Dim stars near the horizon)
         float airMass = 1.0 / max(rayDir.y, 0.01); 
