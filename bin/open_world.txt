@@ -1,6 +1,6 @@
 Camera 45.0 0.001 500.0
 Player 3.00 45.0 1.72 0.20 0 0
-DateTimePlace 0.0 2025 171 20 6 -90.0000 0.0000 
+DateTimePlace 2.683333333 2025 191 10 7 47.56148 -52.71267
 TerrainLayer 100 -50 40.0 50.0 16.0
 TerrainLayer 92 -13 55.0 65.0 17.0
 TerrainLayer 71 26 70.0 80.0 8.0

@@ -92,69 +92,110 @@ void main() {
     }
 
     // ================== MOON ==================
-    vec3  moonDirNorm    = normalize(moonDir);
-    float moonDot        = dot(rayDir, moonDirNorm);
-    float moonAngDist    = acos(clamp(moonDot, -1.0, 1.0));
-    float moonAngRadius  = 1.2 * 3.14159265 / 180.0;
+    vec3 moonDirNorm = normalize(moonDir);
+    float moonDot = dot(rayDir, moonDirNorm);
+    float moonAngDist = acos(clamp(moonDot, -1.0, 1.0));
+    float moonAngRadius = 2.5 * 3.14159265 / 180.0;
 
     if (moonAngDist < moonAngRadius * 2.0)
     {
         // ── Build a local tangent frame around the moon center ──────────────────
-        // We need two axes perpendicular to moonDirNorm to map the texture
-        vec3 worldUp   = vec3(0.0, 1.0, 0.0);
-        vec3 moonRight = normalize(cross(worldUp, moonDirNorm));
-        vec3 moonUp    = normalize(cross(moonDirNorm, moonRight));
+        // ── Stable branchless billboard frame ───────────────────────────────────
+        // Use a vector that changes based on orientation to prevent cross-product collapse
+        vec3 safeUp = abs(moonDirNorm.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+        vec3 moonRight = normalize(cross(safeUp, moonDirNorm));
+        vec3 moonUp = cross(moonDirNorm, moonRight); // Already normalized if right and dir are normalized
 
         // ── Project rayDir onto moon's local frame ──────────────────────────────
-        vec3  delta  = rayDir - moonDirNorm * moonDot;
+        vec3 delta = rayDir - moonDirNorm * moonDot;
         float localX = dot(delta, moonRight);
         float localY = dot(delta, moonUp);
 
         // ── Convert to UV (0..1) ────────────────────────────────────────────────
         float uvX = (localX / moonAngRadius) * 0.5 + 0.5;
         float uvY = (localY / moonAngRadius) * 0.5 + 0.5;
-        vec2  uv  = vec2(uvX, uvY);
+        vec2 uv = vec2(uvX, uvY);
 
         // ── Sample the texture ──────────────────────────────────────────────────
         vec4 moonSample = texture2D(moonTexture, uv);
+        
+        // CRITICAL FIX: Zero out alpha if UV coordinates step outside the texture bounds
+        float boundsMask = step(0.0, uv.x) * step(0.0, uv.y) * step(uv.x, 1.0) * step(uv.y, 1.0);
+        float discMask = moonSample.a * boundsMask;
 
-        // ── Circular disc mask from texture alpha ───────────────────────────────
-        float discMask = moonSample.a;
+        // == Create Moonlight (3D Diffuse Lighting) ==============================
+        vec3 moonLightProj = sunDirNorm - moonDirNorm * dot(sunDirNorm, moonDirNorm);
+        
+        // Prevent normalization crash if sun and moon are perfectly aligned
+        vec3 moonLight = length(moonLightProj) > 0.0001 ? normalize(moonLightProj) : moonRight;
+        
+        float lightX = dot(moonLight, moonRight);
+        float lightY = dot(moonLight, moonUp);
 
-        // ── Terminator ──────────────────────────────────────────────────────────
-        // moonPhase: 0=new, 0.5=full, 1=new
-        // Terminator sweeps left to right across the disc
-        // phaseX: -1=new(dark), 0=quarter, +1=full(bright)
-        float phaseAngle  = -moonPhase * 2.0 * 3.14159265;
-        float termX       = -cos(phaseAngle);         // terminator position in local X
-        float termSoft    = 0.05;                    // softness of terminator edge
-        float litFactor   = smoothstep(-termSoft, termSoft, uvX - 0.5 + termX * 0.5);
+        vec2 pos = vec2(uvX - 0.5, uvY - 0.5) * 2.0;
+        float r2 = dot(pos, pos);
+        
+        // Ensure we stay inside the sphere's bounds before square rooting
+        float z = sqrt(max(1.0 - r2, 0.0)); 
+        vec3 normal = vec3(pos.x, pos.y, z);
 
-        // Flip for waning phases (past full moon)
-        if (moonPhase > 0.5)
-            litFactor = 1.0 - litFactor;
+        float phaseAngle = acos(clamp(dot(moonDirNorm, sunDirNorm), -1.0, 1.0));
+        vec3 lightDir = normalize(vec3(
+            lightX * sin(phaseAngle),
+            lightY * sin(phaseAngle),
+            -cos(phaseAngle)
+        ));
 
-        // ── Earthshine — faint blue glow on dark limb ───────────────────────────
-        float earthshine  = (1.0 - litFactor) * 0.03;
-        vec3  earthColor  = vec3(0.3, 0.5, 0.8);
+        // This diffuse value replaces the old 'litFactor'
+        float diffuse = max(0.0, dot(normal, lightDir));
+
+        // ── Earthshine — faint blue glow on dark (unlit) limb ───────────────────
+        // We use (1.0 - diffuse) instead of the old 2D (1.0 - litFactor)
+        float earthshine = max(0.0, 1.0 - diffuse) * 0.03;
+        vec3 earthColor = vec3(0.3, 0.5, 0.8);
 
         // ── Limb darkening ──────────────────────────────────────────────────────
-        float r           = length(vec2(uvX - 0.5, uvY - 0.5)) * 2.0;
-        float limbDark    = sqrt(max(1.0 - r * r, 0.0));
-        limbDark          = mix(0.4, 1.0, limbDark);
+        float limbDark = mix(0.4, 1.0, z); // z is equivalent to sqrt(1.0 - r^2)
 
-        // ── Atmospheric extinction near horizon ─────────────────────────────────
-        float moonElev    = moonDirNorm.y;
-        float moonExtinct = clamp(moonElev * 4.0, 0.0, 1.0);
+        // ── Atmospheric extinction & Rayleigh Scattering near horizon ───────────
+        float moonElev = max(moonDirNorm.y, 0.01);
+        float airmass = 1.0 / moonElev;
+        vec3 rayleighBeta = vec3(0.051, 0.100, 0.275);
+        vec3 moonAtmosphereColor = exp(-rayleighBeta * airmass);
+        float horizonFade = smoothstep(0.0, 0.02, moonDirNorm.y);
+        moonAtmosphereColor *= horizonFade;
 
         // ── Assemble final moon color ────────────────────────────────────────────
-        vec3 moonLit  = moonSample.rgb * litFactor * limbDark * moonExtinct;
-        vec3 moonDark = skyColor * (1.0 - litFactor) * discMask;
-        vec3 earthshineColor = earthColor * earthshine * limbDark * moonExtinct;
-        vec3 moonFinal = moonLit + moonDark + earthshineColor;
+        // Drop ambient to near-zero during the day so the texture shadows don't stay dark grey
+        float ambient = mix(0.05, 0.001, dayFactor);
+        
+        // 1. DAYTIME BLEACH: Bleach and desaturate the raw moon texture details during the day
+        // This mixes the texture with a flat white base, fading out deep craters and maria
+        vec3 bleachedTexture = mix(moonSample.rgb, vec3(0.95), dayFactor * 0.75);
+        
+        // 2. Apply 3D diffuse lighting and limb darkening to the bleached base
+        vec3 moonLitRaw = bleachedTexture * (ambient + 0.95 * diffuse) * limbDark;
+        vec3 moonLit = moonLitRaw * moonAtmosphereColor;
+        
+        // Earthshine (only visible at night)
+        vec3 earthshineColor = earthColor * earthshine * limbDark * moonAtmosphereColor * discMask;
+        vec3 moonFinal = moonLit + earthshineColor;
+
+        // ── Dynamic Daytime Distance Haze (The Secret Sauce) ────────────────────
+        float airMassRay = 1.0 / max(rayDir.y, 0.01);
+        float horizonHazeFactor = 1.0 - exp(-0.08 * airMassRay);
+        float dayHazeVeil = horizonHazeFactor * (dayFactor + twilightFactor * 0.5);
+
+        // For the unlit portions, force it completely to 1.0 to remain invisible
+        float shadowMask = 1.0 - diffuse;
+        float dynamicDayHaze = mix(dayHazeVeil, 1.0, dayFactor * shadowMask);
+
+        // 3. ADDITIVE SCATTERING VEIL: Instead of just interpolating, 
+        // physically inject sky brightness over the lit moon crescent.
+        moonFinal = mix(moonFinal + skyColor * dayFactor * 0.4, skyColor, dynamicDayHaze);
 
         // ── Blend moon over sky ─────────────────────────────────────────────────
-        float moonBlend   = discMask * moonExtinct;
+        float moonBlend = discMask * horizonFade;
         skyColor = mix(skyColor, moonFinal, moonBlend);
     }
 

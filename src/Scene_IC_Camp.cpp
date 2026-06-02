@@ -669,7 +669,7 @@ void Scene_IC_Camp::update() {
     // Time advancement — debug rate: 1 in-game hour per 4 real seconds
     // To slow later: replace 1.0f / 4.0f with 1.0f / (4.0f * desiredSlowdown)
     const float realSecondsPerGameHour = 4.0f;
-    m_gameTimeOfDay += static_cast<double>(dt) * (1.0f / realSecondsPerGameHour);
+    // m_gameTimeOfDay += static_cast<double>(dt) * (1.0f / realSecondsPerGameHour);
     if (m_gameTimeOfDay >= 24.0f)
     {
         m_gameTimeOfDay -= 24.0f;
@@ -1898,7 +1898,7 @@ void Scene_IC_Camp::updateStarRotation()
     float lon  = m_longitude * DEG2RAD;
 
     float lst  = static_cast<float>(m_epochOffset);
-    lon += lst;
+    lon -= lst;
 
     m_starRotationMatrix[0] = std::cos(lon);
     m_starRotationMatrix[1] = 0.0f;

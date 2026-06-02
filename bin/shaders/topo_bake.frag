@@ -177,8 +177,9 @@ void main() {
         if (rayDir.y < -0.00001) {
             float tGround = -cameraPos.y / rayDir.y;
             
-            // Accept ground hit if it's within reasonable bounds
-            if (tGround > nearPlane * 0.5 && tGround < maxTravel * 1.2) {
+            // FIX: Accept the flat ground hit regardless of how far away it is.
+            // As rayDir.y approaches 0.0, tGround approaches infinity, which is correct!
+            if (tGround > nearPlane * 0.5) {
                 t = tGround;
                 isHit = true;
             }
