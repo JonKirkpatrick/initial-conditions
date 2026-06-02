@@ -10,6 +10,10 @@ uniform mat3 starRotationMatrix;
 uniform bool useSkyCubemap;
 uniform float skyExposure;
 
+uniform vec3 moonDir;
+uniform float moonPhase;
+uniform sampler2D moonTexture;
+
 void main() {
     vec2 screen = gl_FragCoord.xy;
     screen.y = viewportSize.y - screen.y;
@@ -72,7 +76,7 @@ void main() {
         float cubemapFactor = 1.0 - smoothstep(-10.0, -2.0, sunElevation);
         
         // 1. Grab raw data and apply exposure
-        vec3 starDir = starRotationMatrix * rayDir;
+        vec3 starDir =  starRotationMatrix * rayDir;
         vec3 exposedColor = textureCube(skyCubemap, starDir).rgb * skyExposure;
 
         // 2. Atmospheric Extinction (Dim stars near the horizon)
@@ -80,11 +84,78 @@ void main() {
         float extinction = exp(-0.15 * airMass); 
         exposedColor *= mix(1.0, extinction, cubemapFactor);
 
-        // 3. Tone Mapping (Keep your 32-bit star profiles crisp and sharp)
+        // 3. Tone Mapping (Keep your 16-bit star profiles crisp and sharp)
         vec3 toneMappedColor = exposedColor / (exposedColor + vec3(1.0));
 
         // 4. Blend natively
         skyColor = mix(skyColor, toneMappedColor, cubemapFactor);
+    }
+
+    // ================== MOON ==================
+    vec3  moonDirNorm    = normalize(moonDir);
+    float moonDot        = dot(rayDir, moonDirNorm);
+    float moonAngDist    = acos(clamp(moonDot, -1.0, 1.0));
+    float moonAngRadius  = 1.2 * 3.14159265 / 180.0;
+
+    if (moonAngDist < moonAngRadius * 2.0)
+    {
+        // ── Build a local tangent frame around the moon center ──────────────────
+        // We need two axes perpendicular to moonDirNorm to map the texture
+        vec3 worldUp   = vec3(0.0, 1.0, 0.0);
+        vec3 moonRight = normalize(cross(worldUp, moonDirNorm));
+        vec3 moonUp    = normalize(cross(moonDirNorm, moonRight));
+
+        // ── Project rayDir onto moon's local frame ──────────────────────────────
+        vec3  delta  = rayDir - moonDirNorm * moonDot;
+        float localX = dot(delta, moonRight);
+        float localY = dot(delta, moonUp);
+
+        // ── Convert to UV (0..1) ────────────────────────────────────────────────
+        float uvX = (localX / moonAngRadius) * 0.5 + 0.5;
+        float uvY = (localY / moonAngRadius) * 0.5 + 0.5;
+        vec2  uv  = vec2(uvX, uvY);
+
+        // ── Sample the texture ──────────────────────────────────────────────────
+        vec4 moonSample = texture2D(moonTexture, uv);
+
+        // ── Circular disc mask from texture alpha ───────────────────────────────
+        float discMask = moonSample.a;
+
+        // ── Terminator ──────────────────────────────────────────────────────────
+        // moonPhase: 0=new, 0.5=full, 1=new
+        // Terminator sweeps left to right across the disc
+        // phaseX: -1=new(dark), 0=quarter, +1=full(bright)
+        float phaseAngle  = -moonPhase * 2.0 * 3.14159265;
+        float termX       = -cos(phaseAngle);         // terminator position in local X
+        float termSoft    = 0.05;                    // softness of terminator edge
+        float litFactor   = smoothstep(-termSoft, termSoft, uvX - 0.5 + termX * 0.5);
+
+        // Flip for waning phases (past full moon)
+        if (moonPhase > 0.5)
+            litFactor = 1.0 - litFactor;
+
+        // ── Earthshine — faint blue glow on dark limb ───────────────────────────
+        float earthshine  = (1.0 - litFactor) * 0.03;
+        vec3  earthColor  = vec3(0.3, 0.5, 0.8);
+
+        // ── Limb darkening ──────────────────────────────────────────────────────
+        float r           = length(vec2(uvX - 0.5, uvY - 0.5)) * 2.0;
+        float limbDark    = sqrt(max(1.0 - r * r, 0.0));
+        limbDark          = mix(0.4, 1.0, limbDark);
+
+        // ── Atmospheric extinction near horizon ─────────────────────────────────
+        float moonElev    = moonDirNorm.y;
+        float moonExtinct = clamp(moonElev * 4.0, 0.0, 1.0);
+
+        // ── Assemble final moon color ────────────────────────────────────────────
+        vec3 moonLit  = moonSample.rgb * litFactor * limbDark * moonExtinct;
+        vec3 moonDark = skyColor * (1.0 - litFactor) * discMask;
+        vec3 earthshineColor = earthColor * earthshine * limbDark * moonExtinct;
+        vec3 moonFinal = moonLit + moonDark + earthshineColor;
+
+        // ── Blend moon over sky ─────────────────────────────────────────────────
+        float moonBlend   = discMask * moonExtinct;
+        skyColor = mix(skyColor, moonFinal, moonBlend);
     }
 
     // ================== HORIZON HAZE ==================

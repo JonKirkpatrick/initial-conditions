@@ -200,6 +200,11 @@ protected:
     float m_epochOffset = 0.0f; // Time offset to simulate star movement (days)
     AstroTime m_astroTime;
 
+    // Moon parameters
+    sf::Glsl::Vec3 m_moonDirection;
+    float m_moonPhase = 0.0f; // 0 = new, 0.5 = full, 1 = new
+    sf::Texture m_moonTexture;
+
     void updateCamera(float dt);
 
     // Main render passes and world updates
@@ -217,6 +222,7 @@ protected:
     void initializeSkyCubemap();
     void updateSunPosition();
     void updateStarRotation();
+    void updateMoonPosition();
     void siderealTime();
     void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
     void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);

@@ -47,6 +47,58 @@ static sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b)
     );
 }
 
+// Rotation around Y axis (LST spin around celestial pole)
+static std::array<float,9> rotY(float angle)
+{
+    float c = std::cos(angle), s = std::sin(angle);
+    return {
+         c,  0,  s,
+         0,  1,  0,
+        -s,  0,  c
+    };
+}
+
+// Rotation around X axis (tilt pole to correct elevation for latitude)
+static std::array<float,9> rotX(float angle)
+{
+    float c = std::cos(angle), s = std::sin(angle);
+    return {
+        1,  0,   0,
+        0,  c,  -s,
+        0,  s,   c
+    };
+}
+
+static std::array<float,9> rotZ(float angle)
+{
+    float c = std::cos(angle), s = std::sin(angle);
+    return {
+         c, -s,  0,
+         s,  c,  0,
+         0,  0,  1
+    };
+}
+
+static sf::Vector3f altAzToWorld(float altRad, float azRad)
+{
+    return sf::Vector3f(
+        std::cos(altRad) * std::sin(azRad),   // X east-west
+        std::sin(altRad),                      // Y up
+        std::cos(altRad) * std::cos(azRad)    // Z north-south
+    );
+}
+
+// Multiply two column-major 3x3 matrices
+static std::array<float,9> mat3Mul(const std::array<float,9>& A, const std::array<float,9>& B)
+{
+    std::array<float,9> R = {};
+    for (int col = 0; col < 3; col++)
+        for (int row = 0; row < 3; row++)
+            for (int k = 0; k < 3; k++)
+                R[col*3 + row] += A[k*3 + row] * B[col*3 + k];
+    return R;
+}
+
 namespace
 {
     struct CubeFaceSpec
@@ -133,6 +185,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_gridColor = Theme::color("cerulean");
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
+    m_moonTexture = Assets::Instance().getTexture("Moon");
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
@@ -148,9 +201,10 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     runTopDownPass();
     buildHud();
     updateHUDData();
+    siderealTime();
     updateSunPosition();
     updateStarRotation();
-    siderealTime();
+    updateMoonPosition();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -645,6 +699,7 @@ void Scene_IC_Camp::update() {
     siderealTime();
     updateSunPosition();
     updateStarRotation();
+    updateMoonPosition();
     updateCamera(dt);
     sortOrbs();
     m_hud->update(m_game.window(), m_hudData);
@@ -1236,6 +1291,7 @@ void Scene_IC_Camp::sGUI()
                 siderealTime();
                 updateSunPosition();
                 updateStarRotation();
+                updateMoonPosition();
             }
             ImGui::EndTabItem();
         }
@@ -1442,6 +1498,9 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& rotationMatrix) {
     m_sky.setUniform("useSkyCubemap", m_skyCubemapReady);
     m_sky.setUniform("starRotationMatrix", sf::Glsl::Mat3(m_starRotationMatrix));
     m_sky.setUniform("skyExposure", 15.0f);
+    m_sky.setUniform("moonDir", m_moonDirection);
+    m_sky.setUniform("moonPhase", m_moonPhase);
+    m_sky.setUniform("moonTexture", m_moonTexture);
 
     if (m_skyCubemapReady && m_skyCubemapHandle != 0)
     {
@@ -1691,6 +1750,114 @@ void Scene_IC_Camp::updateSunPosition()
     );
 }
 
+void Scene_IC_Camp::updateMoonPosition()
+{
+    const double DEG2RAD = 3.14159265358979323846 / 180.0;
+    const double RAD2DEG = 180.0 / 3.14159265358979323846;
+    double T = m_astroTime.julianCenturies;
+
+    // ── Fundamental arguments (Meeus chapter 47) ────────────────────────────
+    // Moon's mean longitude
+    double Lm = std::fmod(218.3164477 + 481267.88123421 * T, 360.0);
+    // Moon's mean anomaly
+    double M  = std::fmod(134.9633964 + 477198.8675055  * T, 360.0);
+    // Sun's mean anomaly
+    double Ms = std::fmod(357.5291092 + 35999.0502909   * T, 360.0);
+    // Moon's argument of latitude
+    double F  = std::fmod(93.2720950  + 483202.0175233  * T, 360.0);
+    // Longitude of ascending node
+    double Om = std::fmod(125.0445479 - 1934.1362608    * T, 360.0);
+
+    // Convert to radians for trig
+    double LmR = Lm * DEG2RAD;
+    double MR  = M  * DEG2RAD;
+    double MsR = Ms * DEG2RAD;
+    double FR  = F  * DEG2RAD;
+    double OmR = Om * DEG2RAD;
+
+    // ── Ecliptic longitude (degrees) — truncated Meeus series ───────────────
+    double dL = 6288774.0 * std::sin(MR)
+              + 1274027.0 * std::sin(2.0*LmR - MR)
+              +  658314.0 * std::sin(2.0*LmR)
+              +  213618.0 * std::sin(2.0*MR)
+              -  185116.0 * std::sin(MsR)
+              -  114332.0 * std::sin(2.0*FR)
+              +   58793.0 * std::sin(2.0*LmR - 2.0*MR)
+              +   57066.0 * std::sin(2.0*LmR - MsR - MR)
+              +   53322.0 * std::sin(2.0*LmR + MR)
+              +   45758.0 * std::sin(2.0*LmR - MsR)
+              -   40923.0 * std::sin(MsR - MR)
+              -   34720.0 * std::sin(LmR)
+              -   30383.0 * std::sin(MsR + MR);
+    dL /= 1000000.0;  // convert from 1e-6 degrees
+
+    // ── Ecliptic latitude (degrees) ──────────────────────────────────────────
+    double dB = 5128122.0 * std::sin(FR)
+              +  280602.0 * std::sin(MR  + FR)
+              +  277693.0 * std::sin(MR  - FR)
+              +  173237.0 * std::sin(2.0*LmR - FR)
+              +   55413.0 * std::sin(2.0*LmR - MR + FR)
+              +   46271.0 * std::sin(2.0*LmR - MR - FR)
+              +   32573.0 * std::sin(2.0*LmR + FR)
+              +   17198.0 * std::sin(2.0*MR  + FR)
+              +    9266.0 * std::sin(2.0*LmR + MR - FR)
+              +    8822.0 * std::sin(2.0*MR  - FR);
+    dB /= 1000000.0;
+
+    double eclLon = std::fmod(Lm + dL, 360.0);
+    double eclLat = dB;
+
+    // ── Obliquity of ecliptic ────────────────────────────────────────────────
+    double eps = 23.439291111 - 0.013004167 * T;
+    double epsR = eps * DEG2RAD;
+
+    // ── Ecliptic to equatorial (RA/Dec) ──────────────────────────────────────
+    double eclLonR = eclLon * DEG2RAD;
+    double eclLatR = eclLat * DEG2RAD;
+
+    double sinDec = std::sin(eclLatR) * std::cos(epsR)
+                  + std::cos(eclLatR) * std::sin(epsR) * std::sin(eclLonR);
+    double decRad = std::asin(std::clamp(sinDec, -1.0, 1.0));
+
+    double y = std::sin(eclLonR) * std::cos(epsR)
+             - std::tan(eclLatR) * std::sin(epsR);
+    double x = std::cos(eclLonR);
+    double raRad = std::atan2(y, x);
+    if (raRad < 0.0) raRad += 2.0 * 3.14159265358979323846;
+
+    // ── RA/Dec to Hour Angle ─────────────────────────────────────────────────
+    // LST is in degrees in m_astroTime.lst
+    double raDeg  = raRad * RAD2DEG;
+    double haDeg  = std::fmod(m_astroTime.lst - raDeg + 360.0, 360.0);
+    double haRad  = haDeg * DEG2RAD;
+
+    // ── Hour Angle + Dec to Alt/Az — same as your sun ────────────────────────
+    double latRad = m_latitude * DEG2RAD;
+
+    double sinElev = std::sin(latRad) * std::sin(decRad)
+                   + std::cos(latRad) * std::cos(decRad) * std::cos(haRad);
+    sinElev = std::clamp(sinElev, -1.0, 1.0);
+    double elevRad = std::asin(sinElev);
+    double elevDeg = elevRad * RAD2DEG;
+
+    double sinAz = std::sin(haRad) * std::cos(decRad) / std::cos(elevRad);
+    double cosAz = (std::sin(decRad) - std::sin(latRad) * std::sin(elevRad))
+                 / (std::cos(latRad) * std::cos(elevRad));
+    double azRad = std::atan2(sinAz, cosAz);
+
+    // ── World space direction — same convention as your sun ──────────────────
+    m_moonDirection = sf::Glsl::Vec3(
+        (float)(std::cos(elevRad) * std::sin(azRad)),
+        (float)(std::sin(elevRad)),
+        (float)(std::cos(elevRad) * std::cos(azRad))
+    );
+
+    // ── Phase angle — difference between moon and sun ecliptic longitudes ────
+    double sunLon = std::fmod(280.46646 + 36000.76983 * T, 360.0);
+    double phaseAngle = std::fmod(eclLon - sunLon + 360.0, 360.0);
+    m_moonPhase = (float)(phaseAngle / 360.0);  // 0=new, 0.5=full, 1=new
+}
+
 void Scene_IC_Camp::siderealTime()
 {
     const double DEG2RAD = 3.14159265358979323846 / 180.0;
@@ -1706,7 +1873,8 @@ void Scene_IC_Camp::siderealTime()
                + std::floor(y / 400.0)
                - 32045.0;
 
-    double dayFraction       = (static_cast<double>(m_gameTimeOfDay) / 24.0) - 0.5;
+    double utcTime = m_gameTimeOfDay - (m_longitude / 15.0);  // Convert local time to UTC based on longitude
+    double dayFraction       = (static_cast<double>(utcTime) / 24.0) - 0.5;
     double daysSinceJ2000    = (jdn - 2451545.0) + dayFraction;
 
     m_astroTime.julianDate      = jdn + dayFraction;
@@ -1726,27 +1894,21 @@ void Scene_IC_Camp::siderealTime()
 void Scene_IC_Camp::updateStarRotation()
 {
     const float DEG2RAD = 3.14159265f / 180.0f;
+    float lat  = (90.0f - m_latitude) * DEG2RAD;
+    float lon  = m_longitude * DEG2RAD;
 
-    float siderealAngle = m_epochOffset;  // LST in radians, set by siderealTime()
-    float latRad        = m_latitude * DEG2RAD;
+    float lst  = static_cast<float>(m_epochOffset);
+    lon += lst;
 
-    float poleX = 0.0f;
-    float poleY = std::sin(latRad);
-    float poleZ = std::cos(latRad);
-
-    float c = std::cos(siderealAngle);
-    float s = std::sin(siderealAngle);
-    float t = 1.0f - c;
-
-    m_starRotationMatrix[0] = t*poleX*poleX + c;
-    m_starRotationMatrix[1] = t*poleX*poleY + s*poleZ;
-    m_starRotationMatrix[2] = t*poleX*poleZ - s*poleY;
-    m_starRotationMatrix[3] = t*poleX*poleY - s*poleZ;
-    m_starRotationMatrix[4] = t*poleY*poleY + c;
-    m_starRotationMatrix[5] = t*poleY*poleZ + s*poleX;
-    m_starRotationMatrix[6] = t*poleX*poleZ + s*poleY;
-    m_starRotationMatrix[7] = t*poleY*poleZ - s*poleX;
-    m_starRotationMatrix[8] = t*poleZ*poleZ + c;
+    m_starRotationMatrix[0] = std::cos(lon);
+    m_starRotationMatrix[1] = 0.0f;
+    m_starRotationMatrix[2] = std::sin(lon);
+    m_starRotationMatrix[3] = std::sin(lon) * std::sin(lat);
+    m_starRotationMatrix[4] = std::cos(lat);
+    m_starRotationMatrix[5] = -std::cos(lon) * std::sin(lat);
+    m_starRotationMatrix[6] = -std::sin(lon) * std::cos(lat);
+    m_starRotationMatrix[7] = std::sin(lat);
+    m_starRotationMatrix[8] = std::cos(lon) * std::cos(lat);
 }
 
 void Scene_IC_Camp::captureBake() {
