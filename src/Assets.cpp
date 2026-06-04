@@ -1,15 +1,116 @@
 #include "Assets.h"
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
+#include <SFML/OpenGL.hpp>
 #include <map>
+#include <cmath>
 #include <cassert>
 #include <iostream>
 #include <fstream>
+
+static constexpr std::array<Assets::CubeFaceSpec, 6> SKY_CUBEMAP_FACES = {{
+    {"right",  GL_TEXTURE_CUBE_MAP_POSITIVE_X},
+    {"left",   GL_TEXTURE_CUBE_MAP_NEGATIVE_X},
+    {"up",     GL_TEXTURE_CUBE_MAP_POSITIVE_Y},
+    {"down",   GL_TEXTURE_CUBE_MAP_NEGATIVE_Y},
+    {"back",   GL_TEXTURE_CUBE_MAP_POSITIVE_Z},
+    {"front",  GL_TEXTURE_CUBE_MAP_NEGATIVE_Z},
+}};
 
 Assets& Assets::Instance()
 {
     static Assets assets;
     return assets;
+}
+
+void Assets::addCubemap(const std::string& name, const std::filesystem::path& folderPath)
+{
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
+
+    int width = 0, height = 0;
+    std::vector<uint16_t> pixels;
+
+    // Loop through the 6 specifications, load them, and upload them to the GPU
+    for (const auto& face : SKY_CUBEMAP_FACES)
+    {
+        // Construct the filename dynamically (e.g., "path/to/folder/right.raw")
+        std::filesystem::path facePath = folderPath / (std::string(face.suffix) + ".raw");
+
+        if (!readRawHalfFile(facePath, width, height, pixels))
+        {
+            std::cerr << "Failed to load cubemap face: " << facePath << std::endl;
+            glDeleteTextures(1, &textureID);
+            return;
+        }
+
+        // Upload 16-bit half-float RGB texture data directly to OpenGL
+        glTexImage2D(
+            face.target, 0, GL_RGB16F, width, height, 0, 
+            GL_RGB, GL_HALF_FLOAT, pixels.data()
+        );
+    }
+
+    // Set cubemap filtering parameters
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    // Save it in our map!
+    m_cubemapMap[name] = textureID;
+}
+
+GLuint Assets::getCubemap(const std::string& name) const
+{
+    assert(m_cubemapMap.find(name) != m_cubemapMap.end());
+    return m_cubemapMap.at(name);
+}
+
+bool Assets::readRawHalfFile(const std::filesystem::path& path,
+                        int& width,
+                        int& height,
+                        std::vector<uint16_t>& pixels) // Using uint16_t for 16-bit half-floats
+{
+    // 1. Open the file and check size
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        std::cerr << "Could not open RAW file: " << path << std::endl;
+        return false;
+    }
+
+    const std::streamsize fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    // 2. Calculate dimensions assuming 3 channels (RGB) of 16-bit (2 bytes) data
+    // Total bytes = width * height * 3 channels * 2 bytes per channel
+    const size_t totalPixels = static_cast<size_t>(fileSize) / (3 * sizeof(uint16_t));
+    
+    // Assuming square cubemap faces (width == height)
+    width = static_cast<int>(std::sqrt(totalPixels));
+    height = width;
+
+    // Sanity check to ensure the file size matches a perfect square RGB layout
+    if (static_cast<size_t>(width) * static_cast<size_t>(height) * 3 * sizeof(uint16_t) != static_cast<size_t>(fileSize))
+    {
+        std::cerr << "Error: RAW file size does not match expected square 3-channel layout: " << path << std::endl;
+        return false;
+    }
+
+    // 3. Read the payload
+    pixels.resize(totalPixels * 3);
+    file.read(reinterpret_cast<char*>(pixels.data()), fileSize);
+    
+    if (!file)
+    {
+        std::cerr << "Could not read RAW pixel payload: " << path << std::endl;
+        return false;
+    }
+
+    return true;
 }
 
 void Assets::addTexture(const std::string& textureName, const std::string& path, bool smooth)
@@ -75,6 +176,13 @@ void Assets::loadFromFile(const std::string& path)
             file >> name >> path;
             addShader(name, path);
             std::cout << "Loaded shader: " << name << " from " << path << std::endl;
+        } 
+        else if (str == "Cubemap")
+        {
+            std::string name, folderPath;
+            file >> name >> folderPath;
+            addCubemap(name, folderPath);
+            std::cout << "Loaded custom HDR cubemap: " << name << " from " << folderPath << std::endl;
         }
         else
         {

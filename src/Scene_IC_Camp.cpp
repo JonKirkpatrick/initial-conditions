@@ -1,4 +1,3 @@
-
 #include "Scene_IC_Camp.h"
 #include "GameEngine.h"
 #include <SFML/Graphics.hpp>
@@ -13,7 +12,9 @@
 #include <filesystem>
 #include <fstream>
 
-// This might need to move somewhere else.  It's just to flatten a 3x3 matrix into column-major order for uploading to the shader, and I need it in multiple places now.
+// =========================================================================
+// File-Local Static Helper Utilities
+// =========================================================================
 static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matrix) {
     const float flattened[9] = {
         matrix[0][0], matrix[1][0], matrix[2][0],
@@ -48,70 +49,9 @@ static sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b)
     );
 }
 
-namespace
-{
-    struct CubeFaceSpec
-    {
-        const char* name;
-        GLenum target;
-    };
-
-    constexpr std::array<CubeFaceSpec, 6> SKY_CUBEMAP_FACES = {{
-        {"right",  GL_TEXTURE_CUBE_MAP_POSITIVE_X},
-        {"left",   GL_TEXTURE_CUBE_MAP_NEGATIVE_X},
-        {"up",     GL_TEXTURE_CUBE_MAP_POSITIVE_Y},
-        {"down",   GL_TEXTURE_CUBE_MAP_NEGATIVE_Y},
-        {"back",   GL_TEXTURE_CUBE_MAP_POSITIVE_Z},
-        {"front",  GL_TEXTURE_CUBE_MAP_NEGATIVE_Z},
-    }};
-
-    bool readRawHalfFile(const std::filesystem::path& path,
-                         int& width,
-                         int& height,
-                         std::vector<uint16_t>& pixels) // Using uint16_t for 16-bit half-floats
-    {
-        // 1. Open the file and check size
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file)
-        {
-            std::cerr << "Could not open RAW file: " << path << std::endl;
-            return false;
-        }
-
-        const std::streamsize fileSize = file.tellg();
-        file.seekg(0, std::ios::beg);
-
-        // 2. Calculate dimensions assuming 3 channels (RGB) of 16-bit (2 bytes) data
-        // Total bytes = width * height * 3 channels * 2 bytes per channel
-        const size_t totalPixels = static_cast<size_t>(fileSize) / (3 * sizeof(uint16_t));
-        
-        // Assuming square cubemap faces (width == height)
-        width = static_cast<int>(std::sqrt(totalPixels));
-        height = width;
-
-        // Sanity check to ensure the file size matches a perfect square RGB layout
-        if (static_cast<size_t>(width) * static_cast<size_t>(height) * 3 * sizeof(uint16_t) != static_cast<size_t>(fileSize))
-        {
-            std::cerr << "Error: RAW file size does not match expected square 3-channel layout: " << path << std::endl;
-            return false;
-        }
-
-        // 3. Read the payload
-        pixels.resize(totalPixels * 3);
-        file.read(reinterpret_cast<char*>(pixels.data()), fileSize);
-        
-        if (!file)
-        {
-            std::cerr << "Could not read RAW pixel payload: " << path << std::endl;
-            return false;
-        }
-
-        // Note: Endianness swapping is omitted here. Modern desktop GPUs/CPUs 
-        // and standard exporter tools (like Photoshop/Compressonator) default to Little Endian.
-
-        return true;
-    }
-}
+// =========================================================================
+// Public Interface
+// =========================================================================
 
 Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     : Scene(game)
@@ -138,7 +78,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    initializeSkyCubemap();
     updateCamera(0.001f);
     spawnDebugOrbs(8000);
 
@@ -150,457 +89,13 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     runTopDownPass();
     buildHud();
     updateHUDData();
-    siderealTime();
+    updateSiderealTime();
     updateSunPosition();
     updateStarRotation();
     updateMoonPosition();
+    initializeSkyCubemap();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
-}
-
-void Scene_IC_Camp::updateCamera(float dt) 
-{
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    auto& playerTransform = m_entityManager.getTransform(m_player);
-    auto& playerPhysics = m_entityManager.getPhysics(m_player);
-    auto& playerBob = m_entityManager.getBob(m_player);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-
-    // Smooth crouch transition
-    float targetCrouch = playerPhysics.isCrouching ? 1.0f : 0.0f;
-    m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt;
-    m_crouchFactor = std::clamp(m_crouchFactor, 0.0f, 1.0f);
-
-    // Eye height
-    float eyeHeight = m_playerConfig.HEIGHT_OFFSET * (1.0f - m_crouchFactor * 0.45f);
-
-    sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
-
-    sf::Vector3f forward = forwardFromTransform(playerTransform);
-    forward = Camera::normalize(forward);
-    sf::Vector3f right(forward.z, 0.f, -forward.x);
-
-    float horizontalSpeed = std::sqrt(
-        playerTransform.velocity.x * playerTransform.velocity.x +
-        playerTransform.velocity.z * playerTransform.velocity.z
-    );
-
-    // Speed as a fraction of base move speed, clamped to sprint ceiling.
-    // Slope and terrain are already baked into horizontalSpeed, so no
-    // further compensation needed here.
-    float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
-
-    // moveFactor gates the bob entirely when nearly still (0..1 over first unit of speed)
-    float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
-
-    float phase = playerBob.accumulator * 6.2831853f;
-
-    // === Bob Parameters ===
-    float baseFrequency = 1.0f;
-
-    // Amplitudes interpolate continuously with speed.
-    // Sprint end (speedFraction = 3) is tighter/smaller — you're more rigid at a run.
-    // Walk end (speedFraction = 1) is the most pronounced swing.
-    // Uphill crawl (speedFraction < 1) tapers down toward zero via moveFactor.
-    float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
-    float lateralAmplitude = 5.5f + (3.8f - 5.5f) * t;
-    float verticalAmplitude = 6.2f + (4.8f - 6.2f) * t;
-
-    // Crouch reduces amplitude as a postural state regardless of speed
-    if (playerPhysics.isCrouching)
-    {
-        lateralAmplitude  *= (1.0f - m_crouchFactor * 0.45f);
-        verticalAmplitude *= (1.0f - m_crouchFactor * 0.55f);
-    }
-
-    lateralAmplitude *= 0.85f;
-
-    // Use same base frequency, with mild harmonic on vertical
-    float lateralBob  = std::sin(phase * baseFrequency) * lateralAmplitude * moveFactor;
-    float verticalBob = std::sin(phase * baseFrequency * 1.65f) * verticalAmplitude * moveFactor;
-
-    sf::Vector3f targetBob = right * lateralBob + sf::Vector3f(0.f, verticalBob, 0.f);
-    m_cameraBobOffset += (targetBob - m_cameraBobOffset) * m_bobLag;
-
-    camTransform.pos = headPos - (forward * m_playerConfig.EYE_OFFSET) + m_cameraBobOffset;
-    camTransform.yaw   = playerTransform.yaw;
-    camTransform.pitch = playerTransform.pitch;
-
-    // FOV scales continuously with speed rather than snapping on sprint state
-    float targetFov = m_cameraConfig.FOVY + 0.14f * (speedFraction / 3.0f);
-    targetFov -= m_crouchFactor * 0.05f;
-    cameraData.fovY += (targetFov - cameraData.fovY) * 0.12f;
-}
-
-bool Scene_IC_Camp::shouldHeadlightsBeOn() const
-{
-    switch (m_headlightState)
-    {
-    case HeadlightState::Off:
-        return false;
-    case HeadlightState::On:
-        return true;
-    case HeadlightState::Auto:
-    default:
-        return m_sunDirection.y < 0.12f || m_sunIntensity < 0.5f;
-    }
-}
-
-void Scene_IC_Camp::updateHUDData()
-{
-    // Use a constant for clarity
-    const float RAD_TO_DEG = 180.0f / 3.14159265f;
-
-    auto& playerTransform = m_entityManager.getTransform(m_player);
-    sf::Vector3f currentLocation = playerTransform.pos;
-    sf::Vector3f forward = forwardFromTransform(playerTransform);
-    forward.y = 0.f;
-    forward = Camera::normalize(forward);
-
-    float currentHeading = -std::atan2(forward.x, forward.z) * RAD_TO_DEG;
-
-    updateMinimapTexture();
-
-    m_hudData.position = currentLocation;
-    m_hudData.homeLocation = sf::Vector2f(m_homeLocationXZ.x, m_homeLocationXZ.y);
-    m_hudData.cameraYaw = currentHeading;
-    m_hudData.headlightState = static_cast<int>(m_headlightState);
-    m_hudData.headlightEnabled = shouldHeadlightsBeOn();
-    m_hudData.minimapTex = &m_minimapTexture.getTexture();
-}
-
-void Scene_IC_Camp::buildHud()
-{
-    m_hud = std::make_unique<HUD>(m_game.window().getSize());
-}
-
-HUD* Scene_IC_Camp::getHUD() const
-{
-    return m_hud.get();
-}
-
-void Scene_IC_Camp::loadLevel(const std::string& filename)
-{
-    m_entityManager = EntityManager();
-    m_terrainLayers = {};
-
-    std::ifstream file(filename);
-    std::string str;
-    int terrainLayerIndex = 0;
-    while (file >> str)
-    {
-        if (str == "Camera")
-        {
-            file >> m_cameraConfig.FOVY
-                 >> m_cameraConfig.NEAR_PLANE
-                 >> m_cameraConfig.FAR_PLANE;
-        }
-        if (str == "Player")
-        {
-            file >> m_playerConfig.MOVE_SPEED
-                 >> m_playerConfig.ROTATION_SPEED
-                 >> m_playerConfig.HEIGHT_OFFSET
-                 >> m_playerConfig.EYE_OFFSET
-                 >> m_playerConfig.POSITION_X
-                 >> m_playerConfig.POSITION_Z;
-        }
-        if (str == "TerrainLayer")
-        {
-            int centerX = 0;
-            int centerY = 0;
-            float radius = 0.f;
-            float falloffWidth = 0.f;
-            float topoHeight = 0.f;
-
-            file >> centerX
-                 >> centerY
-                 >> radius
-                 >> falloffWidth
-                 >> topoHeight;
-
-            if (terrainLayerIndex < static_cast<int>(m_terrainLayers.size()))
-            {
-                TerrainLayer& layer = m_terrainLayers[terrainLayerIndex++];
-                layer.center = hexToWorld(centerX, centerY);
-                layer.radius = radius * 100.f;
-                layer.falloffWidth = falloffWidth * 100.f;
-                layer.topoHeight = topoHeight * 100.f;
-            }
-        }
-        if (str == "DateTimePlace")
-        {
-            file >> m_gameTimeOfDay
-                 >> m_gameYear
-                 >> m_gameDayOfMonth
-                 >> m_gameMonth
-                 >> m_latitude
-                 >> m_longitude;
-        }
-    }
-    std::srand(std::time(0));
-    m_homeLocationXZ = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
-}
-
-void Scene_IC_Camp::spawnPlayer()
-{
-    m_player = m_entityManager.addEntity("player");
-    m_playerConfig.HEIGHT_OFFSET *= 100.f; // convert from metres to cm
-    m_playerConfig.EYE_OFFSET *= 100.f;    // convert from metres to cm
-    m_playerConfig.MOVE_SPEED *= 100.f;    // convert from m/s to cm/s
-    m_playerConfig.ROTATION_SPEED = m_playerConfig.ROTATION_SPEED * 3.14159265f / 180.f;
-    sf::Vector2f playerPosition = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
-    sf::Vector3f spawnPos(playerPosition.x, heightAt(playerPosition.x, playerPosition.y), playerPosition.y);
-    m_entityManager.addPlayer(m_player, CPlayer());
-    m_entityManager.addTransform(m_player, CTransform3D(spawnPos));
-    m_entityManager.addInput(m_player, CInput());
-    m_entityManager.addPhysics(m_player, CPhysics());
-    m_entityManager.addBob(m_player, CBob(1.0f, 6.0f, 5.5f));   // rate, vertical mag, lateral mag
-
-    // Optional: set initial values
-    auto& phys = m_entityManager.getPhysics(m_player);
-    phys.onGround = true;
-}
-
-void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius, float bobRate, float bobMagnitude)
-{
-    auto orb = m_entityManager.addEntity("orb");
-    sf::Vector2f worldPos = hexToWorld(hexQ, hexR);
-    
-    m_entityManager.addTransform(orb, CTransform3D(
-        sf::Vector3f(worldPos.x, heightAt(worldPos.x, worldPos.y) + 100.0f, worldPos.y)
-        ));
-    
-    m_entityManager.addOrb(orb, COrb(color, radius, 100.0f));
-    m_entityManager.addBob(orb, CBob(bobRate, bobMagnitude, 0.0f));   // orbs only bob vertically
-}
-
-void Scene_IC_Camp::spawnDebugOrbs(int count)
-{
-    static const std::vector<sf::Color> palette = {
-        sf::Color(240, 208,  96, 190),
-        sf::Color(120, 194, 255, 170),
-        sf::Color(255, 140,  80, 180),
-        sf::Color(160, 255, 160, 175),
-        sf::Color(220, 130, 255, 185),
-    };
-
-    std::mt19937 rng(42);
-    std::uniform_real_distribution<float> hexQDist(-100.0f, 100.0f);
-    std::uniform_real_distribution<float> hexRDist(-100.0f, 100.0f);
-    std::uniform_real_distribution<float> radiusDist(20.0f, 80.0f);
-    std::uniform_real_distribution<float> bobRateDist(0.5f, 3.0f);
-    std::uniform_real_distribution<float> bobMagDist(4.0f, 12.0f);
-
-    struct PairHash {
-        std::size_t operator()(const std::pair<int,int>& p) const noexcept {
-            return std::hash<int>{}(p.first) ^ (std::hash<int>{}(p.second) << 16);
-        }
-    };
-    std::unordered_set<std::pair<int,int>, PairHash> usedCoords;
-
-    int spawned = 0;
-    int maxAttempts = count * 10; // prevent infinite loop if grid is saturated
-    int attempts = 0;
-
-    while (spawned < count && attempts < maxAttempts)
-    {
-        ++attempts;
-        int hexQ = static_cast<int>(hexQDist(rng));
-        int hexR = static_cast<int>(hexRDist(rng));
-
-        if (!usedCoords.insert({hexQ, hexR}).second)
-            continue; // already taken, retry
-
-        const sf::Color& color = palette[spawned % palette.size()];
-        float radius  = radiusDist(rng);
-        float bobRate = bobRateDist(rng);
-        float bobMag  = bobMagDist(rng);
-        spawnOrb(hexQ, hexR, color, radius, bobRate, bobMag);
-        ++spawned;
-    }
-}
-
-void Scene_IC_Camp::sortOrbs()
-{
-    m_orbDrawItemCount = 0;
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    auto& camData = m_entityManager.getCamera(m_camera);
-    const sf::Vector2u winSize = m_bakeTexture.getSize();
-    const float focalLengthPx = (winSize.y * 0.5f) / std::tan(camData.fovY * 0.5f);
-
-    for (auto orb : m_entityManager.getEntities("orb"))
-    {
-        if (!m_entityManager.hasOrb(orb) || !m_entityManager.hasTransform(orb)) continue;
-        auto& orbTransform = m_entityManager.getTransform(orb);
-        auto& orbData      = m_entityManager.getOrb(orb);
-
-        sf::Vector3f relative = orbTransform.pos - camTransform.pos;
-        sf::Vector3f cameraSpace = Camera::worldToCamera(
-            relative, camTransform.pitch, camTransform.yaw, camTransform.roll);
-        if (cameraSpace.z >= -camData.nearPlane) continue;
-
-        sf::Vector2f screenPos;
-        if (!Camera::worldToScreen(camTransform, camData, orbTransform.pos, screenPos)) continue;
-
-        float dist = std::sqrt(relative.x * relative.x +
-                               relative.y * relative.y +
-                               relative.z * relative.z);
-        float radiusPx = orbData.radius * focalLengthPx / dist;
-        if (radiusPx <= 0.5f) continue;
-
-        float depthNorm = std::clamp(
-            (dist - camData.nearPlane) / (camData.farPlane - camData.nearPlane), 0.0f, 1.0f);
-
-        m_orbDrawItems[m_orbDrawItemCount++] = {
-            screenPos, cameraSpace, radiusPx, orbData.radius, orbTransform.pos, dist, depthNorm, orbData.color
-        };
-    }
-
-    std::sort(m_orbDrawItems.begin(), m_orbDrawItems.begin() + m_orbDrawItemCount,
-        [](const OrbDrawItem& a, const OrbDrawItem& b) {
-            return a.distSort > b.distSort;
-        });
-}
-
-void Scene_IC_Camp::updateShadowOrbs()
-{
-    m_shadowOrbList.clear();
-    constexpr int   MAX_SHADOW_ORBS    = 64;
-    constexpr float SHADOW_CUTOFF_DIST = 5000.0f;
-
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-
-    for (int i = m_orbDrawItemCount - 1; i >= 0 && (int)m_shadowOrbList.size() < MAX_SHADOW_ORBS; --i)
-    {
-        const auto& item = m_orbDrawItems[i];
-        if (item.distSort > SHADOW_CUTOFF_DIST) continue;
-
-        m_shadowOrbList.push_back({ item.worldPos, item.orbRadius }); // radiusPx is wrong here - see below
-    }
-}
-
-void Scene_IC_Camp::uploadShadowOrbsToShader(sf::Shader& shader)
-{
-    int count = static_cast<int>(m_shadowOrbList.size());
-    shader.setUniform("u_shadowOrbCount", count);
-    shader.setUniform("u_shadowDarkness", 0.6f);
-
-    for (int i = 0; i < count; ++i)
-    {
-        std::string idx = "[" + std::to_string(i) + "]";
-        shader.setUniform("u_shadowOrbPos" + idx,
-            sf::Glsl::Vec3(m_shadowOrbList[i].worldPos.x,
-                           m_shadowOrbList[i].worldPos.y,
-                           m_shadowOrbList[i].worldPos.z));
-        shader.setUniform("u_shadowOrbRadius" + idx, m_shadowOrbList[i].radius);
-    }
-}
-
-void Scene_IC_Camp::spawnCamera()
-{
-    m_camera = m_entityManager.addEntity("camera");
-    float pi = 3.14159265f;
-    m_cameraConfig.FOVY = m_cameraConfig.FOVY * pi / 180.0f;
-    m_cameraConfig.NEAR_PLANE *= 100.f; // convert from metres to cm
-    m_cameraConfig.FAR_PLANE  *= 100.f; // convert from metres to cm
-    m_entityManager.addCamera(m_camera, CCamera(
-        m_cameraConfig.FOVY,
-        float(m_cameraConfig.VIEWPORT_WIDTH)/m_cameraConfig.VIEWPORT_HEIGHT,
-        m_cameraConfig.NEAR_PLANE,
-        m_cameraConfig.FAR_PLANE,
-        sf::Vector2u(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT)
-        ));
-    m_entityManager.addTransform(m_camera, CTransform3D());
-}
-
-void Scene_IC_Camp::initializeSkyCubemap()
-{
-    const std::filesystem::path skyDir = std::filesystem::path("images") / "skymap";
-
-    if (m_skyCubemapHandle != 0)
-    {
-        glDeleteTextures(1, &m_skyCubemapHandle);
-        m_skyCubemapHandle = 0;
-    }
-
-    glGenTextures(1, &m_skyCubemapHandle);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-
-    bool loadedAnyFace = false;
-    for (const auto& face : SKY_CUBEMAP_FACES)
-    {
-        // 1. Point to the new .raw extension
-        const std::filesystem::path rawPath = skyDir / (std::string(face.name) + ".raw");
-
-        int width = 0;
-        int height = 0;
-        
-        // 2. Container switched to uint16_t for half-float data
-        std::vector<uint16_t> pixels; 
-        if (!readRawHalfFile(rawPath, width, height, pixels))
-        {
-            std::cerr << "Could not read converted sky face: " << rawPath << std::endl;
-            continue;
-        }
-
-        // Note: The readRawHalfFile function handles the square shape check, 
-        // but keeping structural consistency with your original fallback check.
-        if (width != height)
-        {
-            std::cerr << "Sky face is not square: " << rawPath << std::endl;
-            continue;
-        }
-
-        // 3. Upload to the GPU utilizing half-floats (No vertical flip needed!)
-        glTexImage2D(
-            face.target,
-            0,
-            GL_RGB16F,        // GPU internal allocation optimized to 16-bit float
-            width,
-            height,
-            0,
-            GL_RGB,
-            GL_HALF_FLOAT,    // Tells OpenGL your buffer contains 16-bit half-floats
-            pixels.data());   // Pass original pixels array directly
-        
-        loadedAnyFace = true;
-    }
-
-    if (!loadedAnyFace)
-    {
-        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-        std::cerr << "Sky cubemap could not be initialized; falling back to procedural sky." << std::endl;
-        m_skyCubemapReady = false;
-        return;
-    }
-
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-
-    m_skyCubemapReady = true;
-}
-
-void Scene_IC_Camp::onEnter() {
-    m_entityManager.getInput(m_player).mouseDelta = {0.f, 0.f};
-    sf::Vector2u size = m_game.window().getSize();
-    sf::Mouse::setPosition(
-        sf::Vector2i(size.x / 2, size.y / 2), 
-        m_game.window()
-    );
-    m_game.setMouseCaptured(true);
-    m_lastStepPhase = 0.0f;
-}
-
-void Scene_IC_Camp::onExit() {
-    // TODO: Called when exiting the scene
-}
-
-void Scene_IC_Camp::onEnd() {
-    // TODO: Called when ending the scene
 }
 
 void Scene_IC_Camp::update() {
@@ -642,7 +137,7 @@ void Scene_IC_Camp::update() {
     }
     sMovement(dt);
     updateHUDData();
-    siderealTime();
+    updateSiderealTime();
     updateSunPosition();
     updateStarRotation();
     updateMoonPosition();
@@ -687,9 +182,6 @@ void Scene_IC_Camp::sDoAction(const Action& action) {
         else if (action.name() == InputAction::ToggleCursor) {
             m_game.setMouseCaptured(!m_game.isMouseCaptured());
             m_cursorMode = !m_game.isMouseCaptured();
-            if (m_cursorMode) {
-                captureBake();
-            }
             sf::Vector2u size = m_game.window().getSize();
             m_entityManager.getInput(m_player).mouseDelta = {0.f, 0.f};
             sf::Mouse::setPosition(
@@ -731,6 +223,219 @@ void Scene_IC_Camp::sDoAction(const Action& action) {
         else if (action.name() == InputAction::Interact)     { input.interact = false; }
     }
 }
+
+void Scene_IC_Camp::onEnter() {
+    m_entityManager.getInput(m_player).mouseDelta = {0.f, 0.f};
+    sf::Vector2u size = m_game.window().getSize();
+    sf::Mouse::setPosition(
+        sf::Vector2i(size.x / 2, size.y / 2), 
+        m_game.window()
+    );
+    m_game.setMouseCaptured(true);
+    m_lastStepPhase = 0.0f;
+}
+
+void Scene_IC_Camp::onExit() {
+    // TODO: Called when exiting the scene
+}
+
+void Scene_IC_Camp::onEnd() {
+    // TODO: Called when ending the scene
+}
+
+HUD* Scene_IC_Camp::getHUD() const
+{
+    return m_hud.get();
+}
+
+void Scene_IC_Camp::sGUI()
+{
+    ImGui::Begin("Scene Properties##IC_Camp");
+
+    ImGui::Text("FPS: %.1f", m_fps);
+
+    if (ImGui::BeginTabBar("MyTabBar"))
+    {
+        if (ImGui::BeginTabItem("Debug"))
+        {
+            ImGui::Checkbox("Draw Grid", &m_drawGrid);
+            ImGui::Checkbox("Draw Textures", &m_drawTextures);
+            ImGui::Checkbox("Draw Debug", &m_drawCollision);
+            ImGui::Checkbox("Show Top-down Viewer", &m_showTopDownViewer);
+
+            sf::Vector2i mousePos = sf::Mouse::getPosition(m_game.window());
+            sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
+
+            sf::Vector3f worldPos = screenToWorld(mousePos);
+            sf::Vector2i hexCoords = worldToHex(worldPos.x, worldPos.z);
+
+            auto& playerTransform = m_entityManager.getTransform(m_player);
+            sf::Vector3f rel = worldPos - playerTransform.pos;
+            float dist = std::sqrt(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
+
+            ImGui::Text("Mouse screen: (%.1f, %.1f)", mouseScreen.x, mouseScreen.y);
+            ImGui::Text("World pos: (%.1f, %.1f, %.1f)", worldPos.x, worldPos.y, worldPos.z);
+            ImGui::Text("Hex coords: (%d, %d)", hexCoords.x, hexCoords.y);
+            ImGui::Text("Distance: %.1f", dist);
+            ImGui::Text("Camera Forward: (%.2f, %.2f, %.2f)", 
+                forwardFromTransform(m_entityManager.getTransform(m_camera)).x, 
+                forwardFromTransform(m_entityManager.getTransform(m_camera)).y, 
+                forwardFromTransform(m_entityManager.getTransform(m_camera)).z);
+
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Entity Manager"))
+        {
+            auto& m_entities = m_entityManager;
+            static std::vector<std::string> tags;
+            if (tags.size() != m_entities.getEntityMap().size() + 1)
+            {
+                tags.clear();
+                tags.push_back("ALL");
+                for (auto& [tag, entities] : m_entities.getEntityMap())
+                {
+                    tags.push_back(tag);
+                }
+            }
+            static int currentTagIndex = 0;
+            static int currentEntityIndex = 0;
+
+            const char* currentTag = tags[currentTagIndex].c_str();
+            if (ImGui::BeginCombo("Tags", currentTag))
+            {
+                for (int n = 0; n < tags.size(); n++)
+                {
+                    bool isSelected = (currentTagIndex == n);
+                    if (ImGui::Selectable(tags[n].c_str(), isSelected))
+                    {
+                        currentTagIndex = n;
+                        currentEntityIndex = 0;
+                    }
+                    if (isSelected)
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            std::vector<SoAEntityHandle> entities;
+            if (tags[currentTagIndex] == "ALL") entities = m_entityManager.getEntities();
+            else entities = m_entityManager.getEntities(tags[currentTagIndex]);
+            if (!entities.empty())
+            {
+                std::vector<std::string> entityLabels;
+                for (auto e : entities)
+                {
+                    entityLabels.push_back(m_entityManager.getTag(e) + " " + std::to_string(int(e.index)) + " " + std::to_string(int(1)) + "," + std::to_string(int(0)));
+                }
+                const char* currentEntity = entityLabels[currentEntityIndex].c_str();
+                if (ImGui::BeginCombo("Entities", currentEntity))
+                {
+                    for (int n = 0; n < entityLabels.size(); n++)
+                    {
+                        bool isSelected = (currentEntityIndex == n);
+                        if (ImGui::Selectable(entityLabels[n].c_str(), isSelected))
+                            currentEntityIndex = n;
+                        if (isSelected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+                if (!entities.empty())
+                {
+                    auto entity = entities[currentEntityIndex];
+                    ImGui::Text("ID: %d", int(entity.index));
+                    ImGui::Text("Tag: %s", m_entityManager.getTag(entity).c_str());
+                    ImGui::Button("Destroy Entity");
+                    if (ImGui::IsItemClicked())
+                    {
+                        if (m_entityManager.getTag(entity) != "player")
+                        {
+                            m_entityManager.destroyEntity(entity);
+                            currentEntityIndex = 0;
+                        }
+                    }
+                }
+            }
+            ImGui::Separator();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Time and Date"))
+        {
+            bool changed = false;
+            float timeOfDayF = static_cast<float>(m_gameTimeOfDay);
+            if (ImGui::SliderFloat("Time of Day (hours)", &timeOfDayF, 0.0f, 24.0f))
+            {
+                m_gameTimeOfDay = static_cast<double>(timeOfDayF);
+                changed = true;
+            }
+            changed |= ImGui::SliderFloat("Latitude", &m_latitude, -90.0f, 90.0f);
+            if (changed) {
+                updateSiderealTime();
+                updateSunPosition();
+                updateStarRotation();
+                updateMoonPosition();
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+
+    // Shader quality control
+    ImGui::Begin("Rendering Quality");
+    ImGui::Checkbox("Depth/Step Debug Bypass", &m_useDepthStepDebug);
+    ImGui::Text("Bypasses the final composite and shows step cost directly.");
+    ImGui::SliderFloat("Render Quality", &m_shaderQuality, 0.05f, 1.0f, "%.2f");
+    ImGui::Text("Lowering quality reduces GPU work (fewer march steps)");
+    ImGui::SliderFloat("Step Size Scale", &m_stepSizeScale, 0.1f, 5.0f, "%.2f");
+    ImGui::Text("Decrease to <1.0 for finer detail, increase for performance");
+    ImGui::SliderFloat("Step Contribution Scale", &m_stepContributionScale, 0.1f, 8.0f, "%.2f");
+    ImGui::Text("Scales the step-count channel only; does not change marching behavior");
+    ImGui::SliderFloat("Step Count Normalization Max", &m_stepCountNormalizationMax, 50.0f, 500.0f, "%.0f");
+    ImGui::Text("Fixed divisor for step count; adjust to baseline, then change threshold");
+    ImGui::SliderFloat("Heightmap Transition Threshold", &m_heightmapTransitionThreshold, 10.0f, 500.0f, "%.1f");
+    ImGui::Text("Distance above cached heightmap before switching to raymarching");
+    ImGui::Separator();
+        bool warpChanged = false;
+        warpChanged |= ImGui::SliderFloat("Warp Scale", &m_warpScale, 0.00002f, 0.00025f, "%.5f");
+        warpChanged |= ImGui::SliderFloat("Warp Strength", &m_warpStrength, 0.0f, 2500.0f, "%.0f");
+        if (warpChanged) {
+            Topography::setWarpParameters(m_warpScale, m_warpStrength);
+        }
+        ImGui::Text("Warp is shared by C++ terrain queries and all terrain shaders");
+    ImGui::End();
+}
+
+void Scene_IC_Camp::sRender() {
+    auto& window = m_game.window();
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto worldToCamMatrix = toGlslMat3(Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll));
+    window.clear(sf::Color::Transparent);
+    updateShadowOrbs();
+    uploadShadowOrbsToShader(m_finalShader);
+
+
+    if (m_useDepthStepDebug) {
+        runDepthStepPass(worldToCamMatrix);
+        sf::Sprite debugSprite(m_renderTexture.getTexture());
+        window.draw(debugSprite);
+    } else {
+        renderSky(worldToCamMatrix);
+        runBakePass(worldToCamMatrix);
+        runFinalPass(worldToCamMatrix);
+        sf::Sprite finalSprite(m_renderTexture.getTexture());
+        sf::Sprite backgroundSprite(m_skyTexture.getTexture());
+        window.draw(backgroundSprite);
+        window.draw(finalSprite);
+        renderOrbs();
+    }
+    m_hud->render(window, false);
+
+    if (m_showTopDownViewer) { renderTopDownViewer(window); }
+}
+
+// =========================================================================
+// Movement & Physics
+// =========================================================================
 
 void Scene_IC_Camp::sMovement(float dt)
 {
@@ -956,53 +661,6 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     }
 }
 
-// Unified bob update for any entity with CBob
-void Scene_IC_Camp::updateBob(SoAEntityHandle e, float dt, float horizSpeed=0.0f)
-{
-    if (!m_entityManager.hasBob(e) || !m_entityManager.hasTransform(e))
-        return;
-
-    auto& bob = m_entityManager.getBob(e);
-    auto& t   = m_entityManager.getTransform(e);
-
-    bool isPlayer = m_entityManager.getTag(e) == "player";
-
-    if (isPlayer)
-    {
-        // Complex player bobbing
-        float speedFraction = std::clamp(horizSpeed / m_playerConfig.MOVE_SPEED, 0.0f, 3.0f);
-        float baseRate = 0.020f * std::sqrt(speedFraction);
-
-        auto& phys = m_entityManager.getPhysics(e);
-        if (phys.isCrouching)
-            baseRate *= 0.625f;
-
-        bob.accumulator = std::fmod(bob.accumulator + baseRate * 60.0f * dt, 1.0f);
-    }
-    else
-    {
-        // Simple constant-rate bobbing (orbs, etc.)
-        bob.accumulator = std::fmod(bob.accumulator + bob.rate * dt, 1.0f);
-    }
-}
-
-void Scene_IC_Camp::updateOrbBobbing(SoAEntityHandle e, float dt)
-{
-    if (m_entityManager.getTag(e) != "orb") return;
-    auto& t = m_entityManager.getTransform(e);
-    auto& orb = m_entityManager.getOrb(e);
-
-    updateBob(e, dt);  // uses simple path
-
-    auto& bob = m_entityManager.getBob(e);
-    float bobOffset = std::sin(bob.accumulator * 6.2831853f) * bob.magnitude;
-
-    float groundY = heightAt(t.pos.x, t.pos.z);
-    t.pos.y = groundY + orb.heightAboveGround + bobOffset;
-
-    t.velocity.y = 0.0f;
-}
-
 void Scene_IC_Camp::resolveEntityPosition(SoAEntityHandle e, float dt)
 {
     if (!m_entityManager.hasTransform(e)) return;
@@ -1047,232 +705,391 @@ void Scene_IC_Camp::resolveEntityPosition(SoAEntityHandle e, float dt)
     }
 }
 
-// This is used already, but will become a far more central function as I start building out the orb system.
-sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
-    return sf::Glsl::Vec3(
-        color.r / 255.0f,
-        color.g / 255.0f,
-        color.b / 255.0f
+void Scene_IC_Camp::updateBob(SoAEntityHandle e, float dt, float horizSpeed=0.0f)
+{
+    if (!m_entityManager.hasBob(e) || !m_entityManager.hasTransform(e))
+        return;
+
+    auto& bob = m_entityManager.getBob(e);
+    auto& t   = m_entityManager.getTransform(e);
+
+    bool isPlayer = m_entityManager.getTag(e) == "player";
+
+    if (isPlayer)
+    {
+        // Complex player bobbing
+        float speedFraction = std::clamp(horizSpeed / m_playerConfig.MOVE_SPEED, 0.0f, 3.0f);
+        float baseRate = 0.020f * std::sqrt(speedFraction);
+
+        auto& phys = m_entityManager.getPhysics(e);
+        if (phys.isCrouching)
+            baseRate *= 0.625f;
+
+        bob.accumulator = std::fmod(bob.accumulator + baseRate * 60.0f * dt, 1.0f);
+    }
+    else
+    {
+        // Simple constant-rate bobbing (orbs, etc.)
+        bob.accumulator = std::fmod(bob.accumulator + bob.rate * dt, 1.0f);
+    }
+}
+
+// =========================================================================
+// Astronomy & Time Systems
+// =========================================================================
+
+void Scene_IC_Camp::updateSiderealTime()
+{
+    // Pass local state data into the pure astronomical function
+    auto result = Astro::computeSiderealTime(
+        m_gameYear,
+        m_gameMonth,
+        m_gameDayOfMonth,
+        m_gameTimeOfDay,
+        m_longitude
+    );
+
+    // Unpack data straight into your state struct
+    m_astroState.astroTime   = result.astroTime;
+    m_astroState.epochOffset = result.epochOffset;
+}
+
+void Scene_IC_Camp::updateSunPosition()
+{
+    float declination  = Astro::solarDeclination(m_gameMonth, m_gameDayOfMonth);
+    float haDeg        = (m_gameTimeOfDay / 24.0f - 0.5f) * 360.0f;
+
+    auto altaz = Astro::computeAltAz(
+        Astro::toRad(haDeg),
+        Astro::toRad(declination),
+        Astro::toRad(m_latitude)
+    );
+
+    m_astroState.sunDirection = Astro::altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
+
+    // === Sun Color & Intensity ===
+    float elevationDeg    = altaz.elevationRad * 180.0f / Astro::PI;
+    float sunHeightFactor = std::clamp((elevationDeg + 12.0f) / 90.0f, 0.0f, 1.0f);
+    float warmth          = 1.0f - sunHeightFactor * 0.75f;
+
+    m_astroState.sunColor = sf::Glsl::Vec4(
+        1.00f,
+        0.90f + warmth * 0.10f,
+        0.65f + warmth * 0.30f,
+        sunHeightFactor * 1.25f + 0.25f
     );
 }
 
-sf::Vector2i Scene_IC_Camp::worldToHex(float x, float z) const {
-    float q = (2.f/3.f * x) / m_hexSize;
-    float r = (z / (m_hexSize * std::sqrt(3.f))) - q / 2.f;
-    
-    // Round to nearest hex using cube coordinate rounding
-    float s = -q - r;
-    int rq = int(std::round(q));
-    int rr = int(std::round(r));
-    int rs = int(std::round(s));
-    float dq = std::abs(rq - q);
-    float dr = std::abs(rr - r);
-    float ds = std::abs(rs - s);
-    if (dq > dr && dq > ds)      rq = -rr - rs;
-    else if (dr > ds)             rr = -rq - rs;
-    
-    return sf::Vector2i(rq, rr);
-}
-
-sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
-    float x = m_hexSize * 3.f/2.f * q;
-    float z = m_hexSize * std::sqrt(3.f) * (r + q/2.f);
-    return sf::Vector2f(x, z);
-}
-
-void Scene_IC_Camp::sRender() {
-    auto& window = m_game.window();
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto worldToCamMatrix = toGlslMat3(Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll));
-    window.clear(sf::Color::Transparent);
-    updateShadowOrbs();
-    uploadShadowOrbsToShader(m_finalShader);
-
-
-    if (m_useDepthStepDebug) {
-        runDepthStepPass(worldToCamMatrix);
-        sf::Sprite debugSprite(m_renderTexture.getTexture());
-        window.draw(debugSprite);
-    } else {
-        renderSky(worldToCamMatrix);
-        runBakePass(worldToCamMatrix);
-        runFinalPass(worldToCamMatrix);
-        sf::Sprite finalSprite(m_renderTexture.getTexture());
-        sf::Sprite backgroundSprite(m_skyTexture.getTexture());
-        window.draw(backgroundSprite);
-        window.draw(finalSprite);
-        renderOrbs();
-    }
-    m_hud->render(window, false);
-
-    if (m_showTopDownViewer) { renderTopDownViewer(window); }
-}
-
-//==== ImGui ====
-
-void Scene_IC_Camp::sGUI()
+void Scene_IC_Camp::updateStarRotation()
 {
-    ImGui::Begin("Scene Properties##IC_Camp");
-
-    ImGui::Text("FPS: %.1f", m_fps);
-
-    if (ImGui::BeginTabBar("MyTabBar"))
-    {
-        if (ImGui::BeginTabItem("Debug"))
-        {
-            ImGui::Checkbox("Draw Grid", &m_drawGrid);
-            ImGui::Checkbox("Draw Textures", &m_drawTextures);
-            ImGui::Checkbox("Draw Debug", &m_drawCollision);
-            ImGui::Checkbox("Show Top-down Viewer", &m_showTopDownViewer);
-
-            sf::Vector2i mousePos = sf::Mouse::getPosition(m_game.window());
-            sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
-
-            sf::Vector3f worldPos = screenToWorld(mousePos);
-            sf::Vector2i hexCoords = worldToHex(worldPos.x, worldPos.z);
-
-            auto& playerTransform = m_entityManager.getTransform(m_player);
-            sf::Vector3f rel = worldPos - playerTransform.pos;
-            float dist = std::sqrt(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
-
-            ImGui::Text("Mouse screen: (%.1f, %.1f)", mouseScreen.x, mouseScreen.y);
-            ImGui::Text("World pos: (%.1f, %.1f, %.1f)", worldPos.x, worldPos.y, worldPos.z);
-            ImGui::Text("Hex coords: (%d, %d)", hexCoords.x, hexCoords.y);
-            ImGui::Text("Distance: %.1f", dist);
-            ImGui::Text("Camera Forward: (%.2f, %.2f, %.2f)", 
-                forwardFromTransform(m_entityManager.getTransform(m_camera)).x, 
-                forwardFromTransform(m_entityManager.getTransform(m_camera)).y, 
-                forwardFromTransform(m_entityManager.getTransform(m_camera)).z);
-
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("Entity Manager"))
-        {
-            auto& m_entities = m_entityManager;
-            static std::vector<std::string> tags;
-            if (tags.size() != m_entities.getEntityMap().size() + 1)
-            {
-                tags.clear();
-                tags.push_back("ALL");
-                for (auto& [tag, entities] : m_entities.getEntityMap())
-                {
-                    tags.push_back(tag);
-                }
-            }
-            static int currentTagIndex = 0;
-            static int currentEntityIndex = 0;
-
-            const char* currentTag = tags[currentTagIndex].c_str();
-            if (ImGui::BeginCombo("Tags", currentTag))
-            {
-                for (int n = 0; n < tags.size(); n++)
-                {
-                    bool isSelected = (currentTagIndex == n);
-                    if (ImGui::Selectable(tags[n].c_str(), isSelected))
-                    {
-                        currentTagIndex = n;
-                        currentEntityIndex = 0;
-                    }
-                    if (isSelected)
-                        ImGui::SetItemDefaultFocus();
-                }
-                ImGui::EndCombo();
-            }
-            std::vector<SoAEntityHandle> entities;
-            if (tags[currentTagIndex] == "ALL") entities = m_entityManager.getEntities();
-            else entities = m_entityManager.getEntities(tags[currentTagIndex]);
-            if (!entities.empty())
-            {
-                std::vector<std::string> entityLabels;
-                for (auto e : entities)
-                {
-                    entityLabels.push_back(m_entityManager.getTag(e) + " " + std::to_string(int(e.index)) + " " + std::to_string(int(1)) + "," + std::to_string(int(0)));
-                }
-                const char* currentEntity = entityLabels[currentEntityIndex].c_str();
-                if (ImGui::BeginCombo("Entities", currentEntity))
-                {
-                    for (int n = 0; n < entityLabels.size(); n++)
-                    {
-                        bool isSelected = (currentEntityIndex == n);
-                        if (ImGui::Selectable(entityLabels[n].c_str(), isSelected))
-                            currentEntityIndex = n;
-                        if (isSelected)
-                            ImGui::SetItemDefaultFocus();
-                    }
-                    ImGui::EndCombo();
-                }
-                if (!entities.empty())
-                {
-                    auto entity = entities[currentEntityIndex];
-                    ImGui::Text("ID: %d", int(entity.index));
-                    ImGui::Text("Tag: %s", m_entityManager.getTag(entity).c_str());
-                    ImGui::Button("Destroy Entity");
-                    if (ImGui::IsItemClicked())
-                    {
-                        if (m_entityManager.getTag(entity) != "player")
-                        {
-                            m_entityManager.destroyEntity(entity);
-                            currentEntityIndex = 0;
-                        }
-                    }
-                }
-            }
-            ImGui::Separator();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Time and Date"))
-        {
-            bool changed = false;
-            float timeOfDayF = static_cast<float>(m_gameTimeOfDay);
-            if (ImGui::SliderFloat("Time of Day (hours)", &timeOfDayF, 0.0f, 24.0f))
-            {
-                m_gameTimeOfDay = static_cast<double>(timeOfDayF);
-                changed = true;
-            }
-            changed |= ImGui::SliderFloat("Latitude", &m_latitude, -90.0f, 90.0f);
-            changed |= ImGui::SliderFloat("Epoch Offset", &m_epochOffset, -365.0f, 365.0f);
-            if (changed) {
-                siderealTime();
-                updateSunPosition();
-                updateStarRotation();
-                updateMoonPosition();
-            }
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
-    }
-
-    // Shader quality control
-    ImGui::Begin("Rendering Quality");
-    ImGui::Checkbox("Depth/Step Debug Bypass", &m_useDepthStepDebug);
-    ImGui::Text("Bypasses the final composite and shows step cost directly.");
-    ImGui::SliderFloat("Render Quality", &m_shaderQuality, 0.05f, 1.0f, "%.2f");
-    ImGui::Text("Lowering quality reduces GPU work (fewer march steps)");
-    ImGui::SliderFloat("Step Size Scale", &m_stepSizeScale, 0.1f, 5.0f, "%.2f");
-    ImGui::Text("Decrease to <1.0 for finer detail, increase for performance");
-    ImGui::SliderFloat("Step Contribution Scale", &m_stepContributionScale, 0.1f, 8.0f, "%.2f");
-    ImGui::Text("Scales the step-count channel only; does not change marching behavior");
-    ImGui::SliderFloat("Step Count Normalization Max", &m_stepCountNormalizationMax, 50.0f, 500.0f, "%.0f");
-    ImGui::Text("Fixed divisor for step count; adjust to baseline, then change threshold");
-    ImGui::SliderFloat("Heightmap Transition Threshold", &m_heightmapTransitionThreshold, 10.0f, 500.0f, "%.1f");
-    ImGui::Text("Distance above cached heightmap before switching to raymarching");
-    ImGui::Separator();
-        bool warpChanged = false;
-        warpChanged |= ImGui::SliderFloat("Warp Scale", &m_warpScale, 0.00002f, 0.00025f, "%.5f");
-        warpChanged |= ImGui::SliderFloat("Warp Strength", &m_warpStrength, 0.0f, 2500.0f, "%.0f");
-        if (warpChanged) {
-            Topography::setWarpParameters(m_warpScale, m_warpStrength);
-        }
-        ImGui::Text("Warp is shared by C++ terrain queries and all terrain shaders");
-    ImGui::End();
-
-    ImGui::End();
+    Astro::computeStarRotationMatrix(
+        m_latitude,
+        m_longitude,
+        m_astroState.epochOffset,
+        m_astroState.starRotationMatrix
+    );
 }
 
-// ==== Terrain and Shader Logic ====
-// Our terrain is composed of 16 individual "regions".  The following three methods are concerned with provided the shaders with
-// the necessary parameters to evaluate the contribution of each layer to the final terrain height at a given point.
+void Scene_IC_Camp::updateMoonPosition()
+{
+    m_astroState.moonDirection = Astro::computeMoonDirection(
+        m_astroState.astroTime,
+        m_latitude
+    );
+}
+
+// =========================================================================
+// Level & Entity Spawning
+// =========================================================================
+
+void Scene_IC_Camp::loadLevel(const std::string& filename)
+{
+    m_entityManager = EntityManager();
+    m_terrainLayers = {};
+
+    std::ifstream file(filename);
+    std::string str;
+    int terrainLayerIndex = 0;
+    while (file >> str)
+    {
+        if (str == "Camera")
+        {
+            file >> m_cameraConfig.FOVY
+                 >> m_cameraConfig.NEAR_PLANE
+                 >> m_cameraConfig.FAR_PLANE;
+        }
+        if (str == "Player")
+        {
+            file >> m_playerConfig.MOVE_SPEED
+                 >> m_playerConfig.ROTATION_SPEED
+                 >> m_playerConfig.HEIGHT_OFFSET
+                 >> m_playerConfig.EYE_OFFSET
+                 >> m_playerConfig.POSITION_X
+                 >> m_playerConfig.POSITION_Z;
+        }
+        if (str == "TerrainLayer")
+        {
+            int centerX = 0;
+            int centerY = 0;
+            float radius = 0.f;
+            float falloffWidth = 0.f;
+            float topoHeight = 0.f;
+
+            file >> centerX
+                 >> centerY
+                 >> radius
+                 >> falloffWidth
+                 >> topoHeight;
+
+            if (terrainLayerIndex < static_cast<int>(m_terrainLayers.size()))
+            {
+                TerrainLayer& layer = m_terrainLayers[terrainLayerIndex++];
+                layer.center = hexToWorld(centerX, centerY);
+                layer.radius = radius * 100.f;
+                layer.falloffWidth = falloffWidth * 100.f;
+                layer.topoHeight = topoHeight * 100.f;
+            }
+        }
+        if (str == "DateTimePlace")
+        {
+            file >> m_gameTimeOfDay
+                 >> m_gameYear
+                 >> m_gameDayOfMonth
+                 >> m_gameMonth
+                 >> m_latitude
+                 >> m_longitude;
+        }
+    }
+    std::srand(std::time(0));
+    m_homeLocationXZ = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
+}
+
+void Scene_IC_Camp::spawnPlayer()
+{
+    m_player = m_entityManager.addEntity("player");
+    m_playerConfig.HEIGHT_OFFSET *= 100.f; // convert from metres to cm
+    m_playerConfig.EYE_OFFSET *= 100.f;    // convert from metres to cm
+    m_playerConfig.MOVE_SPEED *= 100.f;    // convert from m/s to cm/s
+    m_playerConfig.ROTATION_SPEED = m_playerConfig.ROTATION_SPEED * 3.14159265f / 180.f;
+    sf::Vector2f playerPosition = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
+    sf::Vector3f spawnPos(playerPosition.x, heightAt(playerPosition.x, playerPosition.y), playerPosition.y);
+    m_entityManager.addPlayer(m_player, CPlayer());
+    m_entityManager.addTransform(m_player, CTransform3D(spawnPos));
+    m_entityManager.addInput(m_player, CInput());
+    m_entityManager.addPhysics(m_player, CPhysics());
+    m_entityManager.addBob(m_player, CBob(1.0f, 6.0f, 5.5f));   // rate, vertical mag, lateral mag
+
+    // Optional: set initial values
+    auto& phys = m_entityManager.getPhysics(m_player);
+    phys.onGround = true;
+}
+
+void Scene_IC_Camp::spawnCamera()
+{
+    m_camera = m_entityManager.addEntity("camera");
+    float pi = 3.14159265f;
+    m_cameraConfig.FOVY = m_cameraConfig.FOVY * pi / 180.0f;
+    m_cameraConfig.NEAR_PLANE *= 100.f; // convert from metres to cm
+    m_cameraConfig.FAR_PLANE  *= 100.f; // convert from metres to cm
+    m_entityManager.addCamera(m_camera, CCamera(
+        m_cameraConfig.FOVY,
+        float(m_cameraConfig.VIEWPORT_WIDTH)/m_cameraConfig.VIEWPORT_HEIGHT,
+        m_cameraConfig.NEAR_PLANE,
+        m_cameraConfig.FAR_PLANE,
+        sf::Vector2u(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT)
+        ));
+    m_entityManager.addTransform(m_camera, CTransform3D());
+}
+
+void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius, float bobRate, float bobMagnitude)
+{
+    auto orb = m_entityManager.addEntity("orb");
+    sf::Vector2f worldPos = hexToWorld(hexQ, hexR);
+    
+    m_entityManager.addTransform(orb, CTransform3D(
+        sf::Vector3f(worldPos.x, heightAt(worldPos.x, worldPos.y) + 100.0f, worldPos.y)
+        ));
+    
+    m_entityManager.addOrb(orb, COrb(color, radius, 100.0f));
+    m_entityManager.addBob(orb, CBob(bobRate, bobMagnitude, 0.0f));   // orbs only bob vertically
+}
+
+void Scene_IC_Camp::spawnDebugOrbs(int count)
+{
+    static const std::vector<sf::Color> palette = {
+        sf::Color(240, 208,  96, 190),
+        sf::Color(120, 194, 255, 170),
+        sf::Color(255, 140,  80, 180),
+        sf::Color(160, 255, 160, 175),
+        sf::Color(220, 130, 255, 185),
+    };
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> hexQDist(-100.0f, 100.0f);
+    std::uniform_real_distribution<float> hexRDist(-100.0f, 100.0f);
+    std::uniform_real_distribution<float> radiusDist(20.0f, 80.0f);
+    std::uniform_real_distribution<float> bobRateDist(0.5f, 3.0f);
+    std::uniform_real_distribution<float> bobMagDist(4.0f, 12.0f);
+
+    struct PairHash {
+        std::size_t operator()(const std::pair<int,int>& p) const noexcept {
+            return std::hash<int>{}(p.first) ^ (std::hash<int>{}(p.second) << 16);
+        }
+    };
+    std::unordered_set<std::pair<int,int>, PairHash> usedCoords;
+
+    int spawned = 0;
+    int maxAttempts = count * 10; // prevent infinite loop if grid is saturated
+    int attempts = 0;
+
+    while (spawned < count && attempts < maxAttempts)
+    {
+        ++attempts;
+        int hexQ = static_cast<int>(hexQDist(rng));
+        int hexR = static_cast<int>(hexRDist(rng));
+
+        if (!usedCoords.insert({hexQ, hexR}).second)
+            continue; // already taken, retry
+
+        const sf::Color& color = palette[spawned % palette.size()];
+        float radius  = radiusDist(rng);
+        float bobRate = bobRateDist(rng);
+        float bobMag  = bobMagDist(rng);
+        spawnOrb(hexQ, hexR, color, radius, bobRate, bobMag);
+        ++spawned;
+    }
+}
+
+// =========================================================================
+// Rendering Systems & Pipeline
+// =========================================================================
+
+void Scene_IC_Camp::updateCamera(float dt) 
+{
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& playerTransform = m_entityManager.getTransform(m_player);
+    auto& playerPhysics = m_entityManager.getPhysics(m_player);
+    auto& playerBob = m_entityManager.getBob(m_player);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+
+    // Smooth crouch transition
+    float targetCrouch = playerPhysics.isCrouching ? 1.0f : 0.0f;
+    m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt;
+    m_crouchFactor = std::clamp(m_crouchFactor, 0.0f, 1.0f);
+
+    // Eye height
+    float eyeHeight = m_playerConfig.HEIGHT_OFFSET * (1.0f - m_crouchFactor * 0.45f);
+
+    sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
+
+    sf::Vector3f forward = forwardFromTransform(playerTransform);
+    forward = Camera::normalize(forward);
+    sf::Vector3f right(forward.z, 0.f, -forward.x);
+
+    float horizontalSpeed = std::sqrt(
+        playerTransform.velocity.x * playerTransform.velocity.x +
+        playerTransform.velocity.z * playerTransform.velocity.z
+    );
+
+    // Speed as a fraction of base move speed, clamped to sprint ceiling.
+    // Slope and terrain are already baked into horizontalSpeed, so no
+    // further compensation needed here.
+    float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
+
+    // moveFactor gates the bob entirely when nearly still (0..1 over first unit of speed)
+    float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
+
+    float phase = playerBob.accumulator * 6.2831853f;
+
+    // === Bob Parameters ===
+    float baseFrequency = 1.0f;
+
+    // Amplitudes interpolate continuously with speed.
+    // Sprint end (speedFraction = 3) is tighter/smaller — you're more rigid at a run.
+    // Walk end (speedFraction = 1) is the most pronounced swing.
+    // Uphill crawl (speedFraction < 1) tapers down toward zero via moveFactor.
+    float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
+    float lateralAmplitude = 5.5f + (3.8f - 5.5f) * t;
+    float verticalAmplitude = 6.2f + (4.8f - 6.2f) * t;
+
+    // Crouch reduces amplitude as a postural state regardless of speed
+    if (playerPhysics.isCrouching)
+    {
+        lateralAmplitude  *= (1.0f - m_crouchFactor * 0.45f);
+        verticalAmplitude *= (1.0f - m_crouchFactor * 0.55f);
+    }
+
+    lateralAmplitude *= 0.85f;
+
+    // Use same base frequency, with mild harmonic on vertical
+    float lateralBob  = std::sin(phase * baseFrequency) * lateralAmplitude * moveFactor;
+    float verticalBob = std::sin(phase * baseFrequency * 1.65f) * verticalAmplitude * moveFactor;
+
+    sf::Vector3f targetBob = right * lateralBob + sf::Vector3f(0.f, verticalBob, 0.f);
+    m_cameraBobOffset += (targetBob - m_cameraBobOffset) * m_bobLag;
+
+    camTransform.pos = headPos - (forward * m_playerConfig.EYE_OFFSET) + m_cameraBobOffset;
+    camTransform.yaw   = playerTransform.yaw;
+    camTransform.pitch = playerTransform.pitch;
+
+    // FOV scales continuously with speed rather than snapping on sprint state
+    float targetFov = m_cameraConfig.FOVY + 0.14f * (speedFraction / 3.0f);
+    targetFov -= m_crouchFactor * 0.05f;
+    cameraData.fovY += (targetFov - cameraData.fovY) * 0.12f;
+}
+
+void Scene_IC_Camp::updateHUDData()
+{
+    // Use a constant for clarity
+    const float RAD_TO_DEG = 180.0f / 3.14159265f;
+
+    auto& playerTransform = m_entityManager.getTransform(m_player);
+    sf::Vector3f currentLocation = playerTransform.pos;
+    sf::Vector3f forward = forwardFromTransform(playerTransform);
+    forward.y = 0.f;
+    forward = Camera::normalize(forward);
+
+    float currentHeading = -std::atan2(forward.x, forward.z) * RAD_TO_DEG;
+
+    updateMinimapTexture();
+
+    m_hudData.position = currentLocation;
+    m_hudData.homeLocation = sf::Vector2f(m_homeLocationXZ.x, m_homeLocationXZ.y);
+    m_hudData.cameraYaw = currentHeading;
+    m_hudData.headlightState = static_cast<int>(m_headlightState);
+    m_hudData.headlightEnabled = shouldHeadlightsBeOn();
+    m_hudData.minimapTex = &m_minimapTexture.getTexture();
+}
+
+void Scene_IC_Camp::buildHud()
+{
+    m_hud = std::make_unique<HUD>(m_game.window().getSize());
+}
+
+bool Scene_IC_Camp::shouldHeadlightsBeOn() const
+{
+    switch (m_headlightState)
+    {
+    case HeadlightState::Off:
+        return false;
+    case HeadlightState::On:
+        return true;
+    case HeadlightState::Auto:
+    default:
+        return m_astroState.sunDirection.y < 0.12f || m_sunIntensity < 0.5f;
+    }
+}
+
+void Scene_IC_Camp::initializeSkyCubemap()
+{
+
+    m_skyCubemapHandle = Assets::Instance().getCubemap("NightSky");
+    m_skyCubemapReady  = (m_skyCubemapHandle != 0);
+
+    if (!m_skyCubemapReady)
+        std::cerr << "Sky cubemap 'NightSky' not found in Assets; falling back to procedural sky." << std::endl;
+}
+
 void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix) {
     uploadWarpParametersToShader(shader);
     for (int i = 0; i < 16; ++i) {
@@ -1298,75 +1115,7 @@ void Scene_IC_Camp::uploadWarpParametersToShader(sf::Shader& shader) const {
     shader.setUniform("u_warpStrength", m_warpStrength);
 }
 
-// This is the heart of the rendering system: it runs a fullscreen shader that raymarches the terrain to produce a depth value for each pixel, 
-// which is stored in m_bakeTexture.  This is then sampled in the final pass to composite the terrain with the sky and orbs.
-void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    sf::Vector2u bakeSize = m_bakeTexture.getSize();
 
-    // Compute which layers are close enough to affect raymarching
-    m_activeLayerMask = Topography::computeActiveLayerMask(transform.pos, m_terrainLayers);
-
-    m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
-    m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_bakeShader.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_bakeShader.setUniform("fovY",          cameraData.fovY);
-    m_bakeShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_bakeShader.setUniform("nearPlane",     cameraData.nearPlane);
-    m_bakeShader.setUniform("farPlane",      cameraData.farPlane);
-    m_bakeShader.setUniform("u_quality",     m_shaderQuality);
-    m_bakeShader.setUniform("u_stepSizeScale", m_stepSizeScale);
-    m_bakeShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);    
-    m_bakeShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
-    m_bakeShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_bakeShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    m_bakeShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
-    uploadTerrainLayersToShader(m_bakeShader, "layer");
-    uploadActiveLayerMaskToShader(m_bakeShader, "u_activeLayerEnabled");
-
-    sf::RectangleShape dummyRect(sf::Vector2f(bakeSize.x, bakeSize.y));
-    m_bakeTexture.clear(sf::Color::Transparent);
-    m_bakeTexture.draw(dummyRect, &m_bakeShader);
-    m_bakeTexture.display();
-}
-
-// This is a debug pass that is intended to visualize the cost of raymarching steps in the bake shader.
-// It operates in a similar fashion to the bake shader, but reserves the red channel to encode the number of
-// steps taken instead of providing 24 bit precision for depth.
-void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    sf::Vector2u outputSize = m_renderTexture.getSize();
-
-    m_depthStepShader.setUniform("viewportSize",  sf::Glsl::Vec2(outputSize.x, outputSize.y));
-    m_depthStepShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_depthStepShader.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_depthStepShader.setUniform("fovY",          cameraData.fovY);
-    m_depthStepShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_depthStepShader.setUniform("nearPlane",     cameraData.nearPlane);
-    m_depthStepShader.setUniform("farPlane",      cameraData.farPlane);
-    m_depthStepShader.setUniform("u_quality",     m_shaderQuality);
-    m_depthStepShader.setUniform("u_stepSizeScale", m_stepSizeScale);
-    m_depthStepShader.setUniform("u_stepContributionScale", m_stepContributionScale);
-    m_depthStepShader.setUniform("u_stepCountNormalizationMax", m_stepCountNormalizationMax);
-    m_depthStepShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);
-    m_depthStepShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
-    m_depthStepShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_depthStepShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    m_depthStepShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
-    uploadTerrainLayersToShader(m_depthStepShader, "layer");
-    uploadActiveLayerMaskToShader(m_depthStepShader, "u_activeLayerEnabled");
-
-    sf::RectangleShape dummyRect(sf::Vector2f(outputSize.x, outputSize.y));
-    m_renderTexture.clear(sf::Color::Transparent);
-    m_renderTexture.draw(dummyRect, &m_depthStepShader);
-    m_renderTexture.setSmooth(true);
-    m_renderTexture.display();
-}
-
-// Bake a single fixed world-aligned top-down height map once at startup.
-// The bake shader samples this static texture using a constant UV <-> world relationship.
 void Scene_IC_Camp::runTopDownPass() {
     sf::Vector2u texSize = m_topdownTexture.getSize();
 
@@ -1378,9 +1127,7 @@ void Scene_IC_Camp::runTopDownPass() {
     m_topdownShader.setUniform("worldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
     m_topdownShader.setUniform("heightMax", m_topdownMaxHeight);
     uploadTerrainLayersToShader(m_topdownShader, "layer");
-    for (int i = 0; i < 16; ++i) {
-        m_topdownShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
-    }
+    uploadActiveLayerMaskToShader(m_topdownShader, "u_activeLayerEnabled");
 
     sf::RectangleShape dummyRect(sf::Vector2f(texSize.x, texSize.y));
     m_topdownTexture.clear(sf::Color::Transparent);
@@ -1389,79 +1136,66 @@ void Scene_IC_Camp::runTopDownPass() {
     m_topdownTexture.display();
 }
 
-// This pass uses the baked depthmap alone to produce a final shaded image.
-void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    sf::Vector2u winSize = m_game.window().getSize();
-    sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
-    sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
-    const bool headlampOn = shouldHeadlightsBeOn();
-
-    m_finalShader.setUniform("viewportSize",  sf::Glsl::Vec2(winSize.x, winSize.y));
-    m_finalShader.setUniform("m_hexSize",     m_hexSize);
-    m_finalShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_finalShader.setUniform("farPlane",      cameraData.farPlane);
-    m_finalShader.setUniform("nearPlane",     cameraData.nearPlane);
-    m_finalShader.setUniform("fovY",          cameraData.fovY);
-    m_finalShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_finalShader.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_finalShader.setUniform("camHeight",     getCameraHeightAboveGround(transform.pos));
-    m_finalShader.setUniform("sunDir", m_astroState.sunDirection); 
-    m_finalShader.setUniform("sunColor", m_astroState.sunColor);
-    m_finalShader.setUniform("ambientStrength", 0.3f);
-    m_finalShader.setUniform("baseColor", colorToShader(Theme::color("best-brown")));
-    m_finalShader.setUniform("gridColor", colorToShader(m_gridColor));
-    m_finalShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    m_finalShader.setUniform("u_reliefExaggeration", 1.5f);
-    m_finalShader.setUniform("topoTex", m_bakeTexture.getTexture());
-    m_finalShader.setUniform("cursorMode", m_cursorMode);
-    m_finalShader.setUniform("hoveredHex", sf::Glsl::Vec2((float)hex.x, (float)hex.y));
-    m_finalShader.setUniform("headlampOn", headlampOn);
-    m_finalShader.setUniform("headlampIntensity", 4.f);
-    m_finalShader.setUniform("headlampColor", colorToShader(sf::Color(255, 244, 214)));
-    m_finalShader.setUniform("headlampRange", 15000.0f);
-    uploadActiveLayerMaskToShader(m_finalShader, "u_activeLayerEnabled");
-    uploadTerrainLayersToShader(m_finalShader, "layer");
-
-    sf::RectangleShape dummyRect(sf::Vector2f(winSize.x, winSize.y));
-    m_renderTexture.clear(sf::Color::Transparent);
-    m_renderTexture.draw(dummyRect, &m_finalShader);
-    m_renderTexture.setSmooth(true);
-    m_renderTexture.display();
-}
-
-// Draws the sky background.
-void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    auto transform = m_entityManager.getTransform(m_camera);
-    sf::RectangleShape skyQuad(sf::Vector2f(m_game.window().getSize().x, m_game.window().getSize().y));
-    m_sky.setUniform("viewportSize",  sf::Glsl::Vec2(m_game.window().getSize().x, m_game.window().getSize().y));
-    m_sky.setUniform("fovY",          cameraData.fovY);
-    m_sky.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_sky.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_sky.setUniform("sunDir", m_astroState.sunDirection);
-    m_sky.setUniform("useSkyCubemap", m_skyCubemapReady);
-    m_sky.setUniform("starRotationMatrix", sf::Glsl::Mat3(m_starRotationMatrix));
-    m_sky.setUniform("skyExposure", 5.0f);
-    m_sky.setUniform("moonDir", m_moonDirection);
-    m_sky.setUniform("moonTexture", m_moonTexture);
-
-    if (m_skyCubemapReady && m_skyCubemapHandle != 0)
+void Scene_IC_Camp::updateMinimapTexture()
+{
+    if (m_minimapTexture.getSize().x != m_minimapTextureSize ||
+        m_minimapTexture.getSize().y != m_minimapTextureSize)
     {
-        glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
+        m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
     }
-    m_renderTexture.clear(sf::Color::Transparent);
-    m_renderTexture.display();
-    m_skyTexture.clear(sf::Color::Transparent);
-    m_skyTexture.draw(skyQuad, &m_sky);
-    m_skyTexture.setSmooth(true);
-    m_skyTexture.display();
+
+    const sf::Vector3f playerPos = m_entityManager.getTransform(m_player).pos;
+    const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
+    const float center   = texSize * 0.5f;
+    const float worldRadius = 25600.f;
+
+    // ── Draw the hillshaded topo layer via shader ──────────────────────────
+    m_minimapTexture.clear(sf::Color::Transparent);
+
+    sf::RectangleShape fullQuad({texSize, texSize});
+
+    m_topoMinimapShader.setUniform("u_playerXZ",
+        sf::Glsl::Vec2(playerPos.x, playerPos.z));
+    m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
+    m_topoMinimapShader.setUniform("u_texSize",      texSize);
+    m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
+    m_topoMinimapShader.setUniform("u_reliefExaggeration", 2.4f);
+    Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
+    Scene_IC_Camp::uploadActiveLayerMaskToShader(m_topoMinimapShader, "u_activeLayerEnabled");
+    sf::RenderStates states;
+    states.shader = &m_topoMinimapShader;
+    m_minimapTexture.draw(fullQuad, states);
+
+    sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
+    float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+    const float circleRadiusPx = center - 2.f;
+    const float homeMarkerRadius = 5.5f;
+    const float maxMarkerDist = std::max(0.f, circleRadiusPx - homeMarkerRadius - 1.f);
+    const float worldToPixel = circleRadiusPx / worldRadius;
+
+    if (dist > 0.0001f)
+    {
+        sf::Vector2f homePx = sf::Vector2f(center, center) + delta * worldToPixel;
+        sf::Vector2f diff = homePx - sf::Vector2f(center, center);
+        float markerDist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
+        if (markerDist > maxMarkerDist)
+        {
+            sf::Vector2f dir = diff / markerDist;
+            homePx = sf::Vector2f(center, center) + dir * maxMarkerDist;
+        }
+
+        sf::CircleShape homeHex(homeMarkerRadius, 6);
+        homeHex.setOrigin({homeMarkerRadius, homeMarkerRadius});
+        homeHex.setPosition(homePx);
+        homeHex.setFillColor(sf::Color(245, 225, 98, 255));
+        homeHex.setOutlineThickness(1.f);
+        homeHex.setOutlineColor(sf::Color(88, 70, 24, 240));
+        m_minimapTexture.draw(homeHex);
+    }
+
+    m_minimapTexture.display();
 }
 
-// This is a diagnostic tool.  It draws a small top-down view based on the texture produced
-// for consumption by the bake pass.  It is useful for debugging, but is generally not intended
-// to be displayed.
 void Scene_IC_Camp::renderTopDownViewer(sf::RenderWindow& window) {
         sf::Vector2u size = window.getSize();
         const float panelSize = 220.f;
@@ -1483,7 +1217,6 @@ void Scene_IC_Camp::renderTopDownViewer(sf::RenderWindow& window) {
         window.draw(viewer);
 }
 
-// Helper to upload one batch to the shader
 void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch,
                                            const sf::Vector3f& sunDirView)
 {
@@ -1571,263 +1304,267 @@ void Scene_IC_Camp::renderOrbs()
     }
 }
 
-void Scene_IC_Camp::updateMinimapTexture()
-{
-    if (m_minimapTexture.getSize().x != m_minimapTextureSize ||
-        m_minimapTexture.getSize().y != m_minimapTextureSize)
+void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+    auto transform = m_entityManager.getTransform(m_camera);
+    sf::RectangleShape skyQuad(sf::Vector2f(m_game.window().getSize().x, m_game.window().getSize().y));
+    m_sky.setUniform("viewportSize",  sf::Glsl::Vec2(m_game.window().getSize().x, m_game.window().getSize().y));
+    m_sky.setUniform("fovY",          cameraData.fovY);
+    m_sky.setUniform("aspectRatio",   cameraData.aspectRatio);
+    m_sky.setUniform("worldToCamMatrix", worldToCamMatrix);
+    m_sky.setUniform("sunDir", m_astroState.sunDirection);
+    m_sky.setUniform("useSkyCubemap", m_skyCubemapReady);
+    m_sky.setUniform("starRotationMatrix", sf::Glsl::Mat3(m_astroState.starRotationMatrix));
+    m_sky.setUniform("skyExposure", 5.0f);
+    m_sky.setUniform("moonDir", m_astroState.moonDirection);
+    m_sky.setUniform("moonTexture", m_moonTexture);
+
+    if (m_skyCubemapReady && m_skyCubemapHandle != 0)
     {
-        m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
+        glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
     }
+    m_renderTexture.clear(sf::Color::Transparent);
+    m_renderTexture.display();
+    m_skyTexture.clear(sf::Color::Transparent);
+    m_skyTexture.draw(skyQuad, &m_sky);
+    m_skyTexture.setSmooth(true);
+    m_skyTexture.display();
+}
 
-    const sf::Vector3f playerPos = m_entityManager.getTransform(m_player).pos;
-    const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
-    const float center   = texSize * 0.5f;
-    const float worldRadius = 25600.f;
+void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& worldToCamMatrix) {
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+    sf::Vector2u winSize = m_game.window().getSize();
+    sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
+    sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
+    const bool headlampOn = shouldHeadlightsBeOn();
 
-    // ── Draw the hillshaded topo layer via shader ──────────────────────────
-    m_minimapTexture.clear(sf::Color::Transparent);
+    m_finalShader.setUniform("viewportSize",  sf::Glsl::Vec2(winSize.x, winSize.y));
+    m_finalShader.setUniform("m_hexSize",     m_hexSize);
+    m_finalShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
+    m_finalShader.setUniform("farPlane",      cameraData.farPlane);
+    m_finalShader.setUniform("nearPlane",     cameraData.nearPlane);
+    m_finalShader.setUniform("fovY",          cameraData.fovY);
+    m_finalShader.setUniform("aspectRatio",   cameraData.aspectRatio);
+    m_finalShader.setUniform("worldToCamMatrix", worldToCamMatrix);
+    m_finalShader.setUniform("camHeight",     getCameraHeightAboveGround(transform.pos));
+    m_finalShader.setUniform("sunDir", m_astroState.sunDirection); 
+    m_finalShader.setUniform("sunColor", m_astroState.sunColor);
+    m_finalShader.setUniform("ambientStrength", 0.3f);
+    m_finalShader.setUniform("baseColor", colorToShader(Theme::color("best-brown")));
+    m_finalShader.setUniform("gridColor", colorToShader(m_gridColor));
+    m_finalShader.setUniform("u_heightMax",    m_topdownMaxHeight);
+    m_finalShader.setUniform("u_reliefExaggeration", 1.5f);
+    m_finalShader.setUniform("topoTex", m_bakeTexture.getTexture());
+    m_finalShader.setUniform("cursorMode", m_cursorMode);
+    m_finalShader.setUniform("hoveredHex", sf::Glsl::Vec2((float)hex.x, (float)hex.y));
+    m_finalShader.setUniform("headlampOn", headlampOn);
+    m_finalShader.setUniform("headlampIntensity", 4.f);
+    m_finalShader.setUniform("headlampColor", colorToShader(sf::Color(255, 244, 214)));
+    m_finalShader.setUniform("headlampRange", 15000.0f);
+    uploadActiveLayerMaskToShader(m_finalShader, "u_activeLayerEnabled");
+    uploadTerrainLayersToShader(m_finalShader, "layer");
 
-    sf::RectangleShape fullQuad({texSize, texSize});
+    sf::RectangleShape dummyRect(sf::Vector2f(winSize.x, winSize.y));
+    m_renderTexture.clear(sf::Color::Transparent);
+    m_renderTexture.draw(dummyRect, &m_finalShader);
+    m_renderTexture.setSmooth(true);
+    m_renderTexture.display();
+}
 
-    m_topoMinimapShader.setUniform("u_playerXZ",
-        sf::Glsl::Vec2(playerPos.x, playerPos.z));
-    m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
-    m_topoMinimapShader.setUniform("u_texSize",      texSize);
-    m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    m_topoMinimapShader.setUniform("u_reliefExaggeration", 2.4f);
-    Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
-    for (int i = 0; i < 16; ++i) {
-        m_topoMinimapShader.setUniform("u_activeLayerEnabled[" + std::to_string(i) + "]", 1.0f);
-    }
-    sf::RenderStates states;
-    states.shader = &m_topoMinimapShader;
-    m_minimapTexture.draw(fullQuad, states);
+void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& worldToCamMatrix) {
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+    sf::Vector2u outputSize = m_renderTexture.getSize();
 
-    sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
-    float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-    const float circleRadiusPx = center - 2.f;
-    const float homeMarkerRadius = 5.5f;
-    const float maxMarkerDist = std::max(0.f, circleRadiusPx - homeMarkerRadius - 1.f);
-    const float worldToPixel = circleRadiusPx / worldRadius;
+    m_depthStepShader.setUniform("viewportSize",  sf::Glsl::Vec2(outputSize.x, outputSize.y));
+    m_depthStepShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
+    m_depthStepShader.setUniform("worldToCamMatrix", worldToCamMatrix);
+    m_depthStepShader.setUniform("fovY",          cameraData.fovY);
+    m_depthStepShader.setUniform("aspectRatio",   cameraData.aspectRatio);
+    m_depthStepShader.setUniform("nearPlane",     cameraData.nearPlane);
+    m_depthStepShader.setUniform("farPlane",      cameraData.farPlane);
+    m_depthStepShader.setUniform("u_quality",     m_shaderQuality);
+    m_depthStepShader.setUniform("u_stepSizeScale", m_stepSizeScale);
+    m_depthStepShader.setUniform("u_stepContributionScale", m_stepContributionScale);
+    m_depthStepShader.setUniform("u_stepCountNormalizationMax", m_stepCountNormalizationMax);
+    m_depthStepShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);
+    m_depthStepShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
+    m_depthStepShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
+    m_depthStepShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
+    m_depthStepShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
+    uploadTerrainLayersToShader(m_depthStepShader, "layer");
+    uploadActiveLayerMaskToShader(m_depthStepShader, "u_activeLayerEnabled");
 
-    if (dist > 0.0001f)
+    sf::RectangleShape dummyRect(sf::Vector2f(outputSize.x, outputSize.y));
+    m_renderTexture.clear(sf::Color::Transparent);
+    m_renderTexture.draw(dummyRect, &m_depthStepShader);
+    m_renderTexture.setSmooth(true);
+    m_renderTexture.display();
+}
+
+void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& worldToCamMatrix) {
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+    sf::Vector2u bakeSize = m_bakeTexture.getSize();
+
+    // Compute which layers are close enough to affect raymarching
+    m_activeLayerMask = Topography::computeActiveLayerMask(transform.pos, m_terrainLayers);
+
+    m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
+    m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
+    m_bakeShader.setUniform("worldToCamMatrix", worldToCamMatrix);
+    m_bakeShader.setUniform("fovY",          cameraData.fovY);
+    m_bakeShader.setUniform("aspectRatio",   cameraData.aspectRatio);
+    m_bakeShader.setUniform("nearPlane",     cameraData.nearPlane);
+    m_bakeShader.setUniform("farPlane",      cameraData.farPlane);
+    m_bakeShader.setUniform("u_quality",     m_shaderQuality);
+    m_bakeShader.setUniform("u_stepSizeScale", m_stepSizeScale);
+    m_bakeShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);    
+    m_bakeShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
+    m_bakeShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
+    m_bakeShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
+    m_bakeShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
+    uploadTerrainLayersToShader(m_bakeShader, "layer");
+    uploadActiveLayerMaskToShader(m_bakeShader, "u_activeLayerEnabled");
+
+    sf::RectangleShape dummyRect(sf::Vector2f(bakeSize.x, bakeSize.y));
+    m_bakeTexture.clear(sf::Color::Transparent);
+    m_bakeTexture.draw(dummyRect, &m_bakeShader);
+    m_bakeTexture.display();
+}
+
+// =========================================================================
+// Orb & Shadow Pipelines
+// =========================================================================
+
+void Scene_IC_Camp::sortOrbs()
+{
+    m_orbDrawItemCount = 0;
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& camData = m_entityManager.getCamera(m_camera);
+    const sf::Vector2u winSize = m_bakeTexture.getSize();
+    const float focalLengthPx = (winSize.y * 0.5f) / std::tan(camData.fovY * 0.5f);
+
+    for (auto orb : m_entityManager.getEntities("orb"))
     {
-        sf::Vector2f homePx = sf::Vector2f(center, center) + delta * worldToPixel;
-        sf::Vector2f diff = homePx - sf::Vector2f(center, center);
-        float markerDist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
-        if (markerDist > maxMarkerDist)
-        {
-            sf::Vector2f dir = diff / markerDist;
-            homePx = sf::Vector2f(center, center) + dir * maxMarkerDist;
-        }
+        if (!m_entityManager.hasOrb(orb) || !m_entityManager.hasTransform(orb)) continue;
+        auto& orbTransform = m_entityManager.getTransform(orb);
+        auto& orbData      = m_entityManager.getOrb(orb);
 
-        sf::CircleShape homeHex(homeMarkerRadius, 6);
-        homeHex.setOrigin({homeMarkerRadius, homeMarkerRadius});
-        homeHex.setPosition(homePx);
-        homeHex.setFillColor(sf::Color(245, 225, 98, 255));
-        homeHex.setOutlineThickness(1.f);
-        homeHex.setOutlineColor(sf::Color(88, 70, 24, 240));
-        m_minimapTexture.draw(homeHex);
+        sf::Vector3f relative = orbTransform.pos - camTransform.pos;
+        sf::Vector3f cameraSpace = Camera::worldToCamera(
+            relative, camTransform.pitch, camTransform.yaw, camTransform.roll);
+        if (cameraSpace.z >= -camData.nearPlane) continue;
+
+        sf::Vector2f screenPos;
+        if (!Camera::worldToScreen(camTransform, camData, orbTransform.pos, screenPos)) continue;
+
+        float dist = std::sqrt(relative.x * relative.x +
+                               relative.y * relative.y +
+                               relative.z * relative.z);
+        float radiusPx = orbData.radius * focalLengthPx / dist;
+        if (radiusPx <= 0.5f) continue;
+
+        float depthNorm = std::clamp(
+            (dist - camData.nearPlane) / (camData.farPlane - camData.nearPlane), 0.0f, 1.0f);
+
+        m_orbDrawItems[m_orbDrawItemCount++] = {
+            screenPos, cameraSpace, radiusPx, orbData.radius, orbTransform.pos, dist, depthNorm, orbData.color
+        };
     }
 
-    m_minimapTexture.display();
+    std::sort(m_orbDrawItems.begin(), m_orbDrawItems.begin() + m_orbDrawItemCount,
+        [](const OrbDrawItem& a, const OrbDrawItem& b) {
+            return a.distSort > b.distSort;
+        });
 }
 
-void Scene_IC_Camp::updateSunPosition()
+void Scene_IC_Camp::updateShadowOrbs()
 {
-    float declination  = Astro::solarDeclination(m_gameMonth, m_gameDayOfMonth);
-    float haDeg        = (m_gameTimeOfDay / 24.0f - 0.5f) * 360.0f;
+    m_shadowOrbList.clear();
+    constexpr int   MAX_SHADOW_ORBS    = 64;
+    constexpr float SHADOW_CUTOFF_DIST = 5000.0f;
 
-    auto altaz = Astro::computeAltAz(
-        Astro::toRad(haDeg),
-        Astro::toRad(declination),
-        Astro::toRad(m_latitude)
-    );
+    auto& camTransform = m_entityManager.getTransform(m_camera);
 
-    m_astroState.sunDirection = Astro::altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
+    for (int i = m_orbDrawItemCount - 1; i >= 0 && (int)m_shadowOrbList.size() < MAX_SHADOW_ORBS; --i)
+    {
+        const auto& item = m_orbDrawItems[i];
+        if (item.distSort > SHADOW_CUTOFF_DIST) continue;
 
-    // === Sun Color & Intensity (rendering policy) ===
-    float elevationDeg    = altaz.elevationRad * 180.0f / Astro::PI;
-    float sunHeightFactor = std::clamp((elevationDeg + 12.0f) / 90.0f, 0.0f, 1.0f);
-    float warmth          = 1.0f - sunHeightFactor * 0.75f;
-
-    m_astroState.sunColor = sf::Glsl::Vec4(
-        1.00f,
-        0.90f + warmth * 0.10f,
-        0.65f + warmth * 0.30f,
-        sunHeightFactor * 1.25f + 0.25f
-    );
+        m_shadowOrbList.push_back({ item.worldPos, item.orbRadius }); // radiusPx is wrong here - see below
+    }
 }
 
-void Scene_IC_Camp::updateMoonPosition()
+void Scene_IC_Camp::uploadShadowOrbsToShader(sf::Shader& shader)
 {
-    const double DEG2RAD = 3.14159265358979323846 / 180.0;
-    const double RAD2DEG = 180.0 / 3.14159265358979323846;
-    double T = m_astroTime.julianCenturies;
+    int count = static_cast<int>(m_shadowOrbList.size());
+    shader.setUniform("u_shadowOrbCount", count);
+    shader.setUniform("u_shadowDarkness", 0.6f);
 
-    // ── Fundamental arguments (Meeus chapter 47) ────────────────────────────
-    // Moon's mean longitude
-    double Lm = std::fmod(218.3164477 + 481267.88123421 * T, 360.0);
-    // Moon's mean anomaly
-    double M  = std::fmod(134.9633964 + 477198.8675055  * T, 360.0);
-    // Sun's mean anomaly
-    double Ms = std::fmod(357.5291092 + 35999.0502909   * T, 360.0);
-    // Moon's argument of latitude
-    double F  = std::fmod(93.2720950  + 483202.0175233  * T, 360.0);
-    // Longitude of ascending node
-    double Om = std::fmod(125.0445479 - 1934.1362608    * T, 360.0);
+    for (int i = 0; i < count; ++i)
+    {
+        std::string idx = "[" + std::to_string(i) + "]";
+        shader.setUniform("u_shadowOrbPos" + idx,
+            sf::Glsl::Vec3(m_shadowOrbList[i].worldPos.x,
+                           m_shadowOrbList[i].worldPos.y,
+                           m_shadowOrbList[i].worldPos.z));
+        shader.setUniform("u_shadowOrbRadius" + idx, m_shadowOrbList[i].radius);
+    }
+}
 
-    // Convert to radians for trig
-    double LmR = Lm * DEG2RAD;
-    double MR  = M  * DEG2RAD;
-    double MsR = Ms * DEG2RAD;
-    double FR  = F  * DEG2RAD;
-    double OmR = Om * DEG2RAD;
+void Scene_IC_Camp::updateOrbBobbing(SoAEntityHandle e, float dt)
+{
+    if (m_entityManager.getTag(e) != "orb") return;
+    auto& t = m_entityManager.getTransform(e);
+    auto& orb = m_entityManager.getOrb(e);
 
-    // ── Ecliptic longitude (degrees) — truncated Meeus series ───────────────
-    double dL = 6288774.0 * std::sin(MR)
-              + 1274027.0 * std::sin(2.0*LmR - MR)
-              +  658314.0 * std::sin(2.0*LmR)
-              +  213618.0 * std::sin(2.0*MR)
-              -  185116.0 * std::sin(MsR)
-              -  114332.0 * std::sin(2.0*FR)
-              +   58793.0 * std::sin(2.0*LmR - 2.0*MR)
-              +   57066.0 * std::sin(2.0*LmR - MsR - MR)
-              +   53322.0 * std::sin(2.0*LmR + MR)
-              +   45758.0 * std::sin(2.0*LmR - MsR)
-              -   40923.0 * std::sin(MsR - MR)
-              -   34720.0 * std::sin(LmR)
-              -   30383.0 * std::sin(MsR + MR);
-    dL /= 1000000.0;  // convert from 1e-6 degrees
+    updateBob(e, dt);  // uses simple path
 
-    // ── Ecliptic latitude (degrees) ──────────────────────────────────────────
-    double dB = 5128122.0 * std::sin(FR)
-              +  280602.0 * std::sin(MR  + FR)
-              +  277693.0 * std::sin(MR  - FR)
-              +  173237.0 * std::sin(2.0*LmR - FR)
-              +   55413.0 * std::sin(2.0*LmR - MR + FR)
-              +   46271.0 * std::sin(2.0*LmR - MR - FR)
-              +   32573.0 * std::sin(2.0*LmR + FR)
-              +   17198.0 * std::sin(2.0*MR  + FR)
-              +    9266.0 * std::sin(2.0*LmR + MR - FR)
-              +    8822.0 * std::sin(2.0*MR  - FR);
-    dB /= 1000000.0;
+    auto& bob = m_entityManager.getBob(e);
+    float bobOffset = std::sin(bob.accumulator * 6.2831853f) * bob.magnitude;
 
-    double eclLon = std::fmod(Lm + dL, 360.0);
-    double eclLat = dB;
+    float groundY = heightAt(t.pos.x, t.pos.z);
+    t.pos.y = groundY + orb.heightAboveGround + bobOffset;
 
-    // ── Obliquity of ecliptic ────────────────────────────────────────────────
-    double eps = 23.439291111 - 0.013004167 * T;
-    double epsR = eps * DEG2RAD;
+    t.velocity.y = 0.0f;
+}
 
-    // ── Ecliptic to equatorial (RA/Dec) ──────────────────────────────────────
-    double eclLonR = eclLon * DEG2RAD;
-    double eclLatR = eclLat * DEG2RAD;
+// =========================================================================
+// Coordinate and Color Utilities
+// =========================================================================
 
-    double sinDec = std::sin(eclLatR) * std::cos(epsR)
-                  + std::cos(eclLatR) * std::sin(epsR) * std::sin(eclLonR);
-    double decRad = std::asin(std::clamp(sinDec, -1.0, 1.0));
-
-    double y = std::sin(eclLonR) * std::cos(epsR)
-             - std::tan(eclLatR) * std::sin(epsR);
-    double x = std::cos(eclLonR);
-    double raRad = std::atan2(y, x);
-    if (raRad < 0.0) raRad += 2.0 * 3.14159265358979323846;
-
-    // ── RA/Dec to Hour Angle ─────────────────────────────────────────────────
-    // LST is in degrees in m_astroTime.lst
-    double raDeg  = raRad * RAD2DEG;
-    double haDeg  = std::fmod(m_astroTime.lst - raDeg + 360.0, 360.0);
-    double haRad  = haDeg * DEG2RAD;
-
-    // ── Hour Angle + Dec to Alt/Az — same as your sun ────────────────────────
-    double latRad = m_latitude * DEG2RAD;
-
-    double sinElev = std::sin(latRad) * std::sin(decRad)
-                   + std::cos(latRad) * std::cos(decRad) * std::cos(haRad);
-    sinElev = std::clamp(sinElev, -1.0, 1.0);
-    double elevRad = std::asin(sinElev);
-    double elevDeg = elevRad * RAD2DEG;
-
-    double sinAz = std::sin(haRad) * std::cos(decRad) / std::cos(elevRad);
-    double cosAz = (std::sin(decRad) - std::sin(latRad) * std::sin(elevRad))
-                 / (std::cos(latRad) * std::cos(elevRad));
-    double azRad = std::atan2(sinAz, cosAz);
-
-    // ── World space direction — same convention as your sun ──────────────────
-    m_moonDirection = sf::Glsl::Vec3(
-        (float)(std::cos(elevRad) * std::sin(azRad)),
-        (float)(std::sin(elevRad)),
-        (float)(std::cos(elevRad) * std::cos(azRad))
+sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
+    return sf::Glsl::Vec3(
+        color.r / 255.0f,
+        color.g / 255.0f,
+        color.b / 255.0f
     );
 }
 
-void Scene_IC_Camp::siderealTime()
-{
-    const double DEG2RAD = 3.14159265358979323846 / 180.0;
-
-    double a   = std::floor((14.0 - m_gameMonth) / 12.0);
-    double y   = m_gameYear + 4800.0 - a;
-    double m   = m_gameMonth + 12.0 * a - 3.0;
-    double jdn = m_gameDayOfMonth
-               + std::floor((153.0 * m + 2.0) / 5.0)
-               + 365.0 * y
-               + std::floor(y / 4.0)
-               - std::floor(y / 100.0)
-               + std::floor(y / 400.0)
-               - 32045.0;
-
-    double utcTime = m_gameTimeOfDay - (m_longitude / 15.0);  // Convert local time to UTC based on longitude
-    double dayFraction       = (static_cast<double>(utcTime) / 24.0) - 0.5;
-    double daysSinceJ2000    = (jdn - 2451545.0) + dayFraction;
-
-    m_astroTime.julianDate      = jdn + dayFraction;
-    m_astroTime.julianCenturies = daysSinceJ2000 / 36525.0;
-
-    m_astroTime.gmst = std::fmod(280.46061837 + 360.98564736629 * daysSinceJ2000, 360.0);
-    if (m_astroTime.gmst < 0.0)
-        m_astroTime.gmst += 360.0;
-
-    m_astroTime.lst = std::fmod(m_astroTime.gmst + static_cast<double>(m_longitude), 360.0);
-    if (m_astroTime.lst < 0.0)
-        m_astroTime.lst += 360.0;
-
-    // --- FIX: Apply the offset cleanly ONLY to the epoch offset scalar ---
-    // Leave m_astroTime.lst alone so other systems don't read mismatched data.
-    // The offset was callibrated by comparing Polaris to Ursa Major at a known date, time,
-    // and location and adjusting until the starfield aligned with the reference.
-    double textureCalibrationDegrees = -110.0;
-    double calibratedLST = std::fmod(m_astroTime.lst + textureCalibrationDegrees, 360.0);
-    if (calibratedLST < 0.0)
-        calibratedLST += 360.0;
-
-    // This ensures only the starfield matrix tracks the adjusted longitude timeline
-    m_epochOffset = static_cast<float>(calibratedLST * DEG2RAD);
+sf::Vector2i Scene_IC_Camp::worldToHex(float x, float z) const {
+    float q = (2.f/3.f * x) / m_hexSize;
+    float r = (z / (m_hexSize * std::sqrt(3.f))) - q / 2.f;
+    
+    // Round to nearest hex using cube coordinate rounding
+    float s = -q - r;
+    int rq = int(std::round(q));
+    int rr = int(std::round(r));
+    int rs = int(std::round(s));
+    float dq = std::abs(rq - q);
+    float dr = std::abs(rr - r);
+    float ds = std::abs(rs - s);
+    if (dq > dr && dq > ds)      rq = -rr - rs;
+    else if (dr > ds)             rr = -rq - rs;
+    
+    return sf::Vector2i(rq, rr);
 }
 
-void Scene_IC_Camp::updateStarRotation()
-{
-    const float DEG2RAD = 3.14159265f / 180.0f;
-    float lat  = (90.0f - m_latitude) * DEG2RAD;
-    float lon  = m_longitude * DEG2RAD;
-
-    float lst  = static_cast<float>(m_epochOffset);
-    lon -= lst;
-
-    m_starRotationMatrix[0] = std::cos(lon);
-    m_starRotationMatrix[1] = 0.0f;
-    m_starRotationMatrix[2] = std::sin(lon);
-    m_starRotationMatrix[3] = std::sin(lon) * std::sin(lat);
-    m_starRotationMatrix[4] = std::cos(lat);
-    m_starRotationMatrix[5] = -std::cos(lon) * std::sin(lat);
-    m_starRotationMatrix[6] = -std::sin(lon) * std::cos(lat);
-    m_starRotationMatrix[7] = std::sin(lat);
-    m_starRotationMatrix[8] = std::cos(lon) * std::cos(lat);
-}
-
-void Scene_IC_Camp::captureBake() {
-    // Capture the current bake texture for use in the HUD or other UI elements
-    m_currentBakeImage = m_bakeTexture.getTexture().copyToImage();
+sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
+    float x = m_hexSize * 3.f/2.f * q;
+    float z = m_hexSize * std::sqrt(3.f) * (r + q/2.f);
+    return sf::Vector2f(x, z);
 }
 
 sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {

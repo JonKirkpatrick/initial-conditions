@@ -17,7 +17,6 @@ void GameEngine::init(const std::string & path)
     settings.antiAliasingLevel = 8;
     loadDefaultBindings();
     std::cout << "Loading sprite sheets..." << std::endl;
-    Assets::Instance().loadFromFile(path);
     auto modes = sf::VideoMode::getFullscreenModes();
     if (modes.empty())
     {
@@ -33,6 +32,7 @@ void GameEngine::init(const std::string & path)
         {0.f, 0.f},
         {float(m_window.getSize().x), float(m_window.getSize().y)}
     )));
+    Assets::Instance().loadFromFile(path);
     
     if (!ImGui::SFML::Init(m_window)) {}
 

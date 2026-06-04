@@ -2,6 +2,7 @@
 
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
+#include <SFML/OpenGL.hpp>
 #include "AudioManager.h"
            
 #include <map>
@@ -44,9 +45,17 @@ class Assets
 
 private:
     std::string preprocessShaderIncludes(const std::string& filePath);
+    std::map<std::string, GLuint> m_cubemapMap; 
+    
 
 public:
 
+    struct CubeFaceSpec {
+        const char* suffix;
+        GLenum target;
+    };
+
+    bool readRawHalfFile(const std::filesystem::path& path, int& width, int& height, std::vector<uint16_t>& pixels);
     static Assets& Instance();
     Assets(const Assets&) = delete;
     Assets& operator=(const Assets&) = delete;
@@ -58,6 +67,7 @@ public:
     sf::Sound& getSound(const std::string& soundName);
     sf::Music& getMusic(const std::string& musicName);
     sf::Shader& getShader(const std::string& shaderName);
-
+    void addCubemap(const std::string& name, const std::filesystem::path& folderPath);
+    GLuint getCubemap(const std::string& name) const;
     const std::map<std::string, sf::Texture>& getTextures() const;
 };

@@ -37,3 +37,4 @@ Shader    MaxMipReduce   shaders/max_mip_reduce.frag
 Shader    TopoMiniMap    shaders/minimap_topo.frag
 Shader    Sky            shaders/sky.frag
 Shader    Orb            shaders/orb_shader.frag
+Cubemap   NightSky       images/skymap
