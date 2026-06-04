@@ -7,7 +7,7 @@ uniform float farPlane;
 uniform float nearPlane;
 uniform float fovY;
 uniform float aspectRatio;
-uniform mat3 invRotationMatrix;
+uniform mat3 worldToCamMatrix;
 uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
 
 uniform vec3 sunDir;
@@ -171,7 +171,7 @@ void main() {
         float x_ndc = (screen.x / viewportSize.x) * 2.0 - 1.0;
         float y_ndc = 1.0 - (screen.y / viewportSize.y) * 2.0;
         float f = tan(fovY * 0.5);
-        vec3 rayDir = normalize(invRotationMatrix * vec3(x_ndc * f * aspectRatio, y_ndc * f, -1.0));
+        vec3 rayDir = normalize(worldToCamMatrix * vec3(x_ndc * f * aspectRatio, y_ndc * f, -1.0));
         worldPos = cameraPos + rayDir * dist;
     } 
     else {
@@ -236,8 +236,8 @@ void main() {
 
         if (distToCamera > 0.1) {
             vec3 toFragDir = normalize(toFragment);
-            vec3 camForward = normalize(invRotationMatrix * vec3(0.0, 0.0, -1.0));
-            vec3 camRight = normalize(invRotationMatrix * vec3(1.0, 0.0, 0.0));
+            vec3 camForward = normalize(worldToCamMatrix * vec3(0.0, 0.0, -1.0));
+            vec3 camRight = normalize(worldToCamMatrix * vec3(1.0, 0.0, 0.0));
             float camPitchAmount = abs(asin(clamp(camForward.y, -1.0, 1.0)));
             float damping = 1.0 + (dampingMax - 1.0) * pow(cos(clamp(camPitchAmount, 0.0, 3.14 * 0.5)), 10.0);
 

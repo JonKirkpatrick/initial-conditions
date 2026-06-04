@@ -4,7 +4,7 @@ uniform float farPlane;
 uniform float nearPlane;
 uniform float fovY;
 uniform float aspectRatio;
-uniform mat3 invRotationMatrix;
+uniform mat3 worldToCamMatrix;
 uniform float u_quality; // 0.05..1.0, scales raymarch cost
 uniform float u_stepSizeScale; // multiplier for base step size (default 1.0)
 uniform float u_activeLayerEnabled[16]; // 1.0 when layer i is enabled, 0.0 otherwise
@@ -72,7 +72,7 @@ void main() {
     float y_ndc = 1.0 - (screen.y / viewportSize.y) * 2.0;
 
     float f = tan(fovY * 0.5);
-    vec3 rayDir = normalize(invRotationMatrix * vec3(x_ndc * f * aspectRatio, y_ndc * f, -1.0));
+    vec3 rayDir = normalize(worldToCamMatrix * vec3(x_ndc * f * aspectRatio, y_ndc * f, -1.0));
 
     gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); // sky
 

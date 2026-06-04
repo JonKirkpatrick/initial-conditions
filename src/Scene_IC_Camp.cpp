@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "imgui-SFML.h"
 #include "Camera.h"
+#include "Astro.hpp"
 #include <random>
 #include <array>
 #include <filesystem>
@@ -45,58 +46,6 @@ static sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b)
         a.z * b.x - a.x * b.z,
         a.x * b.y - a.y * b.x
     );
-}
-
-// Rotation around Y axis (LST spin around celestial pole)
-static std::array<float,9> rotY(float angle)
-{
-    float c = std::cos(angle), s = std::sin(angle);
-    return {
-         c,  0,  s,
-         0,  1,  0,
-        -s,  0,  c
-    };
-}
-
-// Rotation around X axis (tilt pole to correct elevation for latitude)
-static std::array<float,9> rotX(float angle)
-{
-    float c = std::cos(angle), s = std::sin(angle);
-    return {
-        1,  0,   0,
-        0,  c,  -s,
-        0,  s,   c
-    };
-}
-
-static std::array<float,9> rotZ(float angle)
-{
-    float c = std::cos(angle), s = std::sin(angle);
-    return {
-         c, -s,  0,
-         s,  c,  0,
-         0,  0,  1
-    };
-}
-
-static sf::Vector3f altAzToWorld(float altRad, float azRad)
-{
-    return sf::Vector3f(
-        std::cos(altRad) * std::sin(azRad),   // X east-west
-        std::sin(altRad),                      // Y up
-        std::cos(altRad) * std::cos(azRad)    // Z north-south
-    );
-}
-
-// Multiply two column-major 3x3 matrices
-static std::array<float,9> mat3Mul(const std::array<float,9>& A, const std::array<float,9>& B)
-{
-    std::array<float,9> R = {};
-    for (int col = 0; col < 3; col++)
-        for (int row = 0; row < 3; row++)
-            for (int k = 0; k < 3; k++)
-                R[col*3 + row] += A[k*3 + row] * B[col*3 + k];
-    return R;
 }
 
 namespace
@@ -382,7 +331,6 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
         {
             file >> m_gameTimeOfDay
                  >> m_gameYear
-                 >> m_gameDayOfYear
                  >> m_gameDayOfMonth
                  >> m_gameMonth
                  >> m_latitude
@@ -673,7 +621,6 @@ void Scene_IC_Camp::update() {
     if (m_gameTimeOfDay >= 24.0f)
     {
         m_gameTimeOfDay -= 24.0f;
-        m_gameDayOfYear++;
         m_gameDayOfMonth++;
 
         // Days per month, accounting for leap year
@@ -690,7 +637,6 @@ void Scene_IC_Camp::update() {
             {
                 m_gameMonth = 1;
                 m_gameYear++;
-                m_gameDayOfYear = 1;
             }
         }
     }
@@ -1137,20 +1083,20 @@ sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
 void Scene_IC_Camp::sRender() {
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
-    auto inverseRotationMatrix = toGlslMat3(Camera::getInverseRotationMatrix(transform.pitch, transform.yaw, transform.roll));
+    auto worldToCamMatrix = toGlslMat3(Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll));
     window.clear(sf::Color::Transparent);
     updateShadowOrbs();
     uploadShadowOrbsToShader(m_finalShader);
 
 
     if (m_useDepthStepDebug) {
-        runDepthStepPass(inverseRotationMatrix);
+        runDepthStepPass(worldToCamMatrix);
         sf::Sprite debugSprite(m_renderTexture.getTexture());
         window.draw(debugSprite);
     } else {
-        renderSky(inverseRotationMatrix);
-        runBakePass(inverseRotationMatrix);
-        runFinalPass(inverseRotationMatrix);
+        renderSky(worldToCamMatrix);
+        runBakePass(worldToCamMatrix);
+        runFinalPass(worldToCamMatrix);
         sf::Sprite finalSprite(m_renderTexture.getTexture());
         sf::Sprite backgroundSprite(m_skyTexture.getTexture());
         window.draw(backgroundSprite);
@@ -1284,7 +1230,6 @@ void Scene_IC_Camp::sGUI()
                 m_gameTimeOfDay = static_cast<double>(timeOfDayF);
                 changed = true;
             }
-            changed |= ImGui::SliderInt("Day of Year", &m_gameDayOfYear, 1, 365);
             changed |= ImGui::SliderFloat("Latitude", &m_latitude, -90.0f, 90.0f);
             changed |= ImGui::SliderFloat("Epoch Offset", &m_epochOffset, -365.0f, 365.0f);
             if (changed) {
@@ -1355,7 +1300,7 @@ void Scene_IC_Camp::uploadWarpParametersToShader(sf::Shader& shader) const {
 
 // This is the heart of the rendering system: it runs a fullscreen shader that raymarches the terrain to produce a depth value for each pixel, 
 // which is stored in m_bakeTexture.  This is then sampled in the final pass to composite the terrain with the sky and orbs.
-void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
+void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u bakeSize = m_bakeTexture.getSize();
@@ -1365,7 +1310,7 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
 
     m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
     m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_bakeShader.setUniform("invRotationMatrix", inverseRotationMatrix);
+    m_bakeShader.setUniform("worldToCamMatrix", worldToCamMatrix);
     m_bakeShader.setUniform("fovY",          cameraData.fovY);
     m_bakeShader.setUniform("aspectRatio",   cameraData.aspectRatio);
     m_bakeShader.setUniform("nearPlane",     cameraData.nearPlane);
@@ -1389,14 +1334,14 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& inverseRotationMatrix) {
 // This is a debug pass that is intended to visualize the cost of raymarching steps in the bake shader.
 // It operates in a similar fashion to the bake shader, but reserves the red channel to encode the number of
 // steps taken instead of providing 24 bit precision for depth.
-void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
+void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u outputSize = m_renderTexture.getSize();
 
     m_depthStepShader.setUniform("viewportSize",  sf::Glsl::Vec2(outputSize.x, outputSize.y));
     m_depthStepShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_depthStepShader.setUniform("invRotationMatrix", inverseRotationMatrix);
+    m_depthStepShader.setUniform("worldToCamMatrix", worldToCamMatrix);
     m_depthStepShader.setUniform("fovY",          cameraData.fovY);
     m_depthStepShader.setUniform("aspectRatio",   cameraData.aspectRatio);
     m_depthStepShader.setUniform("nearPlane",     cameraData.nearPlane);
@@ -1445,7 +1390,7 @@ void Scene_IC_Camp::runTopDownPass() {
 }
 
 // This pass uses the baked depthmap alone to produce a final shaded image.
-void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
+void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u winSize = m_game.window().getSize();
@@ -1460,10 +1405,10 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
     m_finalShader.setUniform("nearPlane",     cameraData.nearPlane);
     m_finalShader.setUniform("fovY",          cameraData.fovY);
     m_finalShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_finalShader.setUniform("invRotationMatrix", inverseRotationMatrix);
+    m_finalShader.setUniform("worldToCamMatrix", worldToCamMatrix);
     m_finalShader.setUniform("camHeight",     getCameraHeightAboveGround(transform.pos));
-    m_finalShader.setUniform("sunDir", m_sunDirection); 
-    m_finalShader.setUniform("sunColor", m_sunColor);
+    m_finalShader.setUniform("sunDir", m_astroState.sunDirection); 
+    m_finalShader.setUniform("sunColor", m_astroState.sunColor);
     m_finalShader.setUniform("ambientStrength", 0.3f);
     m_finalShader.setUniform("baseColor", colorToShader(Theme::color("best-brown")));
     m_finalShader.setUniform("gridColor", colorToShader(m_gridColor));
@@ -1487,30 +1432,28 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& inverseRotationMatrix) {
 }
 
 // Draws the sky background.
-void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& rotationMatrix) {
+void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& cameraData = m_entityManager.getCamera(m_camera);
+    auto transform = m_entityManager.getTransform(m_camera);
+    sf::RectangleShape skyQuad(sf::Vector2f(m_game.window().getSize().x, m_game.window().getSize().y));
     m_sky.setUniform("viewportSize",  sf::Glsl::Vec2(m_game.window().getSize().x, m_game.window().getSize().y));
     m_sky.setUniform("fovY",          cameraData.fovY);
     m_sky.setUniform("aspectRatio",   cameraData.aspectRatio);
-    auto transform = m_entityManager.getTransform(m_camera);
-    m_sky.setUniform("invRotationMatrix", rotationMatrix);
-    m_sky.setUniform("sunDir", m_sunDirection);
+    m_sky.setUniform("worldToCamMatrix", worldToCamMatrix);
+    m_sky.setUniform("sunDir", m_astroState.sunDirection);
     m_sky.setUniform("useSkyCubemap", m_skyCubemapReady);
     m_sky.setUniform("starRotationMatrix", sf::Glsl::Mat3(m_starRotationMatrix));
-    m_sky.setUniform("skyExposure", 15.0f);
+    m_sky.setUniform("skyExposure", 5.0f);
     m_sky.setUniform("moonDir", m_moonDirection);
-    m_sky.setUniform("moonPhase", m_moonPhase);
     m_sky.setUniform("moonTexture", m_moonTexture);
 
     if (m_skyCubemapReady && m_skyCubemapHandle != 0)
     {
         glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
     }
-
     m_renderTexture.clear(sf::Color::Transparent);
     m_renderTexture.display();
     m_skyTexture.clear(sf::Color::Transparent);
-    sf::RectangleShape skyQuad(sf::Vector2f(m_game.window().getSize().x, m_game.window().getSize().y));
     m_skyTexture.draw(skyQuad, &m_sky);
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
@@ -1557,8 +1500,8 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
     }
 
     shader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
-    shader.setUniform("sunDirWorld", m_sunDirection);
-    shader.setUniform("sunColor", m_sunColor);
+    shader.setUniform("sunDirWorld", m_astroState.sunDirection);
+    shader.setUniform("sunColor", m_astroState.sunColor);
     shader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
     shader.setUniform("u_viewportSize", sf::Glsl::Vec2(
         static_cast<float>(m_bakeTexture.getSize().x),
@@ -1579,7 +1522,7 @@ void Scene_IC_Camp::renderOrbs()
     auto& camData = m_entityManager.getCamera(m_camera);
 
     sf::Vector3f sunDirView = Camera::worldToCamera(
-        m_sunDirection, camTransform.pitch, camTransform.yaw, camTransform.roll);
+        m_astroState.sunDirection, camTransform.pitch, camTransform.yaw, camTransform.roll);
 
     constexpr int BATCH_SIZE = 64;
     OrbBatch batch;
@@ -1692,61 +1635,27 @@ void Scene_IC_Camp::updateMinimapTexture()
 
 void Scene_IC_Camp::updateSunPosition()
 {
-    float hourFraction = m_gameTimeOfDay / 24.0f;
+    float declination  = Astro::solarDeclination(m_gameMonth, m_gameDayOfMonth);
+    float haDeg        = (m_gameTimeOfDay / 24.0f - 0.5f) * 360.0f;
 
-    // Solar declination (approximate)
-    float declination = 23.45f * std::sin((360.0f / 365.0f) * (m_gameDayOfYear - 81.0f) * 3.14159265f / 180.0f);
-
-    float latRad = m_latitude * 3.14159265f / 180.0f;
-    float decRad = declination * 3.14159265f / 180.0f;
-
-    // Hour angle in radians (-180° to +180°)
-    float hourAngleDeg = (hourFraction - 0.5f) * 360.0f;
-    float haRad = hourAngleDeg * 3.14159265f / 180.0f;
-
-    // Solar elevation
-    float sinElevation = std::sin(latRad) * std::sin(decRad) + 
-                         std::cos(latRad) * std::cos(decRad) * std::cos(haRad);
-    
-    sinElevation = std::clamp(sinElevation, -1.0f, 1.0f);   // safety
-    float elevationRad = std::asin(sinElevation);
-    float elevationDeg = elevationRad * 180.0f / 3.14159265f;
-
-    // === Solar Azimuth (more robust calculation) ===
-    float azimuthRad;
-
-    if (std::abs(std::cos(elevationRad)) < 0.0001f) {
-        // Sun nearly directly overhead or below horizon — azimuth is ambiguous
-        azimuthRad = 0.0f;   // or keep previous value
-    } else {
-        float sinAz = std::sin(haRad) * std::cos(decRad) / std::cos(elevationRad);
-        float cosAz = (std::sin(decRad) - std::sin(latRad) * std::sin(elevationRad)) / 
-                      (std::cos(latRad) * std::cos(elevationRad));
-
-        // Use atan2 for proper quadrant
-        azimuthRad = std::atan2(sinAz, cosAz);
-    }
-
-    // Convert to 3D direction vector (Y up)
-    m_sunDirection = sf::Glsl::Vec3(
-        std::cos(elevationRad) * std::sin(azimuthRad),   // X (East-West)
-        std::sin(elevationRad),                          // Y (Up)
-        std::cos(elevationRad) * std::cos(azimuthRad)    // Z (North-South)
+    auto altaz = Astro::computeAltAz(
+        Astro::toRad(haDeg),
+        Astro::toRad(declination),
+        Astro::toRad(m_latitude)
     );
 
-    // === Sun Color & Intensity ===
+    m_astroState.sunDirection = Astro::altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
+
+    // === Sun Color & Intensity (rendering policy) ===
+    float elevationDeg    = altaz.elevationRad * 180.0f / Astro::PI;
     float sunHeightFactor = std::clamp((elevationDeg + 12.0f) / 90.0f, 0.0f, 1.0f);
+    float warmth          = 1.0f - sunHeightFactor * 0.75f;
 
-    m_sunIntensity = sunHeightFactor * 1.25f + 0.25f;
-
-    // Golden hour / twilight warmth
-    float warmth = 1.0f - sunHeightFactor * 0.75f;           // stronger warmth near horizon
-
-    m_sunColor = sf::Glsl::Vec4(
+    m_astroState.sunColor = sf::Glsl::Vec4(
         1.00f,
         0.90f + warmth * 0.10f,
         0.65f + warmth * 0.30f,
-        m_sunIntensity
+        sunHeightFactor * 1.25f + 0.25f
     );
 }
 
@@ -1851,11 +1760,6 @@ void Scene_IC_Camp::updateMoonPosition()
         (float)(std::sin(elevRad)),
         (float)(std::cos(elevRad) * std::cos(azRad))
     );
-
-    // ── Phase angle — difference between moon and sun ecliptic longitudes ────
-    double sunLon = std::fmod(280.46646 + 36000.76983 * T, 360.0);
-    double phaseAngle = std::fmod(eclLon - sunLon + 360.0, 360.0);
-    m_moonPhase = (float)(phaseAngle / 360.0);  // 0=new, 0.5=full, 1=new
 }
 
 void Scene_IC_Camp::siderealTime()
@@ -1888,7 +1792,17 @@ void Scene_IC_Camp::siderealTime()
     if (m_astroTime.lst < 0.0)
         m_astroTime.lst += 360.0;
 
-    m_epochOffset = static_cast<float>(m_astroTime.lst * DEG2RAD);
+    // --- FIX: Apply the offset cleanly ONLY to the epoch offset scalar ---
+    // Leave m_astroTime.lst alone so other systems don't read mismatched data.
+    // The offset was callibrated by comparing Polaris to Ursa Major at a known date, time,
+    // and location and adjusting until the starfield aligned with the reference.
+    double textureCalibrationDegrees = -110.0;
+    double calibratedLST = std::fmod(m_astroTime.lst + textureCalibrationDegrees, 360.0);
+    if (calibratedLST < 0.0)
+        calibratedLST += 360.0;
+
+    // This ensures only the starfield matrix tracks the adjusted longitude timeline
+    m_epochOffset = static_cast<float>(calibratedLST * DEG2RAD);
 }
 
 void Scene_IC_Camp::updateStarRotation()

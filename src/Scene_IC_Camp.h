@@ -3,6 +3,7 @@
 #include "HUD.h"
 #include "Topography.hpp"
 #include "SoAEntityManager.hpp"
+#include "Astro.hpp"
 #include <SFML/System.hpp>
 
 class Scene_IC_Camp : public Scene {
@@ -182,12 +183,12 @@ protected:
 
     // Time, Date and Location
     double m_gameTimeOfDay; // Hours between 0 and 24
-    int m_gameDayOfYear; // Day of the year between 1 and 365
-    int m_gameDayOfMonth; // Day of the month between 1 and 31 (not currently used, but could be for more detailed time control)
-    int m_gameMonth; // Month between 1 and 12 (not currently used, but could be for more detailed time control)
-    int m_gameYear; // Year (not currently used, but could be for more detailed time control)
-    float m_latitude; // Newfoundland
-    float m_longitude; // Newfoundland
+    int m_gameDayOfMonth; // Day of the month between 1 and 31
+    int m_gameMonth; // Month between 1 and 12
+    int m_gameYear; // Year
+    float m_latitude;
+    float m_longitude;
+    Astro::State m_astroState;
 
     // Sun parameters
     sf::Glsl::Vec3 m_sunDirection;

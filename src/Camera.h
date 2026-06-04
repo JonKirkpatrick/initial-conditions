@@ -22,5 +22,5 @@ namespace Camera
     sf::Vector3f rotateInverse(const sf::Vector3f& v, float pitch, float yaw, float roll); // legacy alias for cameraToWorld
     sf::Vector3f normalize(const sf::Vector3f& v);
     // Compute inverse rotation matrix once per frame (cheaper than per-pixel trig)
-    std::array<std::array<float, 3>, 3> getInverseRotationMatrix(float pitch, float yaw, float roll);
+    std::array<std::array<float, 3>, 3> getWorldToCamMatrix(float pitch, float yaw, float roll);
 }

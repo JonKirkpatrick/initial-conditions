@@ -2,7 +2,7 @@ uniform vec2 viewportSize;
 uniform float farPlane;
 uniform float fovY;
 uniform float aspectRatio;
-uniform mat3 invRotationMatrix;
+uniform mat3 worldToCamMatrix;
 uniform float cameraYaw;
 uniform float heightMax;
 uniform float u_activeLayerEnabled[16];

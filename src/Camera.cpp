@@ -88,7 +88,7 @@ namespace Camera {
         return v / m;
     }
 
-    std::array<std::array<float, 3>, 3> getInverseRotationMatrix(float pitch, float yaw, float roll) {
+    std::array<std::array<float, 3>, 3> getWorldToCamMatrix(float pitch, float yaw, float roll) {
         // Build a matrix that maps world-space vectors into camera-space using the
         // same rotation conventions as `worldToCamera`. We compute the images of
         // the world basis vectors so the result matches the CPU-side math.

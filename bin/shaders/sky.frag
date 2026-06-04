@@ -3,7 +3,7 @@ uniform float fovY;
 uniform float aspectRatio;
 uniform vec3 sunDir;
 uniform vec4 sunColor;
-uniform mat3 invRotationMatrix;
+uniform mat3 worldToCamMatrix;
 
 uniform samplerCube skyCubemap;
 uniform mat3 starRotationMatrix;
@@ -11,7 +11,6 @@ uniform bool useSkyCubemap;
 uniform float skyExposure;
 
 uniform vec3 moonDir;
-uniform float moonPhase;
 uniform sampler2D moonTexture;
 
 void main() {
@@ -20,7 +19,7 @@ void main() {
     float x_ndc = (screen.x / viewportSize.x) * 2.0 - 1.0;
     float y_ndc = 1.0 - (screen.y / viewportSize.y) * 2.0;
     float f = tan(fovY * 0.5);
-    vec3 rayDir = normalize(invRotationMatrix * vec3(x_ndc * f * aspectRatio, y_ndc * f, -1.0));
+    vec3 rayDir = normalize(worldToCamMatrix * vec3(x_ndc * f * aspectRatio, y_ndc * f, -1.0));
 
     vec3 sunDirNorm = normalize(sunDir);
     float sunDot = max(dot(rayDir, sunDirNorm), 0.0);
