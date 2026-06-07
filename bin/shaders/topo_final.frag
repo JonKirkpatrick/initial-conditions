@@ -194,7 +194,6 @@ void main() {
                                     normal.z * u_reliefExaggeration));
     normal = exagNormal;
     
-    // === TOPOGRAPHIC COLORING ===
     vec3 terrainBaseColor = isTerrainHit ? 
                             getTerrainColor(normal, worldPos.xz) : 
                             baseColor;

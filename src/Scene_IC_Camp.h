@@ -94,10 +94,10 @@ protected:
     // Time, Date and Location
     // =========================================================================
 
-    double m_gameTimeOfDay  = 12.0;  // Hours, 0..24
-    int    m_gameDayOfMonth = 1;
-    int    m_gameMonth      = 1;
     int    m_gameYear       = 2000;
+    int    m_gameMonth      = 1;
+    int    m_gameDayOfMonth = 1;
+    double m_gameTimeOfDay  = 12.0;
     float  m_latitude       = 0.f;
     float  m_longitude      = 0.f;
     Astro::State m_astroState;
@@ -287,7 +287,7 @@ protected:
                                 const sf::Vector3f& sunDirView);
 
     // =========================================================================
-    // Terrain Query Helpers (thin wrappers around Topography namespace)
+    // Terrain Query Helpers
     // =========================================================================
 
     float heightAt(float x, float z) const {

@@ -66,7 +66,6 @@ void main()
     vec3 sunLightDir = normalize(sunDir);
     float sunDiffuse = max(0.0, dot(normal, sunLightDir));
     vec3 sunHalfDir = normalize(sunLightDir + viewDir);
-    float sunSpecular = pow(max(0.0, dot(normal, sunHalfDir)), 16.0);
 
     float hemisphere = clamp(0.20 + 0.80 * z, 0.0, 1.0);
     vec3 sunWorldDir = normalize(sunDirWorld);
@@ -80,7 +79,6 @@ void main()
 
     vec3 sunShaded = ambient + orbColor.rgb * hemisphere * (0.10 + 0.90 * sunDiffuse * sunVisibility);
     sunShaded += sunColor.rgb * sunDiffuse * 0.28 * sunVisibility;
-    sunShaded += vec3(sunSpecular) * 0.40 * sunVisibility;
 
     // Headlamp cone: screen center beam, using the orb center in view space.
     vec3 orbCenterDir = normalize(orbCenter);
@@ -99,9 +97,7 @@ void main()
     vec3 lampLightDir = vec3(0.0, 0.0, 1.0);
     float lampDiffuse = max(0.0, dot(normal, lampLightDir));
     vec3 lampHalfDir = normalize(lampLightDir + viewDir);
-    float lampSpecular = pow(max(0.0, dot(normal, lampHalfDir)), 16.0);
-    vec3 flashlightShaded = orbColor.rgb * (0.15 + 0.85 * lampDiffuse)
-                          + vec3(1.0, 0.97, 0.90) * lampSpecular * 0.5;
+    vec3 flashlightShaded = orbColor.rgb * (0.15 + 0.85 * lampDiffuse);
     flashlightShaded *= lampStrength;
 
     // Atmospheric perspective: mirror topo_final's smooth dusk/night rolloff.

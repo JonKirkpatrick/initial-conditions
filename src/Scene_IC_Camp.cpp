@@ -81,7 +81,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     updateCamera(0.001f);
     spawnDebugOrbs(8000);
 
-    // Sync legacy tuple components into SoA before any code reads from the new storage.
     m_entityManager.update();
 
     Topography::setWarpParameters(m_warpScale, m_warpStrength);
@@ -111,8 +110,8 @@ void Scene_IC_Camp::update() {
     m_lastFrameTime = currentTime;
     // Time advancement — debug rate: 1 in-game hour per 4 real seconds
     // To slow later: replace 1.0f / 4.0f with 1.0f / (4.0f * desiredSlowdown)
-    const float realSecondsPerGameHour = 4.0f;
-    // m_gameTimeOfDay += static_cast<double>(dt) * (1.0f / realSecondsPerGameHour);
+    const float realSecondsPerGameHour = 30.0f;
+    m_gameTimeOfDay += static_cast<double>(dt) * (1.0f / realSecondsPerGameHour);
     if (m_gameTimeOfDay >= 24.0f)
     {
         m_gameTimeOfDay -= 24.0f;
@@ -136,12 +135,12 @@ void Scene_IC_Camp::update() {
         }
     }
     sMovement(dt);
+    updateCamera(dt);
     updateHUDData();
     updateSiderealTime();
     updateSunPosition();
     updateStarRotation();
     updateMoonPosition();
-    updateCamera(dt);
     sortOrbs();
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
@@ -403,6 +402,7 @@ void Scene_IC_Camp::sGUI()
         }
         ImGui::Text("Warp is shared by C++ terrain queries and all terrain shaders");
     ImGui::End();
+    ImGui::End();
 }
 
 void Scene_IC_Camp::sRender() {
@@ -450,13 +450,11 @@ void Scene_IC_Camp::sMovement(float dt)
             handlePlayerMovement(e, dt);
         }
 
-        // Kinematic movement for entities without physics (orbs, etc.)
+        // 2. Kinematic movement for entities without physics (orbs, etc.)
         if (!m_entityManager.hasPhysics(e))
         {
             t.pos += t.velocity * dt;
         }
-
-        // Note: physics integration moved to SoA-accelerated loop below
 
         // 3. Ground resolution + special cases
         resolveEntityPosition(e, dt);
@@ -514,7 +512,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 
     sf::Vector3f right = {-terrainForward.z, 0.0f, terrainForward.x};
 
-    // === Slope-based speed modifier - Subtle version ===
+    // === Slope-based speed modifier ===
     float slopeFactor = 1.0f;
     float slopeCos = dot(terrainForward, normal);
     float slopeAngle = std::acos(std::clamp(slopeCos, -1.0f, 1.0f));
@@ -536,7 +534,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     }
 
     moveSpeed *= slopeFactor;
-    // === Rotation (unchanged) ===
+    // === Rotation ===
     t.yaw += input.mouseDelta.x * 0.002f;
     t.pitch += input.mouseDelta.y * 0.002f;
     input.mouseDelta = {0.f, 0.f};
@@ -565,21 +563,20 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 
         if (phys.onGround)
         {
-            // === KEY CHANGE: Velocity now follows the slope naturally ===
+            // === Velocity follows the slope naturally ===
             sf::Vector3f desiredOnPlane = desired - normal * dot(desired, normal);
             if (length(desiredOnPlane) > 0.001f)
                 desiredOnPlane = Camera::normalize(desiredOnPlane) * moveSpeed;
 
             t.velocity.x = desiredOnPlane.x;
             t.velocity.z = desiredOnPlane.z;
-            t.velocity.y = desiredOnPlane.y;   // ← This is the important line
+            t.velocity.y = desiredOnPlane.y;
         }
         else
         {
             const float airControl = 0.25f;
             t.velocity.x = std::lerp(t.velocity.x, desired.x, airControl);
             t.velocity.z = std::lerp(t.velocity.z, desired.z, airControl);
-            // y velocity is left alone (gravity does its thing)
         }
     }
     else if (phys.onGround)
@@ -596,7 +593,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
         phys.onGround = false;
     }
 
-    // === Much gentler ground handling ===
+    // === Ground handling ===
     const float terrainHeight = heightAt(t.pos.x, t.pos.z);
 
     if (phys.onGround)
@@ -614,8 +611,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
         }
         else
         {
-            // Very light correction only
-            t.pos.y = std::lerp(t.pos.y, terrainHeight, 0.35f);   // ← soft follow
+            t.pos.y = std::lerp(t.pos.y, terrainHeight, 0.35f);   // soft follow
             t.velocity.y = std::min(t.velocity.y, 0.0f);
         }
     }
@@ -630,7 +626,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
         }
     }
 
-    // === Bobbing & Footsteps (unchanged) ===
+    // === Bobbing & Footsteps ===
     float horizSpeed = std::sqrt(t.velocity.x*t.velocity.x + t.velocity.z*t.velocity.z);
     updateBob(e, dt, horizSpeed);
 
@@ -740,7 +736,6 @@ void Scene_IC_Camp::updateBob(SoAEntityHandle e, float dt, float horizSpeed=0.0f
 
 void Scene_IC_Camp::updateSiderealTime()
 {
-    // Pass local state data into the pure astronomical function
     auto result = Astro::computeSiderealTime(
         m_gameYear,
         m_gameMonth,
@@ -749,7 +744,6 @@ void Scene_IC_Camp::updateSiderealTime()
         m_longitude
     );
 
-    // Unpack data straight into your state struct
     m_astroState.astroTime   = result.astroTime;
     m_astroState.epochOffset = result.epochOffset;
 }
@@ -768,7 +762,7 @@ void Scene_IC_Camp::updateSunPosition()
     m_astroState.sunDirection = Astro::altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
 
     // === Sun Color & Intensity ===
-    float elevationDeg    = altaz.elevationRad * 180.0f / Astro::PI;
+    float elevationDeg    = Astro::toDeg(altaz.elevationRad);
     float sunHeightFactor = std::clamp((elevationDeg + 12.0f) / 90.0f, 0.0f, 1.0f);
     float warmth          = 1.0f - sunHeightFactor * 0.75f;
 
@@ -852,10 +846,10 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
         }
         if (str == "DateTimePlace")
         {
-            file >> m_gameTimeOfDay
-                 >> m_gameYear
-                 >> m_gameDayOfMonth
+            file >> m_gameYear
                  >> m_gameMonth
+                 >> m_gameDayOfMonth
+                 >> m_gameTimeOfDay
                  >> m_latitude
                  >> m_longitude;
         }
@@ -870,7 +864,7 @@ void Scene_IC_Camp::spawnPlayer()
     m_playerConfig.HEIGHT_OFFSET *= 100.f; // convert from metres to cm
     m_playerConfig.EYE_OFFSET *= 100.f;    // convert from metres to cm
     m_playerConfig.MOVE_SPEED *= 100.f;    // convert from m/s to cm/s
-    m_playerConfig.ROTATION_SPEED = m_playerConfig.ROTATION_SPEED * 3.14159265f / 180.f;
+    m_playerConfig.ROTATION_SPEED = Astro::toRad(m_playerConfig.ROTATION_SPEED);
     sf::Vector2f playerPosition = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
     sf::Vector3f spawnPos(playerPosition.x, heightAt(playerPosition.x, playerPosition.y), playerPosition.y);
     m_entityManager.addPlayer(m_player, CPlayer());
@@ -878,8 +872,6 @@ void Scene_IC_Camp::spawnPlayer()
     m_entityManager.addInput(m_player, CInput());
     m_entityManager.addPhysics(m_player, CPhysics());
     m_entityManager.addBob(m_player, CBob(1.0f, 6.0f, 5.5f));   // rate, vertical mag, lateral mag
-
-    // Optional: set initial values
     auto& phys = m_entityManager.getPhysics(m_player);
     phys.onGround = true;
 }
@@ -887,8 +879,7 @@ void Scene_IC_Camp::spawnPlayer()
 void Scene_IC_Camp::spawnCamera()
 {
     m_camera = m_entityManager.addEntity("camera");
-    float pi = 3.14159265f;
-    m_cameraConfig.FOVY = m_cameraConfig.FOVY * pi / 180.0f;
+    m_cameraConfig.FOVY = Astro::toRad(m_cameraConfig.FOVY);
     m_cameraConfig.NEAR_PLANE *= 100.f; // convert from metres to cm
     m_cameraConfig.FAR_PLANE  *= 100.f; // convert from metres to cm
     m_entityManager.addCamera(m_camera, CCamera(
@@ -991,12 +982,8 @@ void Scene_IC_Camp::updateCamera(float dt)
         playerTransform.velocity.z * playerTransform.velocity.z
     );
 
-    // Speed as a fraction of base move speed, clamped to sprint ceiling.
-    // Slope and terrain are already baked into horizontalSpeed, so no
-    // further compensation needed here.
     float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
 
-    // moveFactor gates the bob entirely when nearly still (0..1 over first unit of speed)
     float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
 
     float phase = playerBob.accumulator * 6.2831853f;
@@ -1004,15 +991,10 @@ void Scene_IC_Camp::updateCamera(float dt)
     // === Bob Parameters ===
     float baseFrequency = 1.0f;
 
-    // Amplitudes interpolate continuously with speed.
-    // Sprint end (speedFraction = 3) is tighter/smaller — you're more rigid at a run.
-    // Walk end (speedFraction = 1) is the most pronounced swing.
-    // Uphill crawl (speedFraction < 1) tapers down toward zero via moveFactor.
     float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
     float lateralAmplitude = 5.5f + (3.8f - 5.5f) * t;
     float verticalAmplitude = 6.2f + (4.8f - 6.2f) * t;
 
-    // Crouch reduces amplitude as a postural state regardless of speed
     if (playerPhysics.isCrouching)
     {
         lateralAmplitude  *= (1.0f - m_crouchFactor * 0.45f);
@@ -1021,7 +1003,6 @@ void Scene_IC_Camp::updateCamera(float dt)
 
     lateralAmplitude *= 0.85f;
 
-    // Use same base frequency, with mild harmonic on vertical
     float lateralBob  = std::sin(phase * baseFrequency) * lateralAmplitude * moveFactor;
     float verticalBob = std::sin(phase * baseFrequency * 1.65f) * verticalAmplitude * moveFactor;
 
@@ -1040,16 +1021,13 @@ void Scene_IC_Camp::updateCamera(float dt)
 
 void Scene_IC_Camp::updateHUDData()
 {
-    // Use a constant for clarity
-    const float RAD_TO_DEG = 180.0f / 3.14159265f;
-
     auto& playerTransform = m_entityManager.getTransform(m_player);
     sf::Vector3f currentLocation = playerTransform.pos;
     sf::Vector3f forward = forwardFromTransform(playerTransform);
     forward.y = 0.f;
     forward = Camera::normalize(forward);
 
-    float currentHeading = -std::atan2(forward.x, forward.z) * RAD_TO_DEG;
+    float currentHeading = Astro::toDeg(-std::atan2(forward.x, forward.z));
 
     updateMinimapTexture();
 
@@ -1407,10 +1385,7 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u bakeSize = m_bakeTexture.getSize();
-
-    // Compute which layers are close enough to affect raymarching
     m_activeLayerMask = Topography::computeActiveLayerMask(transform.pos, m_terrainLayers);
-
     m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
     m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
     m_bakeShader.setUniform("worldToCamMatrix", worldToCamMatrix);
@@ -1427,7 +1402,6 @@ void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& worldToCamMatrix) {
     m_bakeShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
     uploadTerrainLayersToShader(m_bakeShader, "layer");
     uploadActiveLayerMaskToShader(m_bakeShader, "u_activeLayerEnabled");
-
     sf::RectangleShape dummyRect(sf::Vector2f(bakeSize.x, bakeSize.y));
     m_bakeTexture.clear(sf::Color::Transparent);
     m_bakeTexture.draw(dummyRect, &m_bakeShader);
@@ -1493,7 +1467,7 @@ void Scene_IC_Camp::updateShadowOrbs()
         const auto& item = m_orbDrawItems[i];
         if (item.distSort > SHADOW_CUTOFF_DIST) continue;
 
-        m_shadowOrbList.push_back({ item.worldPos, item.orbRadius }); // radiusPx is wrong here - see below
+        m_shadowOrbList.push_back({ item.worldPos, item.orbRadius });
     }
 }
 
@@ -1582,7 +1556,7 @@ sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
 
     float aspectRatio = float(camConfig.VIEWPORT_WIDTH) / camConfig.VIEWPORT_HEIGHT;
 
-    // Reconstruct ray — must match bake shader exactly
+    // Reconstruct ray in camera space
     float x_ndc = (position.x / float(camConfig.VIEWPORT_WIDTH)) * 2.0f - 1.0f;
     float y_ndc = 1.0f - (position.y / float(camConfig.VIEWPORT_HEIGHT)) * 2.0f;
     float f = std::tan(camConfig.FOVY * 0.5f);
