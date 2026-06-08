@@ -34,12 +34,14 @@ class Assets
     std::map<std::string, sf::Sound>        m_soundMap;
     std::map<std::string, std::unique_ptr<sf::Music>> m_musicMap;
     std::map<std::string, std::unique_ptr<sf::Shader>> m_shaderMap;
+    std::map<std::string, GLuint> m_glProgramMap;
 
     void addTexture(const std::string& textureName, const std::string& path, bool smooth = false);
     void addFont(const std::string& fontName, const std::string& path);
     void addSound(const std::string& soundName, const std::string& path);
     void addMusic(const std::string& musicName, const std::string& path);
     void addShader(const std::string& shaderName, const std::string& path);
+    void addGLProgram(const std::string& name, const std::string& vertPath, const std::string& fragPath);
 
     Assets() = default;
 
@@ -69,5 +71,7 @@ public:
     sf::Shader& getShader(const std::string& shaderName);
     void addCubemap(const std::string& name, const std::filesystem::path& folderPath);
     GLuint getCubemap(const std::string& name) const;
+    GLuint getGLProgram(const std::string& name) const;
     const std::map<std::string, sf::Texture>& getTextures() const;
+
 };

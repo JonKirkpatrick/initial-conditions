@@ -1,3 +1,11 @@
+uniform vec3 cameraPos;
+uniform vec2 topdownWorldMin;
+uniform vec2 topdownWorldSize;
+uniform float topdownHeightMax;
+uniform sampler2D topoTopdownTex;
+uniform float nearPlane;
+uniform float farPlane;
+
 uniform vec3 sunDir;
 uniform vec3 sunDirWorld;
 uniform vec4 sunColor;
@@ -15,6 +23,44 @@ uniform vec4  u_orbColor[64];
 uniform float u_orbDepthNorm[64];   // the normalized depth into the scene
 uniform vec2  u_quadOrigin[64];     // top left of orb in screen space
 uniform vec2  u_texSize[64];        // diameter in pixels per orb
+
+vec2 decodeXZ(vec4 c) {
+    float hiX = floor(c.r * 255.0 + 0.5);
+    float loX = floor(c.g * 255.0 + 0.5);
+    float hiZ = floor(c.b * 255.0 + 0.5);
+    float loZ = floor(c.a * 255.0 + 0.5);
+    float normX = (hiX * 256.0 + loX) / 65535.0;
+    float normZ = (hiZ * 256.0 + loZ) / 65535.0;
+    return topdownWorldMin + vec2(normX, normZ) * topdownWorldSize;
+}
+
+// ================== Helper functions ==================
+float rawHeightAt(ivec2 uv) {
+    vec4 c = texelFetch(topoTopdownTex, uv, 0);
+    vec3 bytes = floor(c.rgb * 255.0 + 0.5);
+    float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
+    return scaled * (topdownHeightMax / 16777215.0);
+}
+
+float decodeHeight(vec2 xz) {
+    vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
+    uv.y = 1.0 - uv.y;
+    
+    vec2 texSize = vec2(textureSize(topoTopdownTex, 0));
+    vec2 px = uv * (texSize - 1.0);
+    
+    ivec2 p0 = ivec2(floor(px));
+    vec2 f = fract(px);
+    
+    float h00 = rawHeightAt(p0);
+    float h10 = rawHeightAt(p0 + ivec2(1, 0));
+    float h01 = rawHeightAt(p0 + ivec2(0, 1));
+    float h11 = rawHeightAt(p0 + ivec2(1, 1));
+    
+    float h0 = mix(h00, h10, f.x);
+    float h1 = mix(h01, h11, f.x);
+    return mix(h0, h1, f.y);
+}
 
 void main()
 {
@@ -40,17 +86,23 @@ void main()
 
     // Per-pixel occlusion using screen position
     vec2 fragScreenUv = fragScreenSFML / u_viewportSize;
-    fragScreenUv.y = 1.0 - fragScreenUv.y;
-
-    // Here "norm" is refering to normalized.  It's how deep in the scene the pixel is.
-    vec4 topo = texture2D(u_bakeTex, fragScreenUv);
-    if (topo.a >= 0.5) {
-        float terrainNorm = topo.r + topo.g / 255.0 + topo.b / (255.0 * 255.0);
-        if (terrainNorm + 0.0008 < depthNorm) {
+    vec4 bakeC = texture(u_bakeTex, fragScreenUv);
+    
+    if (!(bakeC.a == 0.0 && bakeC.r == 0.0)) {
+        vec2 xz = decodeXZ(bakeC);
+        
+        float terrainH = decodeHeight(xz);
+        
+        vec3 terrainWorld = vec3(xz.x, terrainH, xz.y);
+        vec3 relative = terrainWorld - cameraPos;
+        float terrainDist = length(relative);
+        
+        float terrainNorm = clamp((terrainDist - nearPlane) / (farPlane - nearPlane), 0.0, 1.0);
+        
+        if (terrainNorm < depthNorm) {
             discard;
         }
     }
-
     vec2 pos = (uv - vec2(0.5)) * 2.0;
     float dist = length(pos);
     

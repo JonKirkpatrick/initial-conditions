@@ -105,4 +105,56 @@ namespace Camera {
         return m;
     }
 
+    std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c)
+    {
+        // Get rotation: world -> camera (columns = transformed basis vectors)
+        auto rot = getWorldToCamMatrix(t.pitch, t.yaw, t.roll);
+
+        // rot[col][row] layout from getWorldToCamMatrix:
+        // rot[0][0..2] = bx (image of world X)
+        // rot[1][0..2] = by
+        // rot[2][0..2] = bz
+
+        // Translation in camera space: t_cam = - (R * world_pos)
+        float tx = -(rot[0][0] * t.pos.x + rot[1][0] * t.pos.y + rot[2][0] * t.pos.z);
+        float ty = -(rot[0][1] * t.pos.x + rot[1][1] * t.pos.y + rot[2][1] * t.pos.z);
+        float tz = -(rot[0][2] * t.pos.x + rot[1][2] * t.pos.y + rot[2][2] * t.pos.z);
+
+        // View matrix (column-major)
+        std::array<float, 16> V = {
+            // Column 0
+            rot[0][0], rot[0][1], rot[0][2], 0.f,
+            // Column 1
+            rot[1][0], rot[1][1], rot[1][2], 0.f,
+            // Column 2
+            rot[2][0], rot[2][1], rot[2][2], 0.f,
+            // Column 3 (translation)
+            tx,        ty,        tz,        1.f
+        };
+
+        // Projection matrix (standard OpenGL-style perspective, column-major)
+        float f     = 1.0f / std::tan(c.fovY * 0.5f);
+        float zNear = c.nearPlane;
+        float zFar  = c.farPlane;
+        float zRange = zNear - zFar;   // negative if zFar > zNear (usual)
+
+        std::array<float, 16> P = {
+            f / c.aspectRatio, 0.f,  0.f,                          0.f,
+            0.f,               -f,    0.f,                          0.f,
+            0.f,               0.f,  (zFar + zNear) / zRange,     -1.f,   // note the -1 for OpenGL convention
+            0.f,               0.f,  (2.f * zFar * zNear) / zRange, 0.f
+        };
+
+        // P * V
+        std::array<float, 16> VP = {};
+        for (int col = 0; col < 4; ++col) {
+            for (int row = 0; row < 4; ++row) {
+                for (int k = 0; k < 4; ++k) {
+                    VP[col*4 + row] += P[k*4 + row] * V[col*4 + k];
+                }
+            }
+        }
+
+        return VP;
+    }
 } // namespace Camera

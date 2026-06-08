@@ -120,7 +120,7 @@ protected:
 
     sf::Shader& m_bakeShader        = Assets::Instance().getShader("TopoBake");
     sf::Shader& m_depthStepShader   = Assets::Instance().getShader("TopoDepthSteps");
-    sf::Shader& m_finalShader       = Assets::Instance().getShader("TopoFinal");
+    sf::Shader& m_finalShader       = Assets::Instance().getShader("NewFinal");
     sf::Shader& m_topdownShader     = Assets::Instance().getShader("MaxMipBase");
     sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
     sf::Shader& m_sky               = Assets::Instance().getShader("Sky");
@@ -134,9 +134,19 @@ protected:
     sf::RenderTexture m_bakeTexture;
     sf::RenderTexture m_skyTexture;
     sf::RenderTexture m_topdownTexture;
+    sf::Image         m_topdownImage;
     sf::RenderTexture m_minimapTexture;
+    sf::RenderTexture m_newBakeTexture;
     unsigned int m_topdownTextureSize  = 512;
     unsigned int m_minimapTextureSize  = 256;
+
+    // New bake pipeline
+    GLuint m_gridVAO        = 0;
+    GLuint m_gridVBO        = 0;
+    GLuint m_gridEBO        = 0;
+    GLuint m_gridIndexCount = 0;
+    GLuint m_newBakeProgram = 0;
+    
 
     // =========================================================================
     // Rendering — Sky Cubemap
@@ -237,6 +247,7 @@ protected:
                   float bobRate = 2.0f, float bobMagnitude = 8.0f);
     void spawnDebugOrbs(int count);
     void buildHud();
+    void buildTerrainGrid();
     void initializeSkyCubemap();
 
     // =========================================================================
@@ -269,6 +280,7 @@ protected:
 
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
     void runBakePass(const sf::Glsl::Mat3& worldToCamMatrix);
+    void runNewBakePass();
     void runFinalPass(const sf::Glsl::Mat3& worldToCamMatrix);
     void runDepthStepPass(const sf::Glsl::Mat3& worldToCamMatrix);
     void runTopDownPass();
@@ -290,9 +302,8 @@ protected:
     // Terrain Query Helpers
     // =========================================================================
 
-    float heightAt(float x, float z) const {
-        return Topography::heightAt(x, z, m_terrainLayers, m_activeLayerMask);
-    }
+    float heightAt(float x, float z) const;
+
     float getCameraHeightAboveGround(const sf::Vector3f& cameraPos) const {
         return Topography::getCameraHeightAboveGround(cameraPos, m_terrainLayers, m_activeLayerMask);
     }
@@ -305,6 +316,8 @@ protected:
     sf::Vector3f terrainNormal(float x, float z, float epsilon = 50.0f) const {
         return Topography::terrainNormal(x, z, m_terrainLayers, m_activeLayerMask, epsilon);
     }
+
+    float sampleHeightmapAt(float worldX, float worldZ) const;
 
     // =========================================================================
     // Coordinate and Color Utilities

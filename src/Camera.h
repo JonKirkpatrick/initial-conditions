@@ -23,4 +23,5 @@ namespace Camera
     sf::Vector3f normalize(const sf::Vector3f& v);
     // Compute inverse rotation matrix once per frame (cheaper than per-pixel trig)
     std::array<std::array<float, 3>, 3> getWorldToCamMatrix(float pitch, float yaw, float roll);
+    std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c);
 }

@@ -1,3 +1,4 @@
+#include <GL/glew.h>
 #include "Assets.h"
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
@@ -184,6 +185,13 @@ void Assets::loadFromFile(const std::string& path)
             addCubemap(name, folderPath);
             std::cout << "Loaded custom HDR cubemap: " << name << " from " << folderPath << std::endl;
         }
+        else if (str == "GLProgram")
+        {
+            std::string name, vertPath, fragPath;
+            file >> name >> vertPath >> fragPath;
+            addGLProgram(name, vertPath, fragPath);
+            std::cout << "Loaded GL program: " << name << std::endl;
+        }
         else
         {
             std::cerr << "Unknown Asset Type: " << str << std::endl;
@@ -279,6 +287,56 @@ std::string Assets::preprocessShaderIncludes(const std::string& filePath)
     }
     
     return result;
+}
+
+void Assets::addGLProgram(const std::string& name,
+                           const std::string& vertPath,
+                           const std::string& fragPath)
+{
+    auto compile = [&](GLenum type, const std::string& path) -> GLuint {
+        std::string src = preprocessShaderIncludes(path);
+        const char* c = src.c_str();
+        GLuint s = glCreateShader(type);
+        glShaderSource(s, 1, &c, nullptr);
+        glCompileShader(s);
+        GLint ok;
+        glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            char log[1024];
+            glGetShaderInfoLog(s, 1024, nullptr, log);
+            std::cerr << "Shader compile error (" << path << "):\n" 
+                      << log << std::endl;
+        }
+        return s;
+    };
+
+    GLuint vert = compile(GL_VERTEX_SHADER,   vertPath);
+    GLuint frag = compile(GL_FRAGMENT_SHADER, fragPath);
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vert);
+    glAttachShader(program, frag);
+    glLinkProgram(program);
+
+    GLint ok;
+    glGetProgramiv(program, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[1024];
+        glGetProgramInfoLog(program, 1024, nullptr, log);
+        std::cerr << "Program link error (" << name << "):\n" 
+                  << log << std::endl;
+    }
+
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+
+    m_glProgramMap[name] = program;
+}
+
+GLuint Assets::getGLProgram(const std::string& name) const
+{
+    assert(m_glProgramMap.find(name) != m_glProgramMap.end());
+    return m_glProgramMap.at(name);
 }
 
 sf::Sound& Assets::getSound(const std::string& soundName)

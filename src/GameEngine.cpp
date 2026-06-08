@@ -1,3 +1,4 @@
+#include <GL/glew.h>
 #include "GameEngine.h"
 #include "Assets.h"
 #include "Scene_Menu.h"
@@ -32,8 +33,15 @@ void GameEngine::init(const std::string & path)
         {0.f, 0.f},
         {float(m_window.getSize().x), float(m_window.getSize().y)}
     )));
+    glewExperimental = GL_TRUE;
+    GLenum err = glewInit();
+    if (err != GLEW_OK) {
+        std::cerr << "GLEW init failed: " << glewGetErrorString(err) << std::endl;
+    }
+
+
     Assets::Instance().loadFromFile(path);
-    
+
     if (!ImGui::SFML::Init(m_window)) {}
 
     changeScene("MENU", std::make_shared<Scene_Menu>(*this));
