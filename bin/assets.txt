@@ -6,6 +6,7 @@ Texture   HLOff          images/gui_elements/HL_Off.png
 Texture   HLOn           images/gui_elements/HL_On.png
 Texture   HLAuto         images/gui_elements/HL_Auto.png
 Texture   Moon           images/skymap/Moon_Cropped.png
+Texture   Test1          images/terrain/test1.png
 Music     MusicTitle     music/title_menu.mp3
 Music     MusicTitleLate music/title_menu_late.mp3
 Music     MusicTopDown   music/top_down_music.mp3
@@ -28,15 +29,9 @@ Font      Jungle         fonts/JungleAdventurer.ttf
 Font      Hack           fonts/Hack-Regular.ttf
 Font      Noto           fonts/Noto-Sans-Symbols.ttf
 Font      Good           fonts/good-timing-bd.otf
-Shader    TopoBake       shaders/topo_bake.frag
-Shader    TopoDepthSteps shaders/topo_depth_steps.frag
-Shader    TopoFinal      shaders/topo_final.frag
-Shader    NewFinal       shaders/new_final.frag
-Shader    TopoTopDown    shaders/topo_topdown.frag
-Shader    MaxMipBase     shaders/max_mip_base.frag
-Shader    MaxMipReduce   shaders/max_mip_reduce.frag
+Shader    Terrain        shaders/terrain.frag
 Shader    TopoMiniMap    shaders/minimap_topo.frag
 Shader    Sky            shaders/sky.frag
 Shader    Orb            shaders/orb_shader.frag
 Cubemap   NightSky       images/skymap
-GLProgram NewBake        shaders/new_bake.vert shaders/new_bake.frag
+GLProgram Bake           shaders/bake.vert shaders/bake.frag

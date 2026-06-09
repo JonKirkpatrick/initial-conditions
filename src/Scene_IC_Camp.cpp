@@ -61,30 +61,23 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     sf::ContextSettings settings;
     settings.antiAliasingLevel = 8;
     sf::Vector2u windowSize = game.window().getSize();
+    m_moonTexture = Assets::Instance().getTexture("Moon");
     m_renderTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     m_skyTexture = sf::RenderTexture({windowSize.x, windowSize.y});
-    sf::Vector2u bakeSize(
-        std::max(1u, windowSize.x / 1),
-        std::max(1u, windowSize.y / 1)
-    );
-    m_bakeTexture = sf::RenderTexture({bakeSize.x, bakeSize.y});
-    m_bakeTexture.setSmooth(false);
-    m_topdownTexture = sf::RenderTexture({m_topdownTextureSize, m_topdownTextureSize});
-    m_topdownTexture.setSmooth(false);
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
+    m_bakeTexture = sf::RenderTexture({windowSize.x, windowSize.y}, sf::ContextSettings(24));
+    m_bakeTexture.setSmooth(false);
+    m_topdownTexture = Assets::Instance().getTexture("Test1");
+    m_topdownImage = m_topdownTexture.copyToImage();
+    m_topdownWorldMin = { -537600.f, -537600.f };
+    m_topdownWorldSize = { 1075200.f, 1075200.f };
     m_gridColor = Theme::color("cerulean");
+    m_bakeProgram = Assets::Instance().getGLProgram("Bake");
+    GLint linked;
+    glGetProgramiv(m_bakeProgram, GL_LINK_STATUS, &linked);
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
-    m_moonTexture = Assets::Instance().getTexture("Moon");
-    m_newBakeProgram = Assets::Instance().getGLProgram("NewBake");
-    m_newBakeTexture = sf::RenderTexture({bakeSize.x, bakeSize.y}, sf::ContextSettings(24));
-    m_newBakeTexture.setSmooth(false);
-    GLint linked;
-    glGetProgramiv(m_newBakeProgram, GL_LINK_STATUS, &linked);
-    std::cout << "New bake program link status: " << linked << std::endl;
-    std::cout << "New bake program handle: " << m_newBakeProgram << std::endl;
     loadLevel(m_levelPath);
-    runTopDownPass();
     spawnPlayer();
     spawnCamera();
     updateCamera(0.001f);
@@ -92,8 +85,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 
     m_entityManager.update();
 
-    Topography::setWarpParameters(m_warpScale, m_warpStrength);
-    m_topdownMaxHeight = computeSceneMaxHeight();
+    m_topdownMaxHeight = 29076.f;
     buildTerrainGrid();
     buildHud();
     updateHUDData();
@@ -102,7 +94,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     updateStarRotation();
     updateMoonPosition();
     initializeSkyCubemap();
-    runTopDownPass();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -257,6 +248,15 @@ HUD* Scene_IC_Camp::getHUD() const
     return m_hud.get();
 }
 
+Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const {
+    return Topography::TerrainContext{
+        m_topdownImage,
+        m_topdownWorldMin,
+        m_topdownWorldSize,
+        m_topdownMaxHeight
+    };
+}
+
 void Scene_IC_Camp::sGUI()
 {
     ImGui::Begin("Scene Properties##IC_Camp");
@@ -270,10 +270,8 @@ void Scene_IC_Camp::sGUI()
             ImGui::Checkbox("Draw Grid", &m_drawGrid);
             ImGui::Checkbox("Draw Textures", &m_drawTextures);
             ImGui::Checkbox("Draw Debug", &m_drawCollision);
-            ImGui::Checkbox("Show Top-down Viewer", &m_showTopDownViewer);
-            // In your render/HUD section, after runNewBakePass()
             ImGui::Begin("New Bake Debug");
-            ImGui::Image(m_newBakeTexture.getTexture(), 
+            ImGui::Image(m_bakeTexture.getTexture(), 
                         sf::Vector2f(256.f, 256.f));
             ImGui::End();
 
@@ -393,30 +391,6 @@ void Scene_IC_Camp::sGUI()
         }
         ImGui::EndTabBar();
     }
-
-    // Shader quality control
-    ImGui::Begin("Rendering Quality");
-    ImGui::Checkbox("Depth/Step Debug Bypass", &m_useDepthStepDebug);
-    ImGui::Text("Bypasses the final composite and shows step cost directly.");
-    ImGui::SliderFloat("Render Quality", &m_shaderQuality, 0.05f, 1.0f, "%.2f");
-    ImGui::Text("Lowering quality reduces GPU work (fewer march steps)");
-    ImGui::SliderFloat("Step Size Scale", &m_stepSizeScale, 0.1f, 5.0f, "%.2f");
-    ImGui::Text("Decrease to <1.0 for finer detail, increase for performance");
-    ImGui::SliderFloat("Step Contribution Scale", &m_stepContributionScale, 0.1f, 8.0f, "%.2f");
-    ImGui::Text("Scales the step-count channel only; does not change marching behavior");
-    ImGui::SliderFloat("Step Count Normalization Max", &m_stepCountNormalizationMax, 50.0f, 500.0f, "%.0f");
-    ImGui::Text("Fixed divisor for step count; adjust to baseline, then change threshold");
-    ImGui::SliderFloat("Heightmap Transition Threshold", &m_heightmapTransitionThreshold, 10.0f, 500.0f, "%.1f");
-    ImGui::Text("Distance above cached heightmap before switching to raymarching");
-    ImGui::Separator();
-        bool warpChanged = false;
-        warpChanged |= ImGui::SliderFloat("Warp Scale", &m_warpScale, 0.00002f, 0.00025f, "%.5f");
-        warpChanged |= ImGui::SliderFloat("Warp Strength", &m_warpStrength, 0.0f, 2500.0f, "%.0f");
-        if (warpChanged) {
-            Topography::setWarpParameters(m_warpScale, m_warpStrength);
-        }
-        ImGui::Text("Warp is shared by C++ terrain queries and all terrain shaders");
-    ImGui::End();
     ImGui::End();
 }
 
@@ -426,27 +400,16 @@ void Scene_IC_Camp::sRender() {
     auto worldToCamMatrix = toGlslMat3(Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll));
     window.clear(sf::Color::Transparent);
     updateShadowOrbs();
-    uploadShadowOrbsToShader(m_finalShader);
-    runNewBakePass();
-
-
-    if (m_useDepthStepDebug) {
-        runDepthStepPass(worldToCamMatrix);
-        sf::Sprite debugSprite(m_renderTexture.getTexture());
-        window.draw(debugSprite);
-    } else {
-        renderSky(worldToCamMatrix);
-        //runBakePass(worldToCamMatrix);
-        runFinalPass(worldToCamMatrix);
-        sf::Sprite finalSprite(m_renderTexture.getTexture());
-        sf::Sprite backgroundSprite(m_skyTexture.getTexture());
-        window.draw(backgroundSprite);
-        window.draw(finalSprite);
-        renderOrbs();
-    }
+    uploadShadowOrbsToShader(m_terrainShader);
+    runBakePass();
+    renderSky(worldToCamMatrix);
+    runTerrainPass(worldToCamMatrix);
+    sf::Sprite finalSprite(m_renderTexture.getTexture());
+    sf::Sprite backgroundSprite(m_skyTexture.getTexture());
+    window.draw(backgroundSprite);
+    window.draw(finalSprite);
+    renderOrbs();
     m_hud->render(window, false);
-
-    if (m_showTopDownViewer) { renderTopDownViewer(window); }
 }
 
 // =========================================================================
@@ -518,7 +481,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     flatForward.y = 0.0f;
     flatForward = Camera::normalize(flatForward);
 
-    sf::Vector3f normal = terrainNormal(t.pos.x, t.pos.z);
+    sf::Vector3f normal = normalAt(t.pos.x, t.pos.z);
 
     sf::Vector3f terrainForward = flatForward - normal * dot(flatForward, normal);
     if (length(terrainForward) > 0.001f)
@@ -815,7 +778,6 @@ void Scene_IC_Camp::updateMoonPosition()
 void Scene_IC_Camp::loadLevel(const std::string& filename)
 {
     m_entityManager = EntityManager();
-    m_terrainLayers = {};
 
     std::ifstream file(filename);
     std::string str;
@@ -836,29 +798,6 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
                  >> m_playerConfig.EYE_OFFSET
                  >> m_playerConfig.POSITION_X
                  >> m_playerConfig.POSITION_Z;
-        }
-        if (str == "TerrainLayer")
-        {
-            int centerX = 0;
-            int centerY = 0;
-            float radius = 0.f;
-            float falloffWidth = 0.f;
-            float topoHeight = 0.f;
-
-            file >> centerX
-                 >> centerY
-                 >> radius
-                 >> falloffWidth
-                 >> topoHeight;
-
-            if (terrainLayerIndex < static_cast<int>(m_terrainLayers.size()))
-            {
-                TerrainLayer& layer = m_terrainLayers[terrainLayerIndex++];
-                layer.center = hexToWorld(centerX, centerY);
-                layer.radius = radius * 100.f;
-                layer.falloffWidth = falloffWidth * 100.f;
-                layer.topoHeight = topoHeight * 100.f;
-            }
         }
         if (str == "DateTimePlace")
         {
@@ -1145,104 +1084,7 @@ void Scene_IC_Camp::initializeSkyCubemap()
         std::cerr << "Sky cubemap 'NightSky' not found in Assets; falling back to procedural sky." << std::endl;
 }
 
-void Scene_IC_Camp::uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix) {
-    uploadWarpParametersToShader(shader);
-    for (int i = 0; i < 16; ++i) {
-        const TerrainLayer& layer = m_terrainLayers[i];
-        std::string idx = std::to_string(i);
-        
-        shader.setUniform(prefix + "_center[" + idx + "]", sf::Glsl::Vec2(layer.center.x, layer.center.y));
-        shader.setUniform(prefix + "_radius[" + idx + "]", layer.radius);
-        shader.setUniform(prefix + "_falloffWidth[" + idx + "]", layer.falloffWidth);
-        shader.setUniform(prefix + "_topoHeight[" + idx + "]", layer.topoHeight);
-    }
-}
-
-void Scene_IC_Camp::uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix) {
-    for (int i = 0; i < 16; ++i) {
-        const float enabled = (m_activeLayerMask & (1u << i)) != 0 ? 1.0f : 0.0f;
-        shader.setUniform(prefix + "[" + std::to_string(i) + "]", enabled);
-    }
-}
-
-void Scene_IC_Camp::uploadWarpParametersToShader(sf::Shader& shader) const {
-    shader.setUniform("u_warpScale", m_warpScale);
-    shader.setUniform("u_warpStrength", m_warpStrength);
-}
-
-
-void Scene_IC_Camp::runTopDownPass() {
-    sf::Vector2u texSize = m_topdownTexture.getSize();
-
-    m_topdownWorldMin = sf::Vector2f(-75000.f, -75000.f);
-    m_topdownWorldSize = sf::Vector2f(150000.f, 150000.f);
-
-    m_topdownShader.setUniform("viewportSize", sf::Glsl::Vec2(texSize.x, texSize.y));
-    m_topdownShader.setUniform("worldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_topdownShader.setUniform("worldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    m_topdownShader.setUniform("heightMax", m_topdownMaxHeight);
-    uploadTerrainLayersToShader(m_topdownShader, "layer");
-    uploadActiveLayerMaskToShader(m_topdownShader, "u_activeLayerEnabled");
-
-    sf::RectangleShape dummyRect(sf::Vector2f(texSize.x, texSize.y));
-    m_topdownTexture.clear(sf::Color::Transparent);
-    m_topdownTexture.setSmooth(false);
-    m_topdownTexture.draw(dummyRect, &m_topdownShader);
-    m_topdownTexture.display();
-    m_topdownImage = m_topdownTexture.getTexture().copyToImage();
-}
-
-float Scene_IC_Camp::sampleHeightmapAt(float worldX, float worldZ) const
-{
-    sf::Vector2u size = m_topdownImage.getSize();
-    
-    float u = (worldX - m_topdownWorldMin.x) / m_topdownWorldSize.x;
-    float v = (worldZ - m_topdownWorldMin.y) / m_topdownWorldSize.y;
-    
-    u = std::clamp(u, 0.0f, 1.0f);
-    v = std::clamp(v, 0.0f, 1.0f);
-
-    // Convert to pixel space (floating point)
-    float px = u * (size.x - 1);
-    float py = v * (size.y - 1);
-
-    // Get integer coordinates of the bottom-left pixel
-    int x0 = static_cast<int>(px);
-    int y0 = static_cast<int>(py);
-    
-    // Get the next pixel (with bounds clamping)
-    int x1 = std::min(x0 + 1, static_cast<int>(size.x - 1));
-    int y1 = std::min(y0 + 1, static_cast<int>(size.y - 1));
-
-    // Fractional parts for interpolation
-    float fx = px - x0;
-    float fy = py - y0;
-
-    // Sample the four surrounding pixels
-    auto getHeight = [&](int x, int y) -> float {
-        sf::Color c = m_topdownImage.getPixel(sf::Vector2u(x, y));
-        float raw = c.r * 65536.0f + c.g * 256.0f + c.b;
-        return raw * (m_topdownMaxHeight / 16777215.0f);
-    };
-
-    float h00 = getHeight(x0, y0);
-    float h10 = getHeight(x1, y0);
-    float h01 = getHeight(x0, y1);
-    float h11 = getHeight(x1, y1);
-
-    // Bilinear interpolation
-    float h0 = h00 + fx * (h10 - h00);  // bottom edge
-    float h1 = h01 + fx * (h11 - h01);  // top edge
-    float height = h0 + fy * (h1 - h0); // interpolate vertically
-
-    return height;
-}
-
-float Scene_IC_Camp::heightAt(float worldX, float worldZ) const {
-    return sampleHeightmapAt(worldX, worldZ);
-}
-
-void Scene_IC_Camp::runNewBakePass() {
+void Scene_IC_Camp::runBakePass() {
     // Build VP matrix from your existing camera data
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
@@ -1251,32 +1093,32 @@ void Scene_IC_Camp::runNewBakePass() {
     // This assumes you have a helper that produces a column-major float[16]
     auto vp =  Camera::getVPMatrix(transform, cameraData);
 
-    sf::Vector2u sz = m_newBakeTexture.getSize();
+    sf::Vector2u sz = m_bakeTexture.getSize();
 
-    m_newBakeTexture.setActive(true);
+    m_bakeTexture.setActive(true);
     glViewport(0, 0, sz.x, sz.y);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
 
-    glUseProgram(m_newBakeProgram);
+    glUseProgram(m_bakeProgram);
 
     // Bind heightmap texture to unit 0
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D,
-                  m_topdownTexture.getTexture().getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_newBakeProgram,
+                  m_topdownTexture.getNativeHandle());
+    glUniform1i(glGetUniformLocation(m_bakeProgram,
                 "topoTopdownTex"), 0);
 
-    glUniform2f(glGetUniformLocation(m_newBakeProgram,
+    glUniform2f(glGetUniformLocation(m_bakeProgram,
                 "topdownWorldMin"),
                 m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_newBakeProgram,
+    glUniform2f(glGetUniformLocation(m_bakeProgram,
                 "topdownWorldSize"),
                 m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(m_newBakeProgram,
+    glUniform1f(glGetUniformLocation(m_bakeProgram,
                 "topdownHeightMax"), m_topdownMaxHeight);
-    glUniformMatrix4fv(glGetUniformLocation(m_newBakeProgram,
+    glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram,
                 "u_VP"), 1, GL_FALSE, vp.data());
     glDisable(GL_BLEND);
     glBindVertexArray(m_gridVAO);
@@ -1287,8 +1129,8 @@ void Scene_IC_Camp::runNewBakePass() {
     glDisable(GL_DEPTH_TEST);
     glUseProgram(0);
 
-    m_newBakeTexture.resetGLStates();
-    m_newBakeTexture.display();
+    m_bakeTexture.resetGLStates();
+    m_bakeTexture.display();
 }
 
 void Scene_IC_Camp::updateMinimapTexture()
@@ -1309,14 +1151,14 @@ void Scene_IC_Camp::updateMinimapTexture()
 
     sf::RectangleShape fullQuad({texSize, texSize});
 
+    m_topoMinimapShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
+    m_topoMinimapShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
+    m_topoMinimapShader.setUniform("topoTopdownTex", m_topdownTexture);
     m_topoMinimapShader.setUniform("u_playerXZ",
         sf::Glsl::Vec2(playerPos.x, playerPos.z));
     m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
     m_topoMinimapShader.setUniform("u_texSize",      texSize);
     m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    m_topoMinimapShader.setUniform("u_reliefExaggeration", 2.4f);
-    Scene_IC_Camp::uploadTerrainLayersToShader(m_topoMinimapShader, "u_layers");
-    Scene_IC_Camp::uploadActiveLayerMaskToShader(m_topoMinimapShader, "u_activeLayerEnabled");
     sf::RenderStates states;
     states.shader = &m_topoMinimapShader;
     m_minimapTexture.draw(fullQuad, states);
@@ -1351,27 +1193,6 @@ void Scene_IC_Camp::updateMinimapTexture()
     m_minimapTexture.display();
 }
 
-void Scene_IC_Camp::renderTopDownViewer(sf::RenderWindow& window) {
-        sf::Vector2u size = window.getSize();
-        const float panelSize = 220.f;
-        const float pad = 12.f;
-        sf::Vector2f panelPos(pad, size.y - panelSize - pad);
-
-        sf::RectangleShape panel(sf::Vector2f(panelSize, panelSize));
-        panel.setPosition(panelPos);
-        panel.setFillColor(sf::Color(14, 16, 18, 235));
-        panel.setOutlineThickness(2.f);
-        panel.setOutlineColor(sf::Color(230, 220, 200, 230));
-        window.draw(panel);
-
-        sf::Sprite viewer(m_topdownTexture.getTexture());
-        const float sx = (panelSize - 8.f) / float(m_topdownTexture.getSize().x);
-        const float sy = (panelSize - 8.f) / float(m_topdownTexture.getSize().y);
-        viewer.setPosition(panelPos + sf::Vector2f(4.f, 4.f));
-        viewer.setScale(sf::Vector2f(sx, sy));
-        window.draw(viewer);
-}
-
 void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch,
                                            const sf::Vector3f& sunDirView)
 {
@@ -1391,16 +1212,16 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
     shader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
     shader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
     shader.setUniform("topdownHeightMax", m_topdownMaxHeight);
-    shader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
+    shader.setUniform("topoTopdownTex", m_topdownTexture);
     shader.setUniform("nearPlane", m_entityManager.getCamera(m_camera).nearPlane);
     shader.setUniform("farPlane", m_entityManager.getCamera(m_camera).farPlane);
     shader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
     shader.setUniform("sunDirWorld", m_astroState.sunDirection);
     shader.setUniform("sunColor", m_astroState.sunColor);
-    shader.setUniform("u_bakeTex", m_newBakeTexture.getTexture());
+    shader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
     shader.setUniform("u_viewportSize", sf::Glsl::Vec2(
-        static_cast<float>(m_newBakeTexture.getSize().x),
-        static_cast<float>(m_newBakeTexture.getSize().y)));
+        static_cast<float>(m_bakeTexture.getSize().x),
+        static_cast<float>(m_bakeTexture.getSize().y)));
 
     shader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
     shader.setUniform("headlampIntensity", 2.5f);
@@ -1493,7 +1314,7 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     m_skyTexture.display();
 }
 
-void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& worldToCamMatrix) {
+void Scene_IC_Camp::runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     sf::Vector2u winSize = m_game.window().getSize();
@@ -1501,99 +1322,37 @@ void Scene_IC_Camp::runFinalPass(const sf::Glsl::Mat3& worldToCamMatrix) {
     sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
     const bool headlampOn = shouldHeadlightsBeOn();
 
-    m_finalShader.setUniform("viewportSize",  sf::Glsl::Vec2(winSize.x, winSize.y));
-    m_finalShader.setUniform("m_hexSize",     m_hexSize);
-    m_finalShader.setUniform("newBakeTex", m_newBakeTexture.getTexture());
-    m_finalShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
-    m_finalShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_finalShader.setUniform("camHeight",     getCameraHeightAboveGround(transform.pos));
-    m_finalShader.setUniform("farPlane",      cameraData.farPlane);
-    m_finalShader.setUniform("nearPlane",     cameraData.nearPlane);
-    m_finalShader.setUniform("fovY",          cameraData.fovY);
-    m_finalShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_finalShader.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_finalShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_finalShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
+    m_terrainShader.setUniform("viewportSize",  sf::Glsl::Vec2(winSize.x, winSize.y));
+    m_terrainShader.setUniform("m_hexSize",     m_hexSize);
+    m_terrainShader.setUniform("bakeTex", m_bakeTexture.getTexture());
+    m_terrainShader.setUniform("topoTopdownTex", m_topdownTexture);
+    m_terrainShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
+    m_terrainShader.setUniform("camHeight",     getCameraHeightAboveGround(transform.pos));
+    m_terrainShader.setUniform("farPlane",      cameraData.farPlane);
+    m_terrainShader.setUniform("worldToCamMatrix", worldToCamMatrix);
+    m_terrainShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
+    m_terrainShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
 
-    m_finalShader.setUniform("sunDir", m_astroState.sunDirection); 
-    m_finalShader.setUniform("sunColor", m_astroState.sunColor);
-    m_finalShader.setUniform("ambientStrength", 0.3f);
-    m_finalShader.setUniform("baseColor", colorToShader(Theme::color("best-brown")));
-    m_finalShader.setUniform("gridColor", colorToShader(m_gridColor));
+    m_terrainShader.setUniform("sunDir", m_astroState.sunDirection); 
+    m_terrainShader.setUniform("sunColor", m_astroState.sunColor);
+    m_terrainShader.setUniform("ambientStrength", 0.3f);
+    m_terrainShader.setUniform("gridColor", colorToShader(m_gridColor));
 
-    m_finalShader.setUniform("headlampOn", headlampOn);
-    m_finalShader.setUniform("headlampIntensity", 4.f);
-    m_finalShader.setUniform("headlampColor", colorToShader(sf::Color(255, 244, 214)));
-    m_finalShader.setUniform("headlampRange", 15000.0f);
+    m_terrainShader.setUniform("headlampOn", headlampOn);
+    m_terrainShader.setUniform("headlampIntensity", 4.f);
+    m_terrainShader.setUniform("headlampColor", colorToShader(sf::Color(255, 244, 214)));
+    m_terrainShader.setUniform("headlampRange", 15000.0f);
 
-    m_finalShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    m_finalShader.setUniform("u_reliefExaggeration", 1.5f);
-    m_finalShader.setUniform("cursorMode", m_cursorMode);
-    m_finalShader.setUniform("hoveredHex", sf::Glsl::Vec2((float)hex.x, (float)hex.y));
+    m_terrainShader.setUniform("u_heightMax",    m_topdownMaxHeight);
+    m_terrainShader.setUniform("u_reliefExaggeration", 1.5f);
+    m_terrainShader.setUniform("cursorMode", m_cursorMode);
+    m_terrainShader.setUniform("hoveredHex", sf::Glsl::Vec2((float)hex.x, (float)hex.y));
 
     sf::RectangleShape dummyRect(sf::Vector2f(winSize.x, winSize.y));
     m_renderTexture.clear(sf::Color::Transparent);
-    m_renderTexture.draw(dummyRect, &m_finalShader);
+    m_renderTexture.draw(dummyRect, &m_terrainShader);
     m_renderTexture.setSmooth(true);
     m_renderTexture.display();
-}
-
-void Scene_IC_Camp::runDepthStepPass(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    sf::Vector2u outputSize = m_renderTexture.getSize();
-
-    m_depthStepShader.setUniform("viewportSize",  sf::Glsl::Vec2(outputSize.x, outputSize.y));
-    m_depthStepShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_depthStepShader.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_depthStepShader.setUniform("fovY",          cameraData.fovY);
-    m_depthStepShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_depthStepShader.setUniform("nearPlane",     cameraData.nearPlane);
-    m_depthStepShader.setUniform("farPlane",      cameraData.farPlane);
-    m_depthStepShader.setUniform("u_quality",     m_shaderQuality);
-    m_depthStepShader.setUniform("u_stepSizeScale", m_stepSizeScale);
-    m_depthStepShader.setUniform("u_stepContributionScale", m_stepContributionScale);
-    m_depthStepShader.setUniform("u_stepCountNormalizationMax", m_stepCountNormalizationMax);
-    m_depthStepShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);
-    m_depthStepShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
-    m_depthStepShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_depthStepShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    m_depthStepShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
-    uploadTerrainLayersToShader(m_depthStepShader, "layer");
-    uploadActiveLayerMaskToShader(m_depthStepShader, "u_activeLayerEnabled");
-
-    sf::RectangleShape dummyRect(sf::Vector2f(outputSize.x, outputSize.y));
-    m_renderTexture.clear(sf::Color::Transparent);
-    m_renderTexture.draw(dummyRect, &m_depthStepShader);
-    m_renderTexture.setSmooth(true);
-    m_renderTexture.display();
-}
-
-void Scene_IC_Camp::runBakePass(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& transform = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    sf::Vector2u bakeSize = m_bakeTexture.getSize();
-    m_activeLayerMask = Topography::computeActiveLayerMask(transform.pos, m_terrainLayers);
-    m_bakeShader.setUniform("viewportSize",  sf::Glsl::Vec2(bakeSize.x, bakeSize.y));
-    m_bakeShader.setUniform("cameraPos",     sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_bakeShader.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_bakeShader.setUniform("fovY",          cameraData.fovY);
-    m_bakeShader.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_bakeShader.setUniform("nearPlane",     cameraData.nearPlane);
-    m_bakeShader.setUniform("farPlane",      cameraData.farPlane);
-    m_bakeShader.setUniform("u_quality",     m_shaderQuality);
-    m_bakeShader.setUniform("u_stepSizeScale", m_stepSizeScale);
-    m_bakeShader.setUniform("u_heightmapTransitionThreshold", m_heightmapTransitionThreshold);    
-    m_bakeShader.setUniform("topoTopdownTex", m_topdownTexture.getTexture());
-    m_bakeShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_bakeShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    m_bakeShader.setUniform("topdownHeightMax", m_topdownMaxHeight);
-    uploadTerrainLayersToShader(m_bakeShader, "layer");
-    uploadActiveLayerMaskToShader(m_bakeShader, "u_activeLayerEnabled");
-    sf::RectangleShape dummyRect(sf::Vector2f(bakeSize.x, bakeSize.y));
-    m_bakeTexture.clear(sf::Color::Transparent);
-    m_bakeTexture.draw(dummyRect, &m_bakeShader);
-    m_bakeTexture.display();
 }
 
 // =========================================================================
@@ -1728,6 +1487,7 @@ sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
     return sf::Vector2f(x, z);
 }
 
+// Interesting.  This is ripe for replacement now that we have a new system.
 sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
     if (!m_cursorMode) {
         return { 0.f, 0.f, 0.f };
@@ -1804,4 +1564,9 @@ sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
         cam.pos.y + rayDir.y * t,
         cam.pos.z + rayDir.z * t
     };
+}
+
+float Scene_IC_Camp::getCameraHeightAboveGround(const sf::Vector3f& camPos) const {
+    float groundHeight = heightAt(camPos.x, camPos.z);
+    return camPos.y - groundHeight;
 }

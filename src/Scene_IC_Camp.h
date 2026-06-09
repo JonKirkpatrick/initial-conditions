@@ -1,7 +1,7 @@
 #pragma once
 #include "Scene.h"
 #include "HUD.h"
-#include "Topography.hpp"
+#include "Topography.h"
 #include "SoAEntityManager.hpp"
 #include "Astro.hpp"
 #include <SFML/System.hpp>
@@ -23,8 +23,6 @@ class Scene_IC_Camp : public Scene {
         float MOVE_SPEED, ROTATION_SPEED, HEIGHT_OFFSET, EYE_OFFSET;
         int POSITION_X, POSITION_Z;
     };
-
-    using TerrainLayer = Topography::TerrainLayer;
 
     enum class HeadlightState { Off, On, Auto };
 
@@ -106,10 +104,6 @@ protected:
     // Terrain
     // =========================================================================
 
-    std::array<TerrainLayer, 16> m_terrainLayers{};
-    uint32_t m_activeLayerMask  = 0xFFFF;
-    float    m_warpScale        = 0.00020f;
-    float    m_warpStrength     = 2415.0f;
     float    m_topdownMaxHeight = 1.f;
     sf::Vector2f m_topdownWorldMin{0.f, 0.f};
     sf::Vector2f m_topdownWorldSize{1.f, 1.f};
@@ -118,10 +112,7 @@ protected:
     // Rendering — Shaders
     // =========================================================================
 
-    sf::Shader& m_bakeShader        = Assets::Instance().getShader("TopoBake");
-    sf::Shader& m_depthStepShader   = Assets::Instance().getShader("TopoDepthSteps");
-    sf::Shader& m_finalShader       = Assets::Instance().getShader("NewFinal");
-    sf::Shader& m_topdownShader     = Assets::Instance().getShader("MaxMipBase");
+    sf::Shader& m_terrainShader       = Assets::Instance().getShader("Terrain");
     sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
     sf::Shader& m_sky               = Assets::Instance().getShader("Sky");
     sf::Shader& m_orbShader         = Assets::Instance().getShader("Orb");
@@ -131,12 +122,11 @@ protected:
     // =========================================================================
 
     sf::RenderTexture m_renderTexture;
-    sf::RenderTexture m_bakeTexture;
     sf::RenderTexture m_skyTexture;
-    sf::RenderTexture m_topdownTexture;
+    sf::Texture m_topdownTexture;
     sf::Image         m_topdownImage;
     sf::RenderTexture m_minimapTexture;
-    sf::RenderTexture m_newBakeTexture;
+    sf::RenderTexture m_bakeTexture;
     unsigned int m_topdownTextureSize  = 512;
     unsigned int m_minimapTextureSize  = 256;
 
@@ -145,7 +135,7 @@ protected:
     GLuint m_gridVBO        = 0;
     GLuint m_gridEBO        = 0;
     GLuint m_gridIndexCount = 0;
-    GLuint m_newBakeProgram = 0;
+    GLuint m_bakeProgram = 0;
     
 
     // =========================================================================
@@ -154,25 +144,6 @@ protected:
 
     unsigned int m_skyCubemapHandle = 0;
     bool         m_skyCubemapReady  = false;
-
-    // =========================================================================
-    // Rendering — Shader Quality Tuning
-    // =========================================================================
-
-    // Overall raymarch quality (0.05..1.0); lower trades fidelity for performance
-    float m_shaderQuality = 1.0f;
-
-    // Multiplier for raymarch step size; <1.0 finer detail, >1.0 faster
-    float m_stepSizeScale = 1.0f;
-
-    // Distance above cached heightmap before switching to full raymarching
-    float m_heightmapTransitionThreshold = 350.0f;
-
-    // Debug: scales step-count visualization channel in the depth/step pass
-    float m_stepContributionScale = 1.0f;
-
-    // Debug: fixed divisor for step-count normalization
-    float m_stepCountNormalizationMax = 255.0f;
 
     // =========================================================================
     // Rendering — Sun and Atmosphere
@@ -193,7 +164,6 @@ protected:
 
     std::array<OrbDrawItem, 8192> m_orbDrawItems;
     int m_orbDrawItemCount = 0;
-
     std::vector<ShadowOrbEntry> m_shadowOrbList;
 
     // =========================================================================
@@ -224,8 +194,6 @@ protected:
     bool m_drawCollision    = false;
     bool m_showGUI          = false;
     bool m_cursorMode       = false;
-    bool m_useDepthStepDebug  = false;
-    bool m_showTopDownViewer  = false;
 
     // =========================================================================
     // Performance Tracking
@@ -279,21 +247,14 @@ protected:
     // =========================================================================
 
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
-    void runBakePass(const sf::Glsl::Mat3& worldToCamMatrix);
-    void runNewBakePass();
-    void runFinalPass(const sf::Glsl::Mat3& worldToCamMatrix);
-    void runDepthStepPass(const sf::Glsl::Mat3& worldToCamMatrix);
-    void runTopDownPass();
+    void runBakePass();
+    void runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix);
     void renderOrbs();
-    void renderTopDownViewer(sf::RenderWindow& window);
 
     // =========================================================================
     // Shader Uniform Upload
     // =========================================================================
 
-    void uploadTerrainLayersToShader(sf::Shader& shader, const std::string& prefix);
-    void uploadActiveLayerMaskToShader(sf::Shader& shader, const std::string& prefix);
-    void uploadWarpParametersToShader(sf::Shader& shader) const;
     void uploadShadowOrbsToShader(sf::Shader& shader);
     void uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch,
                                 const sf::Vector3f& sunDirView);
@@ -302,22 +263,13 @@ protected:
     // Terrain Query Helpers
     // =========================================================================
 
-    float heightAt(float x, float z) const;
-
-    float getCameraHeightAboveGround(const sf::Vector3f& cameraPos) const {
-        return Topography::getCameraHeightAboveGround(cameraPos, m_terrainLayers, m_activeLayerMask);
+    float getCameraHeightAboveGround(const sf::Vector3f& cameraPos) const;
+    float heightAt(float x, float z) const {
+        return Topography::heightAt(getTerrainContext(), x, z);
     }
-    float computeSceneMaxHeight() const {
-        return Topography::computeSceneMaxHeight(m_terrainLayers, m_activeLayerMask);
+    sf::Vector3f normalAt(float x, float z) const {
+        return Topography::normalAt(getTerrainContext(), x, z);
     }
-    float evaluateLayerHeightAt(const TerrainLayer& layer, float x, float z) const {
-        return Topography::evaluateLayerHeightAt(layer, x, z);
-    }
-    sf::Vector3f terrainNormal(float x, float z, float epsilon = 50.0f) const {
-        return Topography::terrainNormal(x, z, m_terrainLayers, m_activeLayerMask, epsilon);
-    }
-
-    float sampleHeightmapAt(float worldX, float worldZ) const;
 
     // =========================================================================
     // Coordinate and Color Utilities
@@ -344,4 +296,5 @@ public:
     void onExit();
     void onEnd();
     HUD* getHUD() const override;
+    Topography::TerrainContext getTerrainContext() const;
 };

@@ -183,7 +183,7 @@ void Assets::loadFromFile(const std::string& path)
             std::string name, folderPath;
             file >> name >> folderPath;
             addCubemap(name, folderPath);
-            std::cout << "Loaded custom HDR cubemap: " << name << " from " << folderPath << std::endl;
+            std::cout << "Loaded cubemap: " << name << " from " << folderPath << std::endl;
         }
         else if (str == "GLProgram")
         {

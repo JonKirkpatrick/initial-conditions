@@ -1,29 +1,16 @@
-// minimap_topo.frag
+#version 460 core
 
-uniform vec2  u_playerXZ;          // player world position (x, z)
-uniform float u_worldRadius;       // world units from center to edge (12800.0)
-uniform float u_texSize;           // texture dimension in pixels (256.0)
-uniform float u_heightMax;         // same as heightMax in the main shader
-uniform float u_reliefExaggeration;  // set to 4.0 from C++
+uniform vec2 topdownWorldMin;
+uniform vec2 topdownWorldSize;
+uniform sampler2D topoTopdownTex;
 
-// Height layer uniforms (identical to topo_topdown.frag)
-uniform float u_activeLayerEnabled[16];
-uniform vec2  u_layers_center[16];
-uniform float u_layers_radius[16];
-uniform float u_layers_falloffWidth[16];
-uniform float u_layers_topoHeight[16];
-// Map the existing minimap uniforms onto the shared terrain helper names.
-#define layer_center u_layers_center
-#define layer_radius u_layers_radius
-#define layer_falloffWidth u_layers_falloffWidth
-#define layer_topoHeight u_layers_topoHeight
 
-#include "topo_common.glsl"
+uniform vec2  u_playerXZ;
+uniform float u_worldRadius;
+uniform float u_texSize;
+uniform float u_heightMax;
 
-#undef layer_center
-#undef layer_radius
-#undef layer_falloffWidth
-#undef layer_topoHeight
+out vec4 fragColor;
 
 // ── Colour palette ─────────────────────────────────────────────────────────
 
@@ -57,6 +44,61 @@ vec3 topoColour(float normHeight, float shade) {
     return clamp(base * light * tint, 0.0, 1.0);
 }
 
+// Helper: raw height at integer texel (nearest only)
+float rawHeightAt(ivec2 p) {
+    vec4 c = texelFetch(topoTopdownTex, p, 0);
+    vec3 bytes = floor(c.rgb * 255.0 + 0.5);
+    float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
+    return scaled * (u_heightMax / 16777215.0);
+}
+
+
+// ================== XZ DECODE ==================
+vec2 decodeXZ(vec4 c) {
+    float hiX = floor(c.r * 255.0 + 0.5);
+    float loX = floor(c.g * 255.0 + 0.5);
+    float hiZ = floor(c.b * 255.0 + 0.5);
+    float loZ = floor(c.a * 255.0 + 0.5);
+    float normX = (hiX * 256.0 + loX) / 65535.0;
+    float normZ = (hiZ * 256.0 + loZ) / 65535.0;
+    return topdownWorldMin + vec2(normX, normZ) * topdownWorldSize;
+}
+
+// ================== HEIGHT from topdown texture (Bilinear) ==================
+float decodeHeight(vec2 xz) {
+    vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
+    uv.y = 1.0 - uv.y;
+    
+    // Convert to texel space
+    vec2 texSize = vec2(textureSize(topoTopdownTex, 0));
+    vec2 px = uv * (texSize - 1.0);
+    
+    ivec2 p0 = ivec2(floor(px));
+    vec2 f = fract(px); 
+    
+    float h00 = rawHeightAt(p0);
+    float h10 = rawHeightAt(p0 + ivec2(1, 0));
+    float h01 = rawHeightAt(p0 + ivec2(0, 1));
+    float h11 = rawHeightAt(p0 + ivec2(1, 1));
+    
+    // Bilinear interpolation
+    float h0 = mix(h00, h10, f.x);
+    float h1 = mix(h01, h11, f.x);
+    return mix(h0, h1, f.y);
+}
+
+// ================== NORMAL from topdown texture ==================
+vec3 computeNormal(vec2 xz) {
+    float eps = topdownWorldSize.x / 512.0;   // one texel width in world space
+    
+    float hL = decodeHeight(xz + vec2(-eps, 0.0));
+    float hR = decodeHeight(xz + vec2( eps, 0.0));
+    float hD = decodeHeight(xz + vec2(0.0, -eps));
+    float hU = decodeHeight(xz + vec2(0.0,  eps));
+
+    return normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 void main() {
     vec2 uv = (gl_FragCoord.xy / u_texSize) * 2.0 - 1.0;
@@ -65,10 +107,8 @@ void main() {
 
     vec2  xz = u_playerXZ + uv * vec2(1.0, -1.0) * u_worldRadius;
 
-    float h;
-    vec3  normal;
-    heightAndNormal(xz, h, normal);
-    normal = normalize(vec3(normal.x * u_reliefExaggeration, normal.y, normal.z * u_reliefExaggeration));
+    float h = decodeHeight(xz);
+    vec3  normal = computeNormal(xz);
 
     float normH  = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
     vec3  light  = normalize(vec3(-1.0, 1.0, 1.0));
@@ -78,5 +118,5 @@ void main() {
     float edge   = smoothstep(1.0, 0.92, r);
     colour = mix(vec3(0.776, 0.902, 0.804), colour, edge);
 
-    gl_FragColor = vec4(colour, edge);
+    fragColor = vec4(colour, edge);
 }
