@@ -2,11 +2,12 @@
 
 uniform vec2 viewportSize;
 uniform float m_hexSize;
-uniform sampler2D bakeTex;
-uniform sampler2D topoTopdownTex;
+uniform sampler2D bakeTex; // Note: topoTopdownTex uniform has been completely removed!
 uniform vec3 cameraPos;
 uniform float camHeight;
 uniform float farPlane;
+uniform sampler2D heightMap;
+uniform float u_heightMax;
 uniform mat3 worldToCamMatrix;
 uniform vec2 topdownWorldMin;
 uniform vec2 topdownWorldSize;
@@ -23,7 +24,6 @@ uniform float headlampRange;
 
 uniform bool  cursorMode;
 uniform vec2  hoveredHex;
-uniform float u_heightMax;
 uniform float u_reliefExaggeration;
 
 uniform int u_shadowOrbCount;
@@ -35,7 +35,7 @@ out vec4 fragColor;
 
 // Helper: raw height at integer texel (nearest only)
 float rawHeightAt(ivec2 p) {
-    vec4 c = texelFetch(topoTopdownTex, p, 0);
+    vec4 c = texelFetch(heightMap, p, 0);
     vec3 bytes = floor(c.rgb * 255.0 + 0.5);
     float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
     return scaled * (u_heightMax / 16777215.0);
@@ -44,13 +44,7 @@ float rawHeightAt(ivec2 p) {
 
 // ================== XZ DECODE ==================
 vec2 decodeXZ(vec4 c) {
-    float hiX = floor(c.r * 255.0 + 0.5);
-    float loX = floor(c.g * 255.0 + 0.5);
-    float hiZ = floor(c.b * 255.0 + 0.5);
-    float loZ = floor(c.a * 255.0 + 0.5);
-    float normX = (hiX * 256.0 + loX) / 65535.0;
-    float normZ = (hiZ * 256.0 + loZ) / 65535.0;
-    return topdownWorldMin + vec2(normX, normZ) * topdownWorldSize;
+    return c.xy;
 }
 
 // ================== HEIGHT from topdown texture (Bilinear) ==================
@@ -59,7 +53,7 @@ float decodeHeight(vec2 xz) {
     uv.y = 1.0 - uv.y;
     
     // Convert to texel space
-    vec2 texSize = vec2(textureSize(topoTopdownTex, 0));
+    vec2 texSize = vec2(textureSize(heightMap, 0));
     vec2 px = uv * (texSize - 1.0);
     
     ivec2 p0 = ivec2(floor(px));
@@ -78,7 +72,7 @@ float decodeHeight(vec2 xz) {
 
 // ================== NORMAL from topdown texture ==================
 vec3 computeNormal(vec2 xz) {
-    float eps = topdownWorldSize.x / 300.0;   // one texel width in world space
+    float eps = topdownWorldSize.x / 1500.0;   // one texel width in world space
     
     float hL = decodeHeight(xz + vec2(-eps, 0.0));
     float hR = decodeHeight(xz + vec2( eps, 0.0));

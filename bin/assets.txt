@@ -6,7 +6,7 @@ Texture   HLOff          images/gui_elements/HL_Off.png
 Texture   HLOn           images/gui_elements/HL_On.png
 Texture   HLAuto         images/gui_elements/HL_Auto.png
 Texture   Moon           images/skymap/Moon_Cropped.png
-Texture   Test1          images/terrain/tiles_5x5/tile_4_4.png
+Texture   Test1          images/terrain/set5x5.png
 Music     MusicTitle     music/title_menu.mp3
 Music     MusicTitleLate music/title_menu_late.mp3
 Music     MusicTopDown   music/top_down_music.mp3

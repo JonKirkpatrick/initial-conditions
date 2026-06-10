@@ -127,15 +127,18 @@ protected:
     sf::Image         m_topdownImage;
     sf::RenderTexture m_minimapTexture;
     sf::RenderTexture m_bakeTexture;
-    unsigned int m_topdownTextureSize  = 512;
+    sf::Texture       m_bakeSFTexture;
     unsigned int m_minimapTextureSize  = 256;
 
     // New bake pipeline
+    GLuint m_bakeFBO        = 0;
+    GLuint m_bakeColorTex   = 0;
+    GLuint m_bakeDepthRBO   = 0;
     GLuint m_gridVAO        = 0;
     GLuint m_gridVBO        = 0;
     GLuint m_gridEBO        = 0;
     GLuint m_gridIndexCount = 0;
-    GLuint m_bakeProgram = 0;
+    GLuint m_bakeProgram    = 0;
     
 
     // =========================================================================
@@ -217,6 +220,8 @@ protected:
     void buildHud();
     void buildTerrainGrid();
     void initializeSkyCubemap();
+    void initializeBakeFBO();
+    void debugDumpBakeTexture();
 
     // =========================================================================
     // Per-Frame Updates
