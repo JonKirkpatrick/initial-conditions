@@ -20,6 +20,9 @@ namespace Topography {
         float maxHeight;
     };
 
+    constexpr int GRID_RESOLUTION = 300; // Matches your Python PIXELS = 300
+    constexpr float BASE_SIZE = 93800.0f; // 938 meters in centimeters
+
     // ============================================================================
     // Terrain Query Functions
     // ============================================================================

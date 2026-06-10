@@ -78,7 +78,7 @@ float decodeHeight(vec2 xz) {
 
 // ================== NORMAL from topdown texture ==================
 vec3 computeNormal(vec2 xz) {
-    float eps = topdownWorldSize.x / 512.0;   // one texel width in world space
+    float eps = topdownWorldSize.x / 300.0;   // one texel width in world space
     
     float hL = decodeHeight(xz + vec2(-eps, 0.0));
     float hR = decodeHeight(xz + vec2( eps, 0.0));

@@ -69,8 +69,10 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_bakeTexture.setSmooth(false);
     m_topdownTexture = Assets::Instance().getTexture("Test1");
     m_topdownImage = m_topdownTexture.copyToImage();
-    m_topdownWorldMin = { -537600.f, -537600.f };
-    m_topdownWorldSize = { 1075200.f, 1075200.f };
+    float worldSize = Topography::BASE_SIZE; // 93800 cm = 938 m
+    float worldMinCoord = -worldSize / 2.0f;
+    m_topdownWorldMin = { worldMinCoord, worldMinCoord };
+    m_topdownWorldSize = { worldSize, worldSize };
     m_gridColor = Theme::color("cerulean");
     m_bakeProgram = Assets::Instance().getGLProgram("Bake");
     GLint linked;
@@ -85,7 +87,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 
     m_entityManager.update();
 
-    m_topdownMaxHeight = 29076.f;
+    m_topdownMaxHeight = 100000.f;
     buildTerrainGrid();
     buildHud();
     updateHUDData();
@@ -907,8 +909,8 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
 }
 
 void Scene_IC_Camp::buildTerrainGrid() {
-    const int W = 512;
-    const int H = 512;
+    const int W = Topography::GRID_RESOLUTION;
+    const int H = Topography::GRID_RESOLUTION;
 
     std::vector<float> verts;
     verts.reserve(W * H * 2);
