@@ -1260,13 +1260,12 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
     shader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
     shader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
     shader.setUniform("topdownHeightMax", m_topdownMaxHeight);
-    shader.setUniform("topoTopdownTex", m_topdownTexture);
+    shader.setUniform("heightMap", m_topdownTexture);
     shader.setUniform("nearPlane", m_entityManager.getCamera(m_camera).nearPlane);
     shader.setUniform("farPlane", m_entityManager.getCamera(m_camera).farPlane);
     shader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
     shader.setUniform("sunDirWorld", m_astroState.sunDirection);
     shader.setUniform("sunColor", m_astroState.sunColor);
-    shader.setUniform("u_bakeTex", m_bakeTexture.getTexture());
     shader.setUniform("u_viewportSize", sf::Glsl::Vec2(
         static_cast<float>(m_bakeTexture.getSize().x),
         static_cast<float>(m_bakeTexture.getSize().y)));
@@ -1326,9 +1325,43 @@ void Scene_IC_Camp::renderOrbs()
         if (batch.centersView.size() == BATCH_SIZE || i == m_orbDrawItemCount - 1)
         {
             uploadOrbBatchToShader(m_orbShader, batch, sunDirView);
+            
             sf::RenderStates states;
             states.shader = &m_orbShader;
+
+            // ==================== INJECTION POINT: HARDWARE TEXTURE LOCKS ====================
+            // 1. Force bind the shader program so we can query its uniform locations
+            sf::Shader::bind(&m_orbShader);
+            GLuint prog = m_orbShader.getNativeHandle();
+
+            // 2. Bind the Bake Texture (Texture coordinates map) to Unit 2
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
+            glUniform1i(glGetUniformLocation(prog, "bakeTex"), 2);
+
+            // 3. Bind the raw Heightmap Texture to Unit 3 (In case your orbs want to sample real heights)
+            glActiveTexture(GL_TEXTURE3);
+            glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+            glUniform1i(glGetUniformLocation(prog, "heightMap"), 3);
+            // =================================================================================
+
+            // SFML draws the vertex quad array using our state-locked texture configurations
             window.draw(vertices, states);
+
+            // ==================== INJECTION POINT: CLEANUP RESTORATION ====================
+            // Release hardware slots immediately so SFML doesn't state-panic on subsequent text/UI steps
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE3);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            
+            glUseProgram(0);
+            sf::Shader::bind(nullptr);
+            sf::Texture::bind(nullptr);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            // =================================================================================
+
             vertices.clear();
             batch.clear();
         }

@@ -2,7 +2,7 @@
 
 uniform vec2 viewportSize;
 uniform float m_hexSize;
-uniform sampler2D bakeTex; // Note: topoTopdownTex uniform has been completely removed!
+uniform sampler2D bakeTex;
 uniform vec3 cameraPos;
 uniform float camHeight;
 uniform float farPlane;

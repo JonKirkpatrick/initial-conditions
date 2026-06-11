@@ -1,42 +1,42 @@
-uniform vec3 cameraPos;
-uniform vec2 topdownWorldMin;
-uniform vec2 topdownWorldSize;
-uniform float topdownHeightMax;
-uniform sampler2D topoTopdownTex;
-uniform float nearPlane;
-uniform float farPlane;
+#version 460 core
 
-uniform vec3 sunDir;
-uniform vec3 sunDirWorld;
-uniform vec4 sunColor;
-uniform sampler2D u_bakeTex;
-uniform vec2 u_viewportSize;
-uniform float headlampIntensity;
-uniform float headlampRange;
-uniform float headlampConeCos; // cos(angle) of headlamp cone (for cutoff)
-uniform float headlampEnabled; // 1.0 when headlights are on, 0.0 when off
+uniform vec3        cameraPos;
+uniform vec2        topdownWorldMin;
+uniform vec2        topdownWorldSize;
+uniform float       topdownHeightMax;
+uniform sampler2D   heightMap;
+uniform float       nearPlane;
+uniform float       farPlane;
+
+uniform vec3        sunDir;
+uniform vec3        sunDirWorld;
+uniform vec4        sunColor;
+uniform sampler2D   bakeTex;
+uniform vec2        u_viewportSize;
+uniform float       headlampIntensity;
+uniform float       headlampRange;
+uniform float       headlampConeCos; // cos(angle) of headlamp cone (for cutoff)
+uniform float       headlampEnabled; // 1.0 when headlights are on, 0.0 when off
 
 // === Batching support ===
-uniform int u_batchSize;
-uniform vec3  u_orbCenterView[64];
-uniform vec4  u_orbColor[64];
-uniform float u_orbDepthNorm[64];   // the normalized depth into the scene
-uniform vec2  u_quadOrigin[64];     // top left of orb in screen space
-uniform vec2  u_texSize[64];        // diameter in pixels per orb
+uniform int         u_batchSize;
+uniform vec3        u_orbCenterView[64];
+uniform vec4        u_orbColor[64];
+uniform float       u_orbDepthNorm[64];   // the normalized depth into the scene
+uniform vec2        u_quadOrigin[64];     // top left of orb in screen space
+uniform vec2        u_texSize[64];        // diameter in pixels per orb
 
+in vec4 gl_Color;
+out vec4 fragColor;
+
+// ================== XZ DECODE ==================
 vec2 decodeXZ(vec4 c) {
-    float hiX = floor(c.r * 255.0 + 0.5);
-    float loX = floor(c.g * 255.0 + 0.5);
-    float hiZ = floor(c.b * 255.0 + 0.5);
-    float loZ = floor(c.a * 255.0 + 0.5);
-    float normX = (hiX * 256.0 + loX) / 65535.0;
-    float normZ = (hiZ * 256.0 + loZ) / 65535.0;
-    return topdownWorldMin + vec2(normX, normZ) * topdownWorldSize;
+    return c.xy;
 }
 
 // ================== Helper functions ==================
 float rawHeightAt(ivec2 uv) {
-    vec4 c = texelFetch(topoTopdownTex, uv, 0);
+    vec4 c = texelFetch(heightMap, uv, 0);
     vec3 bytes = floor(c.rgb * 255.0 + 0.5);
     float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
     return scaled * (topdownHeightMax / 16777215.0);
@@ -46,7 +46,7 @@ float decodeHeight(vec2 xz) {
     vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
     uv.y = 1.0 - uv.y;
     
-    vec2 texSize = vec2(textureSize(topoTopdownTex, 0));
+    vec2 texSize = vec2(textureSize(heightMap, 0));
     vec2 px = uv * (texSize - 1.0);
     
     ivec2 p0 = ivec2(floor(px));
@@ -86,7 +86,7 @@ void main()
 
     // Per-pixel occlusion using screen position
     vec2 fragScreenUv = fragScreenSFML / u_viewportSize;
-    vec4 bakeC = texture(u_bakeTex, fragScreenUv);
+    vec4 bakeC = texture(bakeTex, fragScreenUv);
     
     if (!(bakeC.a == 0.0 && bakeC.r == 0.0)) {
         vec2 xz = decodeXZ(bakeC);
@@ -181,5 +181,5 @@ void main()
                      desat);
     finalColor *= mix(1.0, 0.18, nightFactor);
 
-    gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
+    fragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
 }
