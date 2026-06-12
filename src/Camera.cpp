@@ -105,6 +105,44 @@ namespace Camera {
         return m;
     }
 
+    std::array<float, 16> getViewMatrix(const CTransform3D& t) {
+        // Get rotation matrix from world vectors -> camera space
+        auto rot = getWorldToCamMatrix(t.pitch, t.yaw, t.roll);
+
+        // Compute translation in camera space relative to current position
+        double tx = -(double(rot[0][0]) * t.pos.x + double(rot[1][0]) * t.pos.y + double(rot[2][0]) * t.pos.z);
+        double ty = -(double(rot[0][1]) * t.pos.x + double(rot[1][1]) * t.pos.y + double(rot[2][1]) * t.pos.z);
+        double tz = -(double(rot[0][2]) * t.pos.x + double(rot[1][2]) * t.pos.y + double(rot[2][2]) * t.pos.z);
+
+        // Standalone View matrix (4x4 column-major)
+        return {
+            // Column 0
+            rot[0][0], rot[0][1], rot[0][2], 0.f,
+            // Column 1
+            rot[1][0], rot[1][1], rot[1][2], 0.f,
+            // Column 2
+            rot[2][0], rot[2][1], rot[2][2], 0.f,
+            // Column 3 (camera space translation)
+            float(tx),        float(ty),        float(tz),        1.f
+        };
+    }
+
+    std::array<float, 16> getProjectionMatrix(const CCamera& c) {
+        float f     = 1.0f / std::tan(c.fovY * 0.5f);
+        float zNear = c.nearPlane;
+        float zFar  = c.farPlane;
+        float zRange = zNear - zFar; 
+
+        // Standalone Perspective Projection matrix (4x4 column-major)
+        // Retains your engine's custom Y-axis inversion (-f)
+        return {
+            f / c.aspectRatio, 0.f,  0.f,                          0.f,
+            0.f,               -f,   0.f,                          0.f,
+            0.f,               0.f,  (zFar + zNear) / zRange,     -1.f,   
+            0.f,               0.f,  (2.f * zFar * zNear) / zRange, 0.f
+        };
+    }
+
     std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c)
     {
         // Get rotation: world -> camera (columns = transformed basis vectors)
@@ -116,9 +154,9 @@ namespace Camera {
         // rot[2][0..2] = bz
 
         // Translation in camera space: t_cam = - (R * world_pos)
-        float tx = -(rot[0][0] * t.pos.x + rot[1][0] * t.pos.y + rot[2][0] * t.pos.z);
-        float ty = -(rot[0][1] * t.pos.x + rot[1][1] * t.pos.y + rot[2][1] * t.pos.z);
-        float tz = -(rot[0][2] * t.pos.x + rot[1][2] * t.pos.y + rot[2][2] * t.pos.z);
+        double tx = -(double(rot[0][0]) * t.pos.x + double(rot[1][0]) * t.pos.y + double(rot[2][0]) * t.pos.z);
+        double ty = -(double(rot[0][1]) * t.pos.x + double(rot[1][1]) * t.pos.y + double(rot[2][1]) * t.pos.z);
+        double tz = -(double(rot[0][2]) * t.pos.x + double(rot[1][2]) * t.pos.y + double(rot[2][2]) * t.pos.z);
 
         // View matrix (column-major)
         std::array<float, 16> V = {
@@ -129,7 +167,7 @@ namespace Camera {
             // Column 2
             rot[2][0], rot[2][1], rot[2][2], 0.f,
             // Column 3 (translation)
-            tx,        ty,        tz,        1.f
+            float(tx),        float(ty),        float(tz),        1.f
         };
 
         // Projection matrix (standard OpenGL-style perspective, column-major)

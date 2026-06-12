@@ -82,6 +82,24 @@ vec3 computeNormal(vec2 xz) {
     return normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
 }
 
+// ================== NORMAL DAMPING (HORIZON SMOOTHER) ==================
+vec3 getDampedNormal(vec3 rawNormal, float distanceToCam) {
+    // Distance boundaries defined in centimeters (1.0 = 1cm)
+    // Detail begins softening smoothly at 0.5 km and hits perfectly upright at 2.0 km
+    float startDampDist = 50000.0; 
+    float maxDampDist   = 200000.0; 
+    
+    // Compute our blending factor [0.0 = full detail, 1.0 = vertical flat]
+    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
+    
+    // Smooth out the blending rate so the transition at 1.5km isn't a harsh line
+    dampFactor = smoothstep(0.0, 1.0, dampFactor);
+    
+    // Blend smoothly from the computed slope vector straight up toward vec3(0.0, 1.0, 0.0)
+    vec3 straightUp = vec3(0.0, 1.0, 0.0);
+    return normalize(mix(rawNormal, straightUp, dampFactor));
+}
+
 // ================== HEX GRID ==================
 vec2 hexAt(vec2 p) {
     float q = (2.0/3.0 * p.x) / m_hexSize;
@@ -144,13 +162,30 @@ vec3 topoColour(float normHeight, float shade) {
     return clamp(base * light * tint, 0.0, 1.0);
 }
 
-vec3 getTerrainColor(vec3 normal, vec2 xz) {
-    float h = decodeHeight(xz);
+vec3 getTerrainColor(vec3 normal, float h) {
     float normH = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
     float exaggeratedH = pow(normH, 1.0 / max(u_reliefExaggeration, 0.01));
     vec3 lightDir = normalize(sunDir);
     float shade = clamp(dot(normal, lightDir), 0.0, 1.0);
     return topoColour(exaggeratedH, shade);
+}
+
+// ================== COLOUR DAMPING (HORIZON SMOOTHER) ==================
+
+vec3 getDampedTerrainColor(vec3 rawColor, float distanceToCam) {
+    // Distance boundaries matched to your normal damping system
+    float startDampDist = 50000.0;  // 0.5 km
+    float maxDampDist   = 200000.0; // 2.0 km
+    
+    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
+    dampFactor = smoothstep(0.0, 1.0, dampFactor);
+    
+    // Artistic Target Color: A desaturated, slightly atmospheric grey-blue hue.
+    // This forms a perfect bridge color before the final sky fog layer sweeps over it.
+    vec3 atmosphericBase = vec3(0.53, 0.58, 0.64); 
+    
+    // Smoothly wash away the local elevation tints and lighting artifacts
+    return mix(rawColor, atmosphericBase, dampFactor);
 }
 
 // ================== MAIN ==================
@@ -174,15 +209,24 @@ void main() {
     // Distance from camera for atmosphere + grid fade
     float dist = length(worldPos - cameraPos);
 
-    // ================== NORMAL ==================
-    vec3 normal = computeNormal(xz);
-    vec3 exagNormal = normalize(vec3(normal.x * u_reliefExaggeration,
-                                     normal.y,
-                                     normal.z * u_reliefExaggeration));
-    normal = exagNormal;
+    // ================== NORMAL (WITH HORIZON DAMPING) ==================
+    // 1. Compute and damp the surface vectors
+    vec3 rawNormal = computeNormal(xz);
+    vec3 exagNormal = normalize(vec3(rawNormal.x * u_reliefExaggeration,
+                                     rawNormal.y,
+                                     rawNormal.z * u_reliefExaggeration));
+    
+    // Damp normals toward vec3(0,1,0) to suppress specular/diffuse flickering
+    vec3 normal = getDampedNormal(exagNormal, dist);
+
+    // 2. Compute the sharp local terrain color using our damped normal
+    vec3 rawTerrainColor = getTerrainColor(normal, h);
+
+    // 3. Damp the terrain color toward the atmospheric grey-blue
+    // This eliminates color banding jitter caused by the underlying height-map inaccuracies
+    vec3 terrainBaseColor = getDampedTerrainColor(rawTerrainColor, dist);
 
     // ================== LIGHTING ==================
-    vec3 terrainBaseColor = getTerrainColor(normal, xz);
 
     vec3 sunDirNorm = normalize(sunDir);
     float sunElevationDeg = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;

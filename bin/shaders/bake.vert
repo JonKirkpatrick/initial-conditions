@@ -6,7 +6,9 @@ uniform sampler2D topoTopdownTex;
 uniform vec2 topdownWorldMin;
 uniform vec2 topdownWorldSize;
 uniform float topdownHeightMax;
-uniform mat4 u_VP;
+
+uniform mat4 u_View;
+uniform mat4 u_Projection;
 
 out vec2 v_worldXZ;
 
@@ -24,5 +26,8 @@ void main() {
     float h = decodeHeightVertex(a_uv);
     
     v_worldXZ = vec2(worldX, worldZ);
-    gl_Position = u_VP * vec4(worldX, h, worldZ, 1.0);
+    
+    vec4 cameraSpacePos = u_View * vec4(worldX, h, worldZ, 1.0);
+    
+    gl_Position = u_Projection * cameraSpacePos;
 }

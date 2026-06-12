@@ -1141,7 +1141,8 @@ void Scene_IC_Camp::debugDumpBakeTexture() {
 void Scene_IC_Camp::runBakePass() {
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
-    auto vp = Camera::getVPMatrix(transform, cameraData);
+    auto viewMatrix = Camera::getViewMatrix(transform);
+    auto projMatrix = Camera::getProjectionMatrix(cameraData);
 
     sf::Vector2u windowSize = m_game.window().getSize();
 
@@ -1163,8 +1164,10 @@ void Scene_IC_Camp::runBakePass() {
                 m_topdownWorldSize.x, m_topdownWorldSize.y);
     glUniform1f(glGetUniformLocation(m_bakeProgram, "topdownHeightMax"),
                 m_topdownMaxHeight);
-    glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram, "u_VP"),
-                       1, GL_FALSE, vp.data());
+    glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram, "u_View"),
+                       1, GL_FALSE, viewMatrix.data());
+    glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram, "u_Projection"),
+                       1, GL_FALSE, projMatrix.data());
 
     glBindVertexArray(m_gridVAO);
     glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);

@@ -24,4 +24,6 @@ namespace Camera
     // Compute inverse rotation matrix once per frame (cheaper than per-pixel trig)
     std::array<std::array<float, 3>, 3> getWorldToCamMatrix(float pitch, float yaw, float roll);
     std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c);
+    std::array<float, 16> getViewMatrix(const CTransform3D& t);
+    std::array<float, 16> getProjectionMatrix(const CCamera& c);
 }
