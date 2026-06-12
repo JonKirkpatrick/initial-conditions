@@ -17,6 +17,7 @@ uniform float       headlampIntensity;
 uniform float       headlampRange;
 uniform float       headlampConeCos; // cos(angle) of headlamp cone (for cutoff)
 uniform float       headlampEnabled; // 1.0 when headlights are on, 0.0 when off
+uniform mat4        u_View;
 
 // === Batching support ===
 uniform int         u_batchSize;
@@ -62,6 +63,46 @@ float decodeHeight(vec2 xz) {
     return mix(h0, h1, f.y);
 }
 
+// ================== Eye helpers ==================
+
+// Rotate a direction vector by 'angle' radians around a given axis (Rodrigues)
+vec3 rotateAround(vec3 v, vec3 axis, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
+}
+
+// Given the orb's forward vector (view space), compute the two eye center
+// directions as unit vectors on the sphere surface.
+// elevationRad: angle up from forward toward +Y
+// separationRad: half-angle left/right around the Y-rotated forward
+void eyeDirections(vec3 forward, float elevationRad, float separationRad,
+                   out vec3 leftEye, out vec3 rightEye)
+{
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 right = normalize(cross(forward, up));
+
+    vec3 elevated = normalize(rotateAround(forward, right, elevationRad));
+    leftEye  = normalize(rotateAround(elevated, up,  separationRad));
+    rightEye = normalize(rotateAround(elevated, up, -separationRad));
+}
+
+// Returns > 0 if the fragment at billboard pos 'fragPos' (the same pos you
+// use for body shading, range [-1,1]) hits the eye disc, and the eye surface
+// is in front of the body surface at that fragment.
+// eyeDir: unit vector from eyeDirections()
+// eyeRadius: in the same [-1,1] billboard space
+// Returns the eye's local 2D offset (for pupil/highlight math), or signals
+// a miss via outHit = false.
+float eyeSurfaceZ(vec2 eyeCenter, vec2 fragPos, float eyeRadius, out bool hit) {
+    vec2 delta = fragPos - eyeCenter;
+    float d2 = dot(delta, delta);
+    float r2 = eyeRadius * eyeRadius;
+    hit = d2 < r2;
+    // z on the eye's local sphere surface, in billboard units
+    return sqrt(max(0.0, r2 - d2));
+}
+
 void main()
 {
     // Find which orb this fragment belongs to
@@ -76,6 +117,7 @@ void main()
     vec3 orbCenter  = u_orbCenterView[orbIndex];
     float depthNorm = u_orbDepthNorm[orbIndex];
     vec4 orbColor   = u_orbColor[orbIndex];
+    vec3 orbForward = vec3(0.0, 0.0, -1.0); // for testing eye logic.
 
     // Convert gl_FragCoord (OpenGL bottom-left Y-up) to SFML window coords (top-left Y-down)
     vec2 fragScreenSFML = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
@@ -89,6 +131,7 @@ void main()
     vec4 bakeC = texture(bakeTex, fragScreenUv);
     
     if (!(bakeC.a == 0.0 && bakeC.r == 0.0)) {
+        
         vec2 xz = decodeXZ(bakeC);
         
         float terrainH = decodeHeight(xz);
@@ -112,12 +155,35 @@ void main()
     
     float z = sqrt(1.0 - dist * dist);
     vec3 normal = normalize(vec3(pos.x, -pos.y, z));
+    vec3 leftDir, rightDir;
+    eyeDirections(orbForward,
+                radians(22.5), radians(30.0),
+                leftDir, rightDir);
+
+    // Eye centers in billboard [-1,1] space are just the xy of those directions
+    vec2 leftCenter  = vec2(leftDir.x,  -leftDir.y);
+    vec2 rightCenter = vec2(rightDir.x, -rightDir.y);
+
+    float eyeRadius = 1.0 / 4.0; // tune this
+
+    float leftBodyZ  = sqrt(max(0.0, 1.0 - dot(leftCenter,  leftCenter)));
+    float rightBodyZ = sqrt(max(0.0, 1.0 - dot(rightCenter, rightCenter)));
+
+    bool leftHit, rightHit;
+    float leftZ  = eyeSurfaceZ(leftCenter,  pos, eyeRadius, leftHit);
+    float rightZ = eyeSurfaceZ(rightCenter, pos, eyeRadius, rightHit);
+
+    // body surface z at this fragment
+    float bodyZ = z; // already computed above
     
     // Two-source sphere shading: sun + camera headlamp.
-    vec3 viewDir = vec3(0.0, 0.0, 1.0);
     vec3 sunLightDir = normalize(sunDir);
-    float sunDiffuse = max(0.0, dot(normal, sunLightDir));
-    vec3 sunHalfDir = normalize(sunLightDir + viewDir);
+    vec3 N = -normalize(orbCenter);
+    vec3 up = (abs(N.y) > 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 R = normalize(cross(up, N));
+    vec3 U = cross(N, R);
+    vec3 localSun = vec3(dot(sunLightDir,R),dot(sunLightDir,U),dot(sunLightDir,N));
+    float sunDiffuse = max(dot(normal, localSun), 0.0);
 
     float hemisphere = clamp(0.20 + 0.80 * z, 0.0, 1.0);
     vec3 sunWorldDir = normalize(sunDirWorld);
@@ -145,10 +211,8 @@ void main()
     rangeMask = pow(rangeMask, 1.25);
     float nightBoost = mix(0.20, 1.0, nightFactor);
     float lampStrength = headlampEnabled * headlampIntensity * coneMask * rangeMask * nightBoost;
-
     vec3 lampLightDir = vec3(0.0, 0.0, 1.0);
     float lampDiffuse = max(0.0, dot(normal, lampLightDir));
-    vec3 lampHalfDir = normalize(lampLightDir + viewDir);
     vec3 flashlightShaded = orbColor.rgb * (0.15 + 0.85 * lampDiffuse);
     flashlightShaded *= lampStrength;
 
@@ -180,6 +244,72 @@ void main()
                      vec3(dot(finalColor, vec3(0.299, 0.587, 0.114))),
                      desat);
     finalColor *= mix(1.0, 0.18, nightFactor);
+
+    // === Eye override ===
+    bool inEye = false;
+    vec3 eyeNormal = vec3(0.0);
+    vec2 eyeLocalPos = vec2(0.0);
+    float eyeLocalRadius = 0.0;
+
+    if (leftHit && (leftZ + leftBodyZ) > bodyZ) {
+        inEye = true;
+        eyeLocalPos = pos - leftCenter;
+        eyeLocalRadius = leftZ;
+        eyeNormal = normalize(vec3(eyeLocalPos.x, -eyeLocalPos.y, leftZ));
+    } else if (rightHit && rightZ + rightBodyZ > bodyZ) {
+        inEye = true;
+        eyeLocalPos = pos - rightCenter;
+        eyeLocalRadius = rightZ;
+        eyeNormal = normalize(vec3(eyeLocalPos.x, -eyeLocalPos.y, rightZ));
+    }
+
+    if (inEye) {
+        // Normalized distance from eye center [0..1]
+        float eyeDist = length(eyeLocalPos) / eyeRadius;
+
+        // Sclera (white of the eye)
+        vec3 scleraColor = vec3(0.92, 0.90, 0.88);
+
+        // Pupil: dark disc in the center
+        float pupilRadius = 0.45; // fraction of eye radius
+        vec2 forwardEyeSpace = vec2(orbForward.x, -orbForward.y);
+        vec2 pupilCenter = forwardEyeSpace * 0.3;
+        float pupilDist = length(eyeLocalPos / eyeRadius - pupilCenter);
+        float pupilMask = 1.0 - smoothstep(pupilRadius - 0.08, pupilRadius + 0.08, pupilDist);
+        vec3 pupilColor = vec3(0.05, 0.04, 0.03);
+
+        // Specular highlight: small off-center dot
+        vec2 highlightOffset = pupilCenter + vec2(-0.18, -0.22);
+        float highlightDist = length(eyeLocalPos / eyeRadius - highlightOffset);
+        float highlightMask = 1.0 - smoothstep(0.0, 0.18, highlightDist);
+        vec3 highlightColor = vec3(1.0);
+
+        vec3 eyeColor = mix(scleraColor, pupilColor, pupilMask);
+        eyeColor = mix(eyeColor, highlightColor, highlightMask);
+
+        // Simple diffuse shading on the eye surface so it respects the sun
+        float eyeSunDiffuse = max(0.0, dot(eyeNormal, sunLightDir)) * sunVisibility;
+        float eyeShading = 0.35 + 0.65 * eyeSunDiffuse;
+        // Don't shade the highlight
+        eyeColor *= mix(eyeShading, 1.0, highlightMask);
+
+        // Soft edge blend into body at the limb of the eye sphere
+        float limbBlend = smoothstep(0.85, 1.0, eyeDist);
+        float blink = 0.3; // 0.0 = fully open, 1.0 = fully closed
+
+        // Lid plane rotates down from top of eye sphere
+        float lidAngle = mix(-1.5708, 1.5708, blink);
+        vec3 lidNormal = vec3(0.0, cos(lidAngle), sin(lidAngle));
+        float lidSdf = dot(eyeNormal, lidNormal);
+        float blinkMask = smoothstep(-0.15, 0.15, lidSdf);
+
+        // Lid color: shaded sclera so it reads as a curved lid over the eyeball
+        float lidDiffuse = max(0.0, dot(eyeNormal, sunLightDir)) * sunVisibility;
+        float lidShading = 0.35 + 0.65 * lidDiffuse;
+        vec3 lidColor = mix(scleraColor, orbColor.rgb, 0.75) * lidShading;
+        eyeColor = mix(eyeColor, lidColor, blinkMask);
+        finalColor = mix(eyeColor, finalColor, limbBlend);
+    }
 
     fragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
 }

@@ -1258,14 +1258,17 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
         shader.setUniformArray("u_quadOrigin",    batch.quadOrigins.data(), size);
         shader.setUniformArray("u_texSize",       batch.texSizes.data(), size);
     }
-
-    shader.setUniform("cameraPos", m_entityManager.getTransform(m_camera).pos);
+    auto& transform = m_entityManager.getTransform(m_camera);
+    auto viewMatrix = Camera::getViewMatrix(transform);
+    shader.setUniform("u_View", viewMatrix.data());
+    shader.setUniform("cameraPos", transform.pos);
     shader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
     shader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
     shader.setUniform("topdownHeightMax", m_topdownMaxHeight);
     shader.setUniform("heightMap", m_topdownTexture);
-    shader.setUniform("nearPlane", m_entityManager.getCamera(m_camera).nearPlane);
-    shader.setUniform("farPlane", m_entityManager.getCamera(m_camera).farPlane);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+    shader.setUniform("nearPlane", cameraData.nearPlane);
+    shader.setUniform("farPlane", cameraData.farPlane);
     shader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
     shader.setUniform("sunDirWorld", m_astroState.sunDirection);
     shader.setUniform("sunColor", m_astroState.sunColor);
@@ -1352,7 +1355,6 @@ void Scene_IC_Camp::renderOrbs()
             window.draw(vertices, states);
 
             // ==================== INJECTION POINT: CLEANUP RESTORATION ====================
-            // Release hardware slots immediately so SFML doesn't state-panic on subsequent text/UI steps
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, 0);
             glActiveTexture(GL_TEXTURE3);
@@ -1465,7 +1467,7 @@ void Scene_IC_Camp::runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix) {
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // 7. CLEANUP STATE RESTORATION (Crucial for SFML's engine health!)
+    // 7. CLEANUP STATE RESTORATION
     glUseProgram(0);
     glEnable(GL_BLEND); // Re-enable alpha blending globally for subsequent UI / text steps
     sf::Shader::bind(nullptr);
