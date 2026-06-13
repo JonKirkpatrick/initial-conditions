@@ -37,6 +37,12 @@ class Scene_IC_Camp : public Scene {
         sf::Vector3f cameraSpacePos;
         float        radiusPx;
         float        orbRadius;
+        sf::Vector3f gazeDirection;
+        sf::Vector3f forward;
+        float        hasTapetum;
+        sf::Vector3f tapetumColor;
+        float        pupilDilation;
+        float        eyelidClosure;
         sf::Vector3f worldPos;
         float        distSort;
         float        distNorm;
@@ -52,7 +58,12 @@ class Scene_IC_Camp : public Scene {
         std::vector<float>           depthNorms;
         std::vector<sf::Vector2f>    quadOrigins;
         std::vector<sf::Vector2f>    texSizes;
-
+        std::vector<sf::Vector3f>    gazes;
+        std::vector<sf::Vector3f>    forwards;
+        std::vector<float>           hasTapetums;
+        std::vector<sf::Vector3f>    tapetumColors;
+        std::vector<float>           pupilDilations;
+        std::vector<float>           eyelidClosures;
         void clear()
         {
             centersView.clear();
@@ -60,6 +71,12 @@ class Scene_IC_Camp : public Scene {
             depthNorms.clear();
             quadOrigins.clear();
             texSizes.clear();
+            gazes.clear();
+            forwards.clear();
+            hasTapetums.clear();
+            tapetumColors.clear();
+            pupilDilations.clear();
+            eyelidClosures.clear();
         }
 
         void reserve(size_t n)
@@ -69,6 +86,12 @@ class Scene_IC_Camp : public Scene {
             depthNorms.reserve(n);
             quadOrigins.reserve(n);
             texSizes.reserve(n);
+            gazes.reserve(n);
+            forwards.reserve(n);
+            hasTapetums.reserve(n);
+            tapetumColors.reserve(n);
+            pupilDilations.reserve(n);
+            eyelidClosures.reserve(n);
         }
     };
 
@@ -216,6 +239,8 @@ protected:
     void spawnCamera();
     void spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius,
                   float bobRate = 2.0f, float bobMagnitude = 8.0f);
+    void spawnOrbFauna(int hexQ, int hexR, const sf::Color& color, float radius,
+                      float bobRate = 2.0f, float bobMagnitude = 8.0f, const CEyes& eyes = CEyes());
     void spawnDebugOrbs(int count);
     void buildHud();
     void buildTerrainGrid();

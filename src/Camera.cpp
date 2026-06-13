@@ -73,6 +73,17 @@ namespace Camera {
         return t.pos + rayDir * tt;
     }
 
+    sf::Vector3f getForwardXZ(const CTransform3D& t) {
+        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
+        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
+        return sf::Vector3f(-sy * cp, 0.f, -cy * cp);
+    }
+
+    sf::Vector3f getForward(const CTransform3D& t) {
+        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
+        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
+        return sf::Vector3f(-sy * cp, sp, -cy * cp);
+    }
 
     sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll) {
         return worldToCamera(v, pitch, yaw, roll);

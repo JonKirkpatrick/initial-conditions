@@ -17,7 +17,6 @@ uniform float       headlampIntensity;
 uniform float       headlampRange;
 uniform float       headlampConeCos; // cos(angle) of headlamp cone (for cutoff)
 uniform float       headlampEnabled; // 1.0 when headlights are on, 0.0 when off
-uniform mat4        u_View;
 
 // === Batching support ===
 uniform int         u_batchSize;
@@ -26,6 +25,12 @@ uniform vec4        u_orbColor[64];
 uniform float       u_orbDepthNorm[64];   // the normalized depth into the scene
 uniform vec2        u_quadOrigin[64];     // top left of orb in screen space
 uniform vec2        u_texSize[64];        // diameter in pixels per orb
+uniform vec3        u_gazeDir[64];
+uniform vec3        u_orbForward[64];
+uniform float       u_hasTapetum[64];
+uniform vec4        u_tapetumColor[64];
+uniform float       u_pupilDilation[64];
+uniform float       u_eyelidClosure[64];
 
 in vec4 gl_Color;
 out vec4 fragColor;
@@ -117,7 +122,7 @@ void main()
     vec3 orbCenter  = u_orbCenterView[orbIndex];
     float depthNorm = u_orbDepthNorm[orbIndex];
     vec4 orbColor   = u_orbColor[orbIndex];
-    vec3 orbForward = vec3(0.0, 0.0, -1.0); // for testing eye logic.
+    float blink     = u_eyelidClosure[orbIndex];
 
     // Convert gl_FragCoord (OpenGL bottom-left Y-up) to SFML window coords (top-left Y-down)
     vec2 fragScreenSFML = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
@@ -141,11 +146,20 @@ void main()
         float terrainDist = length(relative);
         
         float terrainNorm = clamp((terrainDist - nearPlane) / (farPlane - nearPlane), 0.0, 1.0);
+
         
         if (terrainNorm < depthNorm) {
             discard;
         }
     }
+    vec3 N  = -normalize(orbCenter);
+    vec3 up = (abs(N.y) > 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 R  = normalize(cross(up, N));
+    vec3 U  = cross(N, R);
+
+    vec3 orbForwardRaw = u_orbForward[orbIndex];
+    vec3 orbForward = normalize(vec3(dot(orbForwardRaw,R),dot(orbForwardRaw,U),dot(orbForwardRaw,N)));
+
     vec2 pos = (uv - vec2(0.5)) * 2.0;
     float dist = length(pos);
     
@@ -165,6 +179,10 @@ void main()
     vec2 rightCenter = vec2(rightDir.x, -rightDir.y);
 
     float eyeRadius = 1.0 / 4.0; // tune this
+    bool  hasTapetum   = (u_hasTapetum[orbIndex] < 0.5)? false:true;
+    // bool hasTapetum = true;
+    vec3  tapetumColor = u_tapetumColor[orbIndex].rgb;
+    // vec3 tapetumColor = vec3(1.0,0.0,0.0);
 
     float leftBodyZ  = sqrt(max(0.0, 1.0 - dot(leftCenter,  leftCenter)));
     float rightBodyZ = sqrt(max(0.0, 1.0 - dot(rightCenter, rightCenter)));
@@ -178,10 +196,6 @@ void main()
     
     // Two-source sphere shading: sun + camera headlamp.
     vec3 sunLightDir = normalize(sunDir);
-    vec3 N = -normalize(orbCenter);
-    vec3 up = (abs(N.y) > 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-    vec3 R = normalize(cross(up, N));
-    vec3 U = cross(N, R);
     vec3 localSun = vec3(dot(sunLightDir,R),dot(sunLightDir,U),dot(sunLightDir,N));
     float sunDiffuse = max(dot(normal, localSun), 0.0);
 
@@ -221,8 +235,6 @@ void main()
     float distNormalized = clamp(depthNorm / atmosphereMaxDist, 0.0, 1.0);
     float atmosphereStrength = pow(distNormalized, 1.7);
 
-    vec3 sunDirNorm = sunWorldDir;
-
     float dayMix = smoothstep(-10.0, 6.0, sunElevationDeg);
     vec3 shaded = ambient;
     shaded += (sunShaded - ambient) * dayMix;
@@ -231,7 +243,7 @@ void main()
     vec3 nightAtm = vec3(0.008, 0.006, 0.025);
     vec3 atmTint = mix(sunColor.rgb * vec3(0.7, 0.65, 0.8),
                        vec3(0.50, 0.68, 0.95), 0.6);
-    float daytimeFactor = clamp(sunDirNorm.y * 1.8, 0.0, 1.0);
+    float daytimeFactor = clamp(sunWorldDir.y * 1.8, 0.0, 1.0);
     atmTint = mix(vec3(0.28, 0.18, 0.40), atmTint, daytimeFactor);
     atmTint = mix(atmTint, nightAtm, nightFactor * 0.95);
 
@@ -249,65 +261,93 @@ void main()
     bool inEye = false;
     vec3 eyeNormal = vec3(0.0);
     vec2 eyeLocalPos = vec2(0.0);
-    float eyeLocalRadius = 0.0;
+    float eyeCenterX = 0.0;
 
     if (leftHit && (leftZ + leftBodyZ) > bodyZ) {
         inEye = true;
         eyeLocalPos = pos - leftCenter;
-        eyeLocalRadius = leftZ;
         eyeNormal = normalize(vec3(eyeLocalPos.x, -eyeLocalPos.y, leftZ));
+        eyeCenterX = leftCenter.x;
     } else if (rightHit && rightZ + rightBodyZ > bodyZ) {
         inEye = true;
         eyeLocalPos = pos - rightCenter;
-        eyeLocalRadius = rightZ;
         eyeNormal = normalize(vec3(eyeLocalPos.x, -eyeLocalPos.y, rightZ));
+        eyeCenterX = rightCenter.x;
     }
 
     if (inEye) {
-        // Normalized distance from eye center [0..1]
         float eyeDist = length(eyeLocalPos) / eyeRadius;
 
-        // Sclera (white of the eye)
+        // === Eye parameters (promote to uniforms when ready) ===
+        float dilation       = u_pupilDilation[orbIndex];
+        // float dilation = 0.5;
+        vec3 lookDir        = u_gazeDir[orbIndex];
+        // vec3 lookDir = vec3(0.0,0.0,1.0);
+        float pupilRadiusMin = 0.20;
+        float pupilRadiusMax = 0.60;
+        float pupilRadius    = mix(pupilRadiusMin, pupilRadiusMax, dilation);
+
+        // Sclera
         vec3 scleraColor = vec3(0.92, 0.90, 0.88);
 
-        // Pupil: dark disc in the center
-        float pupilRadius = 0.45; // fraction of eye radius
-        vec2 forwardEyeSpace = vec2(orbForward.x, -orbForward.y);
-        vec2 pupilCenter = forwardEyeSpace * 0.3;
-        float pupilDist = length(eyeLocalPos / eyeRadius - pupilCenter);
-        float pupilMask = 1.0 - smoothstep(pupilRadius - 0.08, pupilRadius + 0.08, pupilDist);
-        vec3 pupilColor = vec3(0.05, 0.04, 0.03);
+        // Pupil center driven by lookDir
+        vec2 lookEyeSpace = vec2(lookDir.x, -lookDir.y);
+        vec2 pupilCenter  = lookEyeSpace * 0.3;
+        float pupilDist   = length(eyeLocalPos / eyeRadius - pupilCenter);
+        float pupilMask   = 1.0 - smoothstep(pupilRadius - 0.08, pupilRadius + 0.08, pupilDist);
+        vec3  pupilColor  = vec3(0.05, 0.04, 0.03);
 
-        // Specular highlight: small off-center dot
-        vec2 highlightOffset = pupilCenter + vec2(-0.18, -0.22);
-        float highlightDist = length(eyeLocalPos / eyeRadius - highlightOffset);
-        float highlightMask = 1.0 - smoothstep(0.0, 0.18, highlightDist);
-        vec3 highlightColor = vec3(1.0);
+        // Specular highlight anchored to gaze direction
+        vec2  highlightOffset = pupilCenter + vec2(-0.18, -0.22);
+        float highlightDist   = length(eyeLocalPos / eyeRadius - highlightOffset);
+        float highlightMask   = 1.0 - smoothstep(0.0, 0.18, highlightDist);
+        vec3  highlightColor  = vec3(1.0);
 
+        // Base eye color
         vec3 eyeColor = mix(scleraColor, pupilColor, pupilMask);
-        eyeColor = mix(eyeColor, highlightColor, highlightMask);
 
-        // Simple diffuse shading on the eye surface so it respects the sun
-        float eyeSunDiffuse = max(0.0, dot(eyeNormal, sunLightDir)) * sunVisibility;
-        float eyeShading = 0.35 + 0.65 * eyeSunDiffuse;
-        // Don't shade the highlight
-        eyeColor *= mix(eyeShading, 1.0, highlightMask);
+        // === Sun contribution — darkens with night ===
+        float eyeSunDiffuse   = max(0.0, dot(eyeNormal, sunLightDir)) * sunVisibility;
+        float eyeAmbientFloor = mix(0.05, 0.35, sunVisibility);
+        float eyeShading      = eyeAmbientFloor + (1.0 - eyeAmbientFloor) * eyeSunDiffuse;
+        float lateralShadow   = clamp(0.85 + 0.1 * sign(localSun.x) * sign(eyeCenterX) * sunVisibility, 0.0, 1.0);
+        vec3  eyeSunColor     = eyeColor * mix(eyeShading, 1.0, highlightMask) * lateralShadow;
+        eyeSunColor           = mix(eyeColor, highlightColor, highlightMask) * eyeShading * lateralShadow;
+        eyeSunColor           *= mix(1.0, 0.15, nightFactor);
 
-        // Soft edge blend into body at the limb of the eye sphere
-        float limbBlend = smoothstep(0.85, 1.0, eyeDist);
-        float blink = 0.3; // 0.0 = fully open, 1.0 = fully closed
+        // === Lamp contribution — independent of night darkening ===
+        float eyeLampDiffuse = max(0.0, dot(eyeNormal, lampLightDir));
+        float eyeShine       = pow(eyeLampDiffuse, 4.0) * lampStrength * 0.75;
+        vec3  eyeLampColor   = scleraColor * eyeShine * (1.0 - pupilMask);
 
-        // Lid plane rotates down from top of eye sphere
-        float lidAngle = mix(-1.5708, 1.5708, blink);
-        vec3 lidNormal = vec3(0.0, cos(lidAngle), sin(lidAngle));
-        float lidSdf = dot(eyeNormal, lidNormal);
-        float blinkMask = smoothstep(-0.15, 0.15, lidSdf);
+        // === Tapetum lucidum ===
+        vec3 tapetumContrib = vec3(0.0);
+        if (hasTapetum) {
+            float tapetumRetro  = pow(eyeLampDiffuse, 2.0);
+            float tapetumShine  = tapetumRetro * lampStrength * pupilMask * 2.5;
+            tapetumContrib      = tapetumColor * clamp(tapetumShine, 0.0, 0.92);
+        }
 
-        // Lid color: shaded sclera so it reads as a curved lid over the eyeball
-        float lidDiffuse = max(0.0, dot(eyeNormal, sunLightDir)) * sunVisibility;
-        float lidShading = 0.35 + 0.65 * lidDiffuse;
-        vec3 lidColor = mix(scleraColor, orbColor.rgb, 0.75) * lidShading;
+        // Combine
+        eyeColor = eyeSunColor + eyeLampColor + tapetumContrib;
+
+        // === Lid ===
+        float limbBlend  = smoothstep(0.85, 1.0, eyeDist);
+        float lidAngle   = mix(-1.5708, 1.5708, blink);
+        vec3  lidNormal  = vec3(0.0, cos(lidAngle), sin(lidAngle));
+        float blinkMask  = smoothstep(-0.15, 0.15, dot(eyeNormal, lidNormal));
+
+        // Lid sun contribution
+        float lidShading  = eyeAmbientFloor + (1.0 - eyeAmbientFloor) * eyeSunDiffuse;
+        vec3  lidSunColor = mix(scleraColor, orbColor.rgb, 0.75) * lidShading;
+        lidSunColor       *= mix(1.0, 0.1, nightFactor);
+
+        // Lid lamp contribution
+        vec3 lidLampColor = orbColor.rgb * (0.05 + 0.25 * eyeLampDiffuse) * lampStrength;
+
+        vec3 lidColor = lidSunColor + lidLampColor;
         eyeColor = mix(eyeColor, lidColor, blinkMask);
+
         finalColor = mix(eyeColor, finalColor, limbBlend);
     }
 

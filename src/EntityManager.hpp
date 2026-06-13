@@ -35,6 +35,7 @@ class EntityManager
     soa::ComponentArray<CCamera> m_compCamera;
     soa::ComponentArray<CInput> m_compInput;
     soa::ComponentArray<COrb> m_compOrb;
+    soa::ComponentArray<CEyes> m_compEyes;
 
     static constexpr uint32_t INVALID_INDEX = std::numeric_limits<uint32_t>::max();
 
@@ -128,7 +129,7 @@ public:
         if (m_compCamera.has(h)) m_compCamera.remove(h);
         if (m_compInput.has(h)) m_compInput.remove(h);
         if (m_compOrb.has(h)) m_compOrb.remove(h);
-
+        if (m_compEyes.has(h)) m_compEyes.remove(h);
         swapRemoveFromTagList(h);
         swapRemoveFromEntityList(h);
 
@@ -197,6 +198,27 @@ public:
             {
                 CTransform3D& transform = m_compTransform.get(h);
                 func(h, transform, orbData);
+            }
+        });
+    }
+
+    // Eyes
+    void addEyes(SoAEntityHandle h, const CEyes& e) { if (!m_soaPool.valid(h)) return; auto v = e; m_compEyes.add(h, v); }
+    bool hasEyes(SoAEntityHandle h) const { return m_compEyes.has(h); }
+    CEyes& getEyes(SoAEntityHandle h) { return m_compEyes.get(h); }
+    void removeEyes(SoAEntityHandle h) { m_compEyes.remove(h); }
+    template<typename F> void forEachEyes(F&& f) { m_compEyes.each([this,&f](uint32_t entIndex, CEyes& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
+    template<typename F>
+    void forEachOrbWithComponents(F&& func)
+    {
+        m_compOrb.each([&](uint32_t entIndex, COrb& orbData)
+        {
+            SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex);
+            if (m_compTransform.has(h))
+            {
+                CTransform3D& transform = m_compTransform.get(h);
+                CEyes*        eyes      = m_compEyes.has(h) ? &m_compEyes.get(h) : nullptr;
+                func(h, transform, orbData, eyes);
             }
         });
     }
