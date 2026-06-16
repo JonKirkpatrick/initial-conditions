@@ -25,10 +25,12 @@ uniform vec4        u_orbColor[64];
 uniform float       u_orbDepthNorm[64];   // the normalized depth into the scene
 uniform vec2        u_quadOrigin[64];     // top left of orb in screen space
 uniform vec2        u_texSize[64];        // diameter in pixels per orb
+uniform vec2        u_quadSize[64];
+uniform float       u_orbRadiusPx[64];
 uniform vec3        u_gazeDir[64];
 uniform vec3        u_orbForward[64];
 uniform float       u_hasTapetum[64];
-uniform vec4        u_tapetumColor[64];
+uniform vec3        u_tapetumColor[64];
 uniform float       u_pupilDilation[64];
 uniform float       u_eyelidClosure[64];
 
@@ -119,6 +121,7 @@ void main()
     
     vec2 quadOrigin = u_quadOrigin[orbIndex];
     vec2 texSize    = u_texSize[orbIndex];
+    vec2 quadSize   = u_quadSize[orbIndex];
     vec3 orbCenter  = u_orbCenterView[orbIndex];
     float depthNorm = u_orbDepthNorm[orbIndex];
     vec4 orbColor   = u_orbColor[orbIndex];
@@ -129,7 +132,8 @@ void main()
 
     // Local position inside the billboard quad (SFML coords)
     vec2 localSFML = fragScreenSFML - quadOrigin;
-    vec2 uv = localSFML / texSize;
+    vec2 uv = localSFML / quadSize;
+    float padding = (quadSize / texSize).x;
 
     // Per-pixel occlusion using screen position
     vec2 fragScreenUv = fragScreenSFML / u_viewportSize;
@@ -158,17 +162,14 @@ void main()
     vec3 U  = cross(N, R);
 
     vec3 orbForwardRaw = u_orbForward[orbIndex];
-    vec3 orbForward = normalize(vec3(dot(orbForwardRaw,R),dot(orbForwardRaw,U),dot(orbForwardRaw,N)));
+    vec3 orbForward    = normalize(vec3(dot(orbForwardRaw, R), dot(orbForwardRaw, U), dot(orbForwardRaw, N)));
 
-    vec2 pos = (uv - vec2(0.5)) * 2.0;
+    vec3 gazeDirRaw = u_gazeDir[orbIndex];
+    vec3 gazeDir    = normalize(vec3(dot(gazeDirRaw, R), dot(gazeDirRaw, U), dot(gazeDirRaw, N)));
+
+    vec2 pos = (uv - vec2(0.5)) * 2.0 * padding;
     float dist = length(pos);
-    
-    if (dist > 1.0) {
-        discard;
-    }
-    
-    float z = sqrt(1.0 - dist * dist);
-    vec3 normal = normalize(vec3(pos.x, -pos.y, z));
+
     vec3 leftDir, rightDir;
     eyeDirections(orbForward,
                 radians(22.5), radians(30.0),
@@ -178,21 +179,26 @@ void main()
     vec2 leftCenter  = vec2(leftDir.x,  -leftDir.y);
     vec2 rightCenter = vec2(rightDir.x, -rightDir.y);
 
-    float eyeRadius = 1.0 / 4.0; // tune this
-    bool  hasTapetum   = (u_hasTapetum[orbIndex] < 0.5)? false:true;
-    // bool hasTapetum = true;
-    vec3  tapetumColor = u_tapetumColor[orbIndex].rgb;
-    // vec3 tapetumColor = vec3(1.0,0.0,0.0);
-
-    float leftBodyZ  = sqrt(max(0.0, 1.0 - dot(leftCenter,  leftCenter)));
-    float rightBodyZ = sqrt(max(0.0, 1.0 - dot(rightCenter, rightCenter)));
+    float eyeRadius = 1.0 / 4.0;
 
     bool leftHit, rightHit;
     float leftZ  = eyeSurfaceZ(leftCenter,  pos, eyeRadius, leftHit);
     float rightZ = eyeSurfaceZ(rightCenter, pos, eyeRadius, rightHit);
 
-    // body surface z at this fragment
-    float bodyZ = z; // already computed above
+    if (dist > 1.0 && !leftHit && !rightHit) discard;
+    
+    bool onSphere = dist <= 1.0;
+    float z       = onSphere ? sqrt(1.0 - dist * dist) : 0.0;
+    vec3 normal   = onSphere ? normalize(vec3(pos.x, -pos.y, z)) : vec3(0.0, 0.0, 1.0);
+    float bodyZ   = z;
+
+    bool hasTapetum   = (u_hasTapetum[orbIndex] < 0.5)? false:true;
+    // bool hasTapetum = true;
+    vec3  tapetumColor = u_tapetumColor[orbIndex].xyz;
+    // vec3 tapetumColor = vec3(1.0,0.0,0.0);
+
+    float leftBodyZ  = sqrt(max(0.0, 1.0 - dot(leftCenter,  leftCenter)));
+    float rightBodyZ = sqrt(max(0.0, 1.0 - dot(rightCenter, rightCenter)));
     
     // Two-source sphere shading: sun + camera headlamp.
     vec3 sunLightDir = normalize(sunDir);
@@ -263,7 +269,7 @@ void main()
     vec2 eyeLocalPos = vec2(0.0);
     float eyeCenterX = 0.0;
 
-    if (leftHit && (leftZ + leftBodyZ) > bodyZ) {
+    if (leftHit && leftZ > (bodyZ-leftBodyZ)) {
         inEye = true;
         eyeLocalPos = pos - leftCenter;
         eyeNormal = normalize(vec3(eyeLocalPos.x, -eyeLocalPos.y, leftZ));
@@ -280,12 +286,11 @@ void main()
 
         // === Eye parameters (promote to uniforms when ready) ===
         float dilation       = u_pupilDilation[orbIndex];
-        // float dilation = 0.5;
-        vec3 lookDir        = u_gazeDir[orbIndex];
-        // vec3 lookDir = vec3(0.0,0.0,1.0);
+        vec3 lookDir         = gazeDir;
         float pupilRadiusMin = 0.20;
         float pupilRadiusMax = 0.60;
         float pupilRadius    = mix(pupilRadiusMin, pupilRadiusMax, dilation);
+
 
         // Sclera
         vec3 scleraColor = vec3(0.92, 0.90, 0.88);
@@ -332,7 +337,7 @@ void main()
         eyeColor = eyeSunColor + eyeLampColor + tapetumContrib;
 
         // === Lid ===
-        float limbBlend  = smoothstep(0.85, 1.0, eyeDist);
+        float limbBlend  = 0.0;
         float lidAngle   = mix(-1.5708, 1.5708, blink);
         vec3  lidNormal  = vec3(0.0, cos(lidAngle), sin(lidAngle));
         float blinkMask  = smoothstep(-0.15, 0.15, dot(eyeNormal, lidNormal));

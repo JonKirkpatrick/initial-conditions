@@ -58,6 +58,7 @@ class Scene_IC_Camp : public Scene {
         std::vector<float>           depthNorms;
         std::vector<sf::Vector2f>    quadOrigins;
         std::vector<sf::Vector2f>    texSizes;
+        std::vector<sf::Vector2f>    quadSizes;
         std::vector<sf::Vector3f>    gazes;
         std::vector<sf::Vector3f>    forwards;
         std::vector<float>           hasTapetums;
@@ -71,6 +72,7 @@ class Scene_IC_Camp : public Scene {
             depthNorms.clear();
             quadOrigins.clear();
             texSizes.clear();
+            quadSizes.clear();
             gazes.clear();
             forwards.clear();
             hasTapetums.clear();
@@ -86,6 +88,7 @@ class Scene_IC_Camp : public Scene {
             depthNorms.reserve(n);
             quadOrigins.reserve(n);
             texSizes.reserve(n);
+            quadSizes.reserve(n);
             gazes.reserve(n);
             forwards.reserve(n);
             hasTapetums.reserve(n);

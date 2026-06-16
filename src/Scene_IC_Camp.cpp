@@ -934,9 +934,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         sf::Vector3f gaze = Camera::normalize({ gazeDist(rng), 0.0f, gazeDist(rng) });
         bool         hasTapetum  = tapetumChance(rng) == 0;
         sf::Color    tapetumCol  = tapetumPalette[tapetumColorIdx(rng)];
-
         CEyes eyes(gaze, dilationDist(rng), closureDist(rng), hasTapetum, tapetumCol);
-
         spawnOrbFauna(hexQ, hexR, color, radius, bobRate, bobMag, eyes);
         auto& eyesComp = m_entityManager.getEyes(m_entityManager.getEntities().back());
         ++spawned;
@@ -1294,6 +1292,7 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
         shader.setUniformArray("u_orbDepthNorm",    batch.depthNorms.data(),      size);
         shader.setUniformArray("u_quadOrigin",      batch.quadOrigins.data(),     size);
         shader.setUniformArray("u_texSize",         batch.texSizes.data(),        size);
+        shader.setUniformArray("u_quadSize",        batch.quadSizes.data(),       size);
         shader.setUniformArray("u_gazeDir",         batch.gazes.data(),           size);
         shader.setUniformArray("u_orbForward",      batch.forwards.data(),        size);
         shader.setUniformArray("u_hasTapetum",      batch.hasTapetums.data(),     size);
@@ -1341,18 +1340,20 @@ void Scene_IC_Camp::renderOrbs()
 
     for (int i = 0; i < m_orbDrawItemCount; ++i)
     {
+        float padding = 1.5f;
         const auto& item = m_orbDrawItems[i];
         const float r = item.radiusPx;
-        const sf::Vector2f origin(item.screenPos.x - r, item.screenPos.y - r);
+        const sf::Vector2f origin(item.screenPos.x - r * padding, item.screenPos.y - r * padding);
         const sf::Vector2f size(r * 2.f, r * 2.f);
+        const sf::Vector2f expandedSize = size * padding; // expand the quad to remove clipping
 
         uint8_t idx = static_cast<uint8_t>(batch.centersView.size());
         sf::Color indexColor(idx, 0, 0, 255);
 
         sf::Vertex v1(origin, indexColor);
-        sf::Vertex v2({origin.x + size.x, origin.y}, indexColor);
-        sf::Vertex v3({origin.x + size.x, origin.y + size.y}, indexColor);
-        sf::Vertex v4({origin.x, origin.y + size.y}, indexColor);
+        sf::Vertex v2({origin.x + expandedSize.x, origin.y}, indexColor);
+        sf::Vertex v3({origin.x + expandedSize.x, origin.y + expandedSize.y}, indexColor);
+        sf::Vertex v4({origin.x, origin.y + expandedSize.y}, indexColor);
 
         vertices.append(v1);
         vertices.append(v2);
@@ -1368,6 +1369,7 @@ void Scene_IC_Camp::renderOrbs()
         batch.depthNorms.push_back(item.distNorm);
         batch.quadOrigins.push_back(origin);
         batch.texSizes.emplace_back(size);
+        batch.quadSizes.push_back(expandedSize);
         batch.gazes.push_back(item.gazeDirection);
         batch.forwards.push_back(item.forward);
         batch.hasTapetums.push_back(item.hasTapetum);
@@ -1566,7 +1568,7 @@ void Scene_IC_Camp::sortOrbs()
             (dist - camData.nearPlane) / (camData.farPlane - camData.nearPlane), 0.0f, 1.0f);
 
         // Compute camera forward vector for eye gaze projection in the shader
-        sf::Vector3f testForward(0.0f, 0.0f, 1.0f);
+        sf::Vector3f testForward(0.0f, 0.0f, -1.0f);
         sf::Vector3f forward = Camera::worldToCamera(testForward, camTransform.pitch, camTransform.yaw, camTransform.roll);
         forward.y = 0.0f;
         forward = Camera::normalize(forward);
