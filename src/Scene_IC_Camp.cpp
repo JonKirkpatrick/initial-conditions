@@ -901,7 +901,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     std::uniform_real_distribution<float> radiusDist(20.0f, 80.0f);
     std::uniform_real_distribution<float> bobRateDist(0.5f, 3.0f);
     std::uniform_real_distribution<float> bobMagDist(4.0f, 12.0f);
-    std::uniform_real_distribution<float> gazeDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> gazeDeviationDist(-0.32f, 0.32f);
     std::uniform_real_distribution<float> dilationDist(0.0f, 1.0f);
     std::uniform_real_distribution<float> closureDist(0.0f, 1.0f);   // mostly open
     std::uniform_int_distribution<int>    tapetumChance(0, 2);        // 1 in 3 have tapetum
@@ -931,7 +931,10 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         float bobMag  = bobMagDist(rng);
 
         // Random gaze direction, normalised in XZ — orbs look around horizontally
-        sf::Vector3f gaze = Camera::normalize({ gazeDist(rng), 0.0f, gazeDist(rng) });
+        sf::Vector3f baseForward = {0.0f, 0.0f, 1.0f};
+        sf::Vector3f gazeOffset = { gazeDeviationDist(rng), gazeDeviationDist(rng), 0.0f };
+        sf::Vector3f gaze = Camera::normalize(baseForward + gazeOffset);
+        // sf::Vector3f gaze = Camera::normalize({ gazeDeviationDist(rng), 0.0f, gazeDeviationDist(rng) });;
         bool         hasTapetum  = tapetumChance(rng) == 0;
         sf::Color    tapetumCol  = tapetumPalette[tapetumColorIdx(rng)];
         CEyes eyes(gaze, dilationDist(rng), closureDist(rng), hasTapetum, tapetumCol);
