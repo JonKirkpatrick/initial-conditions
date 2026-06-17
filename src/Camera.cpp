@@ -4,6 +4,14 @@
 
 namespace Camera {
 
+    sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b) {
+        return sf::Vector3f(
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x
+        );
+    }
+
     sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float roll) {
         float cp = std::cos(pitch), sp = std::sin(pitch);
         float cy = std::cos(yaw),   sy = std::sin(yaw);
@@ -83,6 +91,20 @@ namespace Camera {
         float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
         float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
         return sf::Vector3f(-sy * cp, sp, -cy * cp);
+    }
+
+    sf::Vector3f getRight(const CTransform3D& t) {
+        // Right is the camera's X axis in world space
+        // Derived by transforming world X through the inverse camera rotation
+        float cy = std::cos(t.yaw), sy = std::sin(t.yaw);
+        float cr = std::cos(t.roll), sr = std::sin(t.roll);
+        return normalize(sf::Vector3f(cy * cr, sr, -sy * cr));
+    }
+
+    sf::Vector3f getUp(const CTransform3D& t) {
+        // Up is the cross product of right and forward
+        // ensuring an orthonormal basis
+        return normalize(cross(getForward(t), getRight(t)));
     }
 
     sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll) {

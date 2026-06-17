@@ -138,13 +138,13 @@ protected:
     // Rendering — Shaders
     // =========================================================================
 
-    sf::Shader& m_terrainShader       = Assets::Instance().getShader("Terrain");
+    sf::Shader& m_terrainShader     = Assets::Instance().getShader("Terrain");
     sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
     sf::Shader& m_sky               = Assets::Instance().getShader("Sky");
     sf::Shader& m_orbShader         = Assets::Instance().getShader("Orb");
 
     // =========================================================================
-    // Rendering — Render Textures
+    // Rendering — Render Textures and OpenGL Resources
     // =========================================================================
 
     sf::RenderTexture m_renderTexture;
@@ -164,7 +164,10 @@ protected:
     GLuint m_gridVBO        = 0;
     GLuint m_gridEBO        = 0;
     GLuint m_gridIndexCount = 0;
-    GLuint m_bakeProgram    = 0;
+    GLuint m_bakeProgram    = Assets::Instance().getGLProgram("Bake");
+
+    // New sphere impostor pipeline
+    GLuint m_demoSphereProgram = Assets::Instance().getGLProgram("DemoSphere");
     
 
     // =========================================================================
@@ -283,6 +286,7 @@ protected:
     void runBakePass();
     void runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix);
     void renderOrbs();
+    void renderDemoSphere();
 
     // =========================================================================
     // Shader Uniform Upload

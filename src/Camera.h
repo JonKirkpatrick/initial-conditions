@@ -18,10 +18,12 @@ namespace Camera
     sf::Vector3f screenToWorld(const CTransform3D& cameraTransform, const CCamera& cameraData, sf::Vector2f screen);
     sf::Vector3f getForwardXZ(const CTransform3D& cameraTransform);
     sf::Vector3f getForward(const CTransform3D& cameraTransform);
+    sf::Vector3f getRight(const CTransform3D& cameraTransform);
+    sf::Vector3f getUp(const CTransform3D& cameraTransform);
+    sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b);
     sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll); // legacy alias for worldToCamera
     sf::Vector3f rotateInverse(const sf::Vector3f& v, float pitch, float yaw, float roll); // legacy alias for cameraToWorld
     sf::Vector3f normalize(const sf::Vector3f& v);
-    // Compute inverse rotation matrix once per frame (cheaper than per-pixel trig)
     std::array<std::array<float, 3>, 3> getWorldToCamMatrix(float pitch, float yaw, float roll);
     std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c);
     std::array<float, 16> getViewMatrix(const CTransform3D& t);

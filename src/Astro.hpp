@@ -153,7 +153,7 @@ namespace Astro {
     {
         double T = astroTime.julianCenturies;
 
-        // ── Fundamental arguments (Meeus chapter 47) ────────────────────────────
+        // == Fundamental arguments (Meeus chapter 47) ============================
         double Lm = std::fmod(218.3164477 + 481267.88123421 * T, 360.0); // Moon's mean longitude
         double M  = std::fmod(134.9633964 + 477198.8675055  * T, 360.0); // Moon's mean anomaly
         double Ms = std::fmod(357.5291092 + 35999.0502909   * T, 360.0); // Sun's mean anomaly
@@ -165,7 +165,7 @@ namespace Astro {
         double MsR = toRad(Ms);
         double FR  = toRad(F);
 
-        // ── Ecliptic longitude (degrees) — truncated Meeus series ───────────────
+        // == Ecliptic longitude (degrees) — truncated Meeus series ===============
         double dL = 6288774.0 * std::sin(MR)
                   + 1274027.0 * std::sin(2.0 * LmR - MR)
                   +  658314.0 * std::sin(2.0 * LmR)
@@ -181,7 +181,7 @@ namespace Astro {
                   -   30383.0 * std::sin(MsR + MR);
         dL /= 1000000.0;
 
-        // ── Ecliptic latitude (degrees) ──────────────────────────────────────────
+        // == Ecliptic latitude (degrees) ==========================================
         double dB = 5128122.0 * std::sin(FR)
                   +  280602.0 * std::sin(MR  + FR)
                   +  277693.0 * std::sin(MR  - FR)
@@ -197,11 +197,11 @@ namespace Astro {
         double eclLonR = toRad(std::fmod(Lm + dL, 360.0));
         double eclLatR = toRad(dB);
 
-        // ── Obliquity of ecliptic ────────────────────────────────────────────────
+        // == Obliquity of ecliptic ================================================
         double eps  = 23.439291111 - 0.013004167 * T;
         double epsR = toRad(eps);
 
-        // ── Ecliptic to equatorial (RA/Dec) ──────────────────────────────────────
+        // == Ecliptic to equatorial (RA/Dec) ======================================
         double sinDec = std::sin(eclLatR) * std::cos(epsR)
                       + std::cos(eclLatR) * std::sin(epsR) * std::sin(eclLonR);
         double decRad = std::asin(std::clamp(sinDec, -1.0, 1.0));
@@ -213,15 +213,15 @@ namespace Astro {
             raRad += 2.0 * PI;
         }
 
-        // ── RA/Dec to Hour Angle ─────────────────────────────────────────────────
+        // == RA/Dec to Hour Angle =================================================
         double raDeg = toDeg(raRad);
         double haDeg = std::fmod(astroTime.lst - raDeg + 360.0, 360.0);
         float haRad  = static_cast<float>(toRad(haDeg));
 
-        // ── Hour Angle + Dec to Alt/Az ──────────────────────────────────────────
+        // == Hour Angle + Dec to Alt/Az ==========================================
         AltAz altaz = computeAltAz(haRad, static_cast<float>(decRad), static_cast<float>(toRad(latitude)));
 
-        // ── Convert to World Vector ──────────────────────────────────────────────
+        // == Convert to World Vector ==============================================
         return altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
     }
 } // namespace Astro

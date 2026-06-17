@@ -75,7 +75,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_topdownWorldMin = { worldMinCoord, worldMinCoord };
     m_topdownWorldSize = { worldSize, worldSize };
     m_gridColor = Theme::color("cerulean");
-    m_bakeProgram = Assets::Instance().getGLProgram("Bake");
     GLint linked;
     glGetProgramiv(m_bakeProgram, GL_LINK_STATUS, &linked);
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
@@ -409,6 +408,7 @@ void Scene_IC_Camp::sRender() {
     window.draw(backgroundSprite);
     window.draw(finalSprite);
     renderOrbs();
+    renderDemoSphere();
     m_hud->render(window, false);
 }
 
@@ -1235,7 +1235,7 @@ void Scene_IC_Camp::updateMinimapTexture()
     const float center   = texSize * 0.5f;
     const float worldRadius = 25600.f;
 
-    // ── Draw the hillshaded topo layer via shader ──────────────────────────
+    // == Draw the hillshaded topo layer via shader ==========================
     m_minimapTexture.clear(sf::Color::Transparent);
 
     sf::RectangleShape fullQuad({texSize, texSize});
@@ -1323,6 +1323,93 @@ void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& b
     shader.setUniform("headlampIntensity", 2.5f);
     shader.setUniform("headlampRange", 8500.0f);
     shader.setUniform("headlampConeCos", 1.0f);
+}
+
+void Scene_IC_Camp::renderDemoSphere()
+{
+    auto& window       = m_game.window();
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& camData      = m_entityManager.getCamera(m_camera);
+
+    sf::Vector3f camFwd   = -Camera::getForward(camTransform);
+    sf::Vector3f camRight = Camera::getRight(camTransform);
+    sf::Vector3f camUp    = Camera::getUp(camTransform);
+    sf::Vector3f sunDir   = m_astroState.sunDirection;
+
+    // Hardcoded demo orb
+    sf::Vector3f orbCentre  = { 0.f, heightAt(0.0f, -500.0f) + 150.f, -500.f };
+    float        orbRadius  = 150.f;
+    sf::Vector3f orbForward = {  0.f, 0.f, -1.f }; // South
+    sf::Vector3f orbRight   = {  1.f, 0.f,  0.f }; // West
+    sf::Vector3f orbUp      = {  0.f, 1.f,  0.f }; // Up
+
+    // ==================== SFML STATE HANDOFF ====================
+    window.setActive(true);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);  // draw to window
+    sf::Vector2u windowSize = m_game.window().getSize();
+    glViewport(0, 0, windowSize.x, windowSize.y);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    GLuint prog = m_demoSphereProgram;
+    glUseProgram(prog);
+    GLint linked = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[1024];
+        glGetProgramInfoLog(prog, 1024, nullptr, log);
+        std::cerr << "DemoSphere link error: " << log << std::endl;
+    }
+    
+    // Camera uniforms
+    glUniform2f(glGetUniformLocation(prog, "u_viewportSize"),
+        static_cast<float>(camData.viewportSize.x),
+        static_cast<float>(camData.viewportSize.y));
+    glUniform1f(glGetUniformLocation(prog, "u_fovY"),          camData.fovY);
+    glUniform3f(glGetUniformLocation(prog, "u_cameraPos"),     camTransform.pos.x, camTransform.pos.y, camTransform.pos.z);
+    glUniform3f(glGetUniformLocation(prog, "u_cameraForward"), camFwd.x,   camFwd.y,   camFwd.z);
+    glUniform3f(glGetUniformLocation(prog, "u_cameraRight"),   camRight.x, camRight.y, camRight.z);
+    glUniform3f(glGetUniformLocation(prog, "u_cameraUp"),      camUp.x,    camUp.y,    camUp.z);
+    glUniform3f(glGetUniformLocation(prog, "u_sunDir"),        sunDir.x,   sunDir.y,   sunDir.z);
+
+    // Orb uniforms
+    glUniform3f(glGetUniformLocation(prog, "u_orbCentre"),  orbCentre.x,  orbCentre.y,  orbCentre.z);
+    glUniform1f(glGetUniformLocation(prog, "u_orbRadius"),  orbRadius);
+    glUniform3f(glGetUniformLocation(prog, "u_orbForward"), orbForward.x, orbForward.y, orbForward.z);
+    glUniform3f(glGetUniformLocation(prog, "u_orbRight"),   orbRight.x,   orbRight.y,   orbRight.z);
+    glUniform3f(glGetUniformLocation(prog, "u_orbUp"),      orbUp.x,      orbUp.y,      orbUp.z);
+
+    // Full screen quad
+    static const float quadVerts[] = {
+        -1.f, -1.f,
+         1.f, -1.f,
+         1.f,  1.f,
+        -1.f, -1.f,
+         1.f,  1.f,
+        -1.f,  1.f,
+    };
+
+    GLuint vao, vbo;
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVerts), quadVerts, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // ==================== CLEANUP RESTORATION ====================
+    glDisableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
+    glUseProgram(0);
+    // =============================================================
 }
 
 void Scene_IC_Camp::renderOrbs()

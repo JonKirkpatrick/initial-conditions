@@ -12,7 +12,7 @@ uniform float u_heightMax;
 
 out vec4 fragColor;
 
-// ── Colour palette ─────────────────────────────────────────────────────────
+// == Colour palette =========================================================
 
 vec3 topoColour(float normHeight, float shade) {
     // Classic topo palette — 6 stops from lowland green to peak white
@@ -100,7 +100,7 @@ vec3 computeNormal(vec2 xz) {
     return normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
+// == Main ===================================================================
 void main() {
     vec2 uv = (gl_FragCoord.xy / u_texSize) * 2.0 - 1.0;
     float r = length(uv);
