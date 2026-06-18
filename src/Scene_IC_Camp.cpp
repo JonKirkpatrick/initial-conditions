@@ -70,6 +70,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_bakeTexture.setSmooth(false);
     m_topdownTexture = Assets::Instance().getTexture("Test1");
     m_topdownImage = m_topdownTexture.copyToImage();
+    m_wolfTexture = Assets::Instance().getTexture("Croc");
+    m_wolfHeight = Assets::Instance().getTexture("CrocHeight");
     float worldSize = Topography::BASE_SIZE;
     float worldMinCoord = -worldSize / 2.0f;
     m_topdownWorldMin = { worldMinCoord, worldMinCoord };
@@ -83,7 +85,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnPlayer();
     spawnCamera();
     updateCamera(0.001f);
-    spawnDebugOrbs(8000);
+    spawnDebugOrbs(1);
 
     m_entityManager.update();
 
@@ -1340,7 +1342,7 @@ void Scene_IC_Camp::renderDemoSphere()
     sf::Vector3f orbCentre  = { 0.f, heightAt(0.0f, -500.0f) + 150.f, -500.f };
     float        orbRadius  = 150.f;
     sf::Vector3f orbForward = {  0.f, 0.f, -1.f }; // South
-    sf::Vector3f orbRight   = {  1.f, 0.f,  0.f }; // West
+    sf::Vector3f orbRight   = {  -1.f, 0.f,  0.f }; // West
     sf::Vector3f orbUp      = {  0.f, 1.f,  0.f }; // Up
 
     // ==================== SFML STATE HANDOFF ====================
@@ -1361,7 +1363,17 @@ void Scene_IC_Camp::renderDemoSphere()
         glGetProgramInfoLog(prog, 1024, nullptr, log);
         std::cerr << "DemoSphere link error: " << log << std::endl;
     }
-    
+    // Texture bindings
+    GLint texLoc = glGetUniformLocation(prog, "u_wolfTex");
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_wolfTexture.getNativeHandle());
+    glUniform1i(texLoc, 0);
+    GLint heightTexLoc = glGetUniformLocation(prog, "u_wolfHeightTex");
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_wolfHeight.getNativeHandle());
+    glUniform1i(heightTexLoc, 1);
+
+
     // Camera uniforms
     glUniform2f(glGetUniformLocation(prog, "u_viewportSize"),
         static_cast<float>(camData.viewportSize.x),
@@ -1409,6 +1421,16 @@ void Scene_IC_Camp::renderDemoSphere()
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
     glUseProgram(0);
+
+    // Unbind textures — SFML needs unit 0 clean for HUD rendering
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Return SFML to a known state
+    sf::Shader::bind(nullptr);
+    sf::Texture::bind(nullptr);
     // =============================================================
 }
 

@@ -7,6 +7,10 @@ Texture   HLOn           images/gui_elements/HL_On.png
 Texture   HLAuto         images/gui_elements/HL_Auto.png
 Texture   Moon           images/skymap/Moon_Cropped.png
 Texture   Test1          images/terrain/set5x5.png
+Texture   Wolf           images/species_textures/Wolf.jpg
+Texture   WolfHeight     images/species_textures/Wolf_height.png
+Texture   Croc           images/species_textures/Crocodile.png
+Texture   CrocHeight     images/species_textures/Crocodile_height.png
 Music     MusicTitle     music/title_menu.mp3
 Music     MusicTitleLate music/title_menu_late.mp3
 Music     MusicTopDown   music/top_down_music.mp3

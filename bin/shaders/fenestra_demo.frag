@@ -2,12 +2,9 @@
 
 // fenestra_demo.frag
 // Demo fragment shader for Fenestra.
-// Renders a single white sphere with three orientation dots:
-//   Red   — forward direction
-//   Green — up direction  
-//   Blue  — right direction
-// Verify: sphere should look correctly round with perspective,
-// dots should sit on the surface and rotate correctly with the orb.
+
+uniform sampler2D u_wolfTex;
+uniform sampler2D u_wolfHeightTex;
 
 // Camera uniforms
 uniform vec2  u_viewportSize;
@@ -40,20 +37,18 @@ struct Ray {
 // Reconstruct a world-space ray for this fragment from camera parameters.
 Ray reconstructRay(vec2 fragCoord)
 {
-    // Convert to NDC [-1, 1]
     vec2 ndc = (fragCoord / u_viewportSize) * 2.0 - 1.0;
-
-    // Account for aspect ratio and field of view
     float aspectRatio = u_viewportSize.x / u_viewportSize.y;
     float halfTanFov  = tan(u_fovY * 0.5);
 
-    // Build ray direction in world space from camera basis vectors
+    // Note: u_cameraForward is negated on upload (see renderDemoSphere).
+    // dir.z is flipped here to reconcile SFML/engine coordinate conventions
+    // with OpenGL's ray casting space. Both corrections are intentional.
     vec3 dir = normalize(
         u_cameraForward
         + ndc.x * aspectRatio * halfTanFov * u_cameraRight
         + ndc.y * halfTanFov  * u_cameraUp
     );
-
     dir.z = -dir.z;
 
     return Ray(u_cameraPos, dir);
@@ -96,14 +91,24 @@ SphereHit intersectSphere(Ray ray, vec3 centre, float radius)
     return result;
 }
 
-// == Dot marker helper =========================================================
-
-// Returns 1.0 if the surface normal is within angularRadius of the target
-// direction, 0.0 otherwise. Used to paint orientation dots on the sphere.
-float orientationDot(vec3 normal, vec3 targetDir, float angularRadius)
+vec3 normalFromHeightMap(vec2 uv, float strength)
 {
-    float cosAngle = dot(normalize(normal), normalize(targetDir));
-    return smoothstep(cos(angularRadius), cos(angularRadius * 0.5), cosAngle);
+    // Sample neighbouring texels to compute gradient
+    vec2 texelSize = vec2(1.0) / vec2(textureSize(u_wolfHeightTex, 0));
+    
+    float hL = texture(u_wolfHeightTex, uv + vec2(-texelSize.x, 0.0)).r;
+    float hR = texture(u_wolfHeightTex, uv + vec2( texelSize.x, 0.0)).r;
+    float hD = texture(u_wolfHeightTex, uv + vec2(0.0, -texelSize.y)).r;
+    float hU = texture(u_wolfHeightTex, uv + vec2(0.0,  texelSize.y)).r;
+
+    // Finite difference gradient
+    vec3 tangentNormal = normalize(vec3(
+        (hL - hR) * strength,
+        (hD - hU) * strength,
+        1.0
+    ));
+    
+    return tangentNormal;
 }
 
 // == Main ======================================================================
@@ -117,8 +122,8 @@ void main()
 
     // --- Eyeball Placement Geometry ---
     float eyeRadius  = u_orbRadius * 0.22; // Scale eyeballs relative to body size
-    float forwardPush = u_orbRadius * 0.85; // Push eyes toward the front face
-    float sideSpread  = u_orbRadius * 0.45; // Spread eyes out to the left/right sides
+    float forwardPush = u_orbRadius * 0.78; // Push eyes toward the front face
+    float sideSpread  = u_orbRadius * 0.35; // Spread eyes out to the left/right sides
     float verticalUp  = u_orbRadius * 0.35; // Elevate eyes slightly up from center
 
     // Combine basis vectors to find true 3D world space centers for both eyes
@@ -170,33 +175,93 @@ void main()
     
     vec3 baseColor = vec3(1.0);
 
-    if (hitType == 0) {
-        // We hit the main body: paint it white (or look up planet skins)
-        baseColor = vec3(1.0);
-        
-        // Keep your debug orientation dots painted strictly on the body shell
-        float dotRadius = radians(15.0);
-        float fwdDot   = orientationDot(finalHit.normal, u_orbForward, dotRadius);
-        float rightDot = orientationDot(finalHit.normal, u_orbRight,   dotRadius);
-        float upDot    = orientationDot(finalHit.normal, u_orbUp,      dotRadius);
+if (hitType == 0) {
+    vec3 localNorm = vec3(
+        dot(finalHit.normal, normalize(u_orbRight)),
+        dot(finalHit.normal, normalize(u_orbUp)),
+        dot(finalHit.normal, normalize(u_orbForward))
+    );
+    float u = (atan(localNorm.z, -localNorm.x) / 3.1415926535) * 0.5 + 0.5;
+    float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
+    vec2 uv = vec2(u, v);
 
-        baseColor = mix(baseColor, vec3(0.0, 0.0, 1.0), upDot);
-        baseColor = mix(baseColor, vec3(0.0, 1.0, 0.0), rightDot);
-        baseColor = mix(baseColor, vec3(1.0, 0.0, 0.0), fwdDot);
-    } 
+    // Eye positions in local space — starting from your values
+    float eyeForward = 1.00;
+    float eyeSide    = 0.48;   // try 0.37–0.40 if eyes feel too close together
+    float eyeUp      = 0.40;
+
+    vec3 leftEyeDir  = normalize(vec3( eyeSide, eyeUp, eyeForward));
+    vec3 rightEyeDir = normalize(vec3(-eyeSide, eyeUp, eyeForward));
+
+    float leftEyeU  = (atan(leftEyeDir.z, -leftEyeDir.x) / 3.1415926535) * 0.5 + 0.5;
+    float leftEyeV  = acos(clamp(leftEyeDir.y, -1.0, 1.0)) / 3.1415926535;
+    float rightEyeU = (atan(rightEyeDir.z, -rightEyeDir.x) / 3.1415926535) * 0.5 + 0.5;
+    float rightEyeV = acos(clamp(rightEyeDir.y, -1.0, 1.0)) / 3.1415926535;
+
+    vec2 leftUV  = vec2(leftEyeU, leftEyeV);
+    vec2 rightUV = vec2(rightEyeU, rightEyeV);
+
+    // Distances
+    float distL = length(uv - leftUV);
+    float distR = length(uv - rightUV);
+
+    // Tighter, separate sockets
+    float maskL = smoothstep(0.0, 0.08, distL);   // tighter than 0.12
+    float maskR = smoothstep(0.0, 0.08, distR);
+    float eyeMask = min(maskL, maskR);
+
+    // === Production look (remove harsh green) ===
+    vec3 furColor = texture(u_wolfTex, uv).rgb;
+    // Softer darkening + thinning with quadratic falloff
+    baseColor = mix(vec3(0.20, 0.15, 0.11), furColor, eyeMask * eyeMask);
+
+    // === Socket depression ===
+    float socketDepth = max(
+        1.0 - smoothstep(0.0, 0.13, distL),
+        1.0 - smoothstep(0.0, 0.13, distR)
+    );
+
+    vec3 tangentNormal = normalFromHeightMap(uv, 5.0);
+    tangentNormal.z += socketDepth * -0.32;   // slightly softer depth
+    tangentNormal = normalize(tangentNormal);
+
+    vec3 T = normalize(u_orbRight);
+    vec3 B = normalize(u_orbUp);
+    vec3 N = normalize(finalHit.normal);
+    vec3 worldNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
+
+    diffuse = max(dot(worldNormal, sunDir), 0.0);
+}
     else {
         // We hit an eyeball! Paint it black (or design a pupil using the eye's local normal)
         vec3 eyeCentre = (hitType == 1) ? leftEyeCentre : rightEyeCentre;
         
         // Find the local normal of the eyeball itself
         vec3 eyeLocalNorm = normalize(finalHit.pos - eyeCentre);
+        // How far from the eye centre are we, normalised [0,1]
+        float eyeEdge = length(eyeLocalNorm.xy) / 1.0;  // 1.0 at the silhouette
+
+        // Sample fur texture at the same UV the body would have at this point
+        // Use the world position of the eye fragment projected onto the body's UV space
+        vec3 eyeSurfaceWorld = finalHit.pos;
+        vec3 bodyLocalNorm = normalize(eyeSurfaceWorld - u_orbCentre);
+        vec3 furLocalNorm = vec3(
+            dot(bodyLocalNorm, normalize(u_orbRight)),
+            dot(bodyLocalNorm, normalize(u_orbUp)),
+            dot(bodyLocalNorm, normalize(u_orbForward))
+        );
+        float furU = (atan(furLocalNorm.z, -furLocalNorm.x) / 3.1415926535) * 0.5 + 0.5;
+        float furV = acos(clamp(furLocalNorm.y, -1.0, 1.0)) / 3.1415926535;
+        vec3 furSample = texture(u_wolfTex, vec2(furU, furV)).rgb;
+
+        // Blend fur onto the eye edge
+        float furBlend = smoothstep(0.6, 1.0, eyeEdge);
+        baseColor = mix(baseColor, furSample, furBlend);
         
         // Create a basic forward-facing pupil on the eye surface
         float pupilDot = dot(eyeLocalNorm, u_orbForward);
-        if (pupilDot > 0.85) {
+        if (pupilDot > 0.95) {
             baseColor = vec3(0.0); // Black pupil
-        } else {
-            baseColor = vec3(0.9, 0.9, 0.85); // Creamy white sclera
         }
     }
 
