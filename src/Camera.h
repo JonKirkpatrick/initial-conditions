@@ -18,6 +18,7 @@ namespace Camera
     sf::Vector3f screenToWorld(const CTransform3D& cameraTransform, const CCamera& cameraData, sf::Vector2f screen);
     sf::Vector3f getForwardXZ(const CTransform3D& cameraTransform);
     sf::Vector3f getForward(const CTransform3D& cameraTransform);
+    sf::Vector3f getForwardNeg(const CTransform3D& cameraTransform);
     sf::Vector3f getRight(const CTransform3D& cameraTransform);
     sf::Vector3f getUp(const CTransform3D& cameraTransform);
     sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b);

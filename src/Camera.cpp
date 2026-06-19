@@ -93,6 +93,13 @@ namespace Camera {
         return sf::Vector3f(-sy * cp, sp, -cy * cp);
     }
 
+    // I don't know entirely why I need this, but the sphere shader misbehaves otherwise.
+    sf::Vector3f getForwardNeg(const CTransform3D& t) {
+        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
+        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
+        return sf::Vector3f(sy * cp, -sp, cy * cp);
+    }
+
     sf::Vector3f getRight(const CTransform3D& t) {
         // Right is the camera's X axis in world space
         // Derived by transforming world X through the inverse camera rotation

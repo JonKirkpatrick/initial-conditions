@@ -4,6 +4,7 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/OpenGL.hpp>
 #include <SFML/Graphics/CoordinateType.hpp>
+#include <glm/glm.hpp>
 #include <cmath>
 #include "imgui.h"
 #include "imgui-SFML.h"
@@ -25,6 +26,10 @@ static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matr
     };
 
     return sf::Glsl::Mat3(flattened);
+}
+
+static glm::vec3 toGLMVec3(const sf::Vector3f& v) {
+    return glm::vec3(v.x, v.y, v.z);
 }
 
 static sf::Vector3f forwardFromTransform(const CTransform3D& transform)
@@ -1333,17 +1338,19 @@ void Scene_IC_Camp::renderDemoSphere()
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& camData      = m_entityManager.getCamera(m_camera);
 
-    sf::Vector3f camFwd   = -Camera::getForward(camTransform);
-    sf::Vector3f camRight = Camera::getRight(camTransform);
-    sf::Vector3f camUp    = Camera::getUp(camTransform);
-    sf::Vector3f sunDir   = m_astroState.sunDirection;
+    glm::vec3 camPos   = toGLMVec3(camTransform.pos);
+    glm::vec3 camFwd   = toGLMVec3(Camera::getForwardNeg(camTransform));
+    glm::vec3 camRight = toGLMVec3(Camera::getRight(camTransform));
+    glm::vec3 camUp    = toGLMVec3(Camera::getUp(camTransform));
+    glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);
 
     // Hardcoded demo orb
-    sf::Vector3f orbCentre  = { 0.f, heightAt(0.0f, -500.0f) + 150.f, -500.f };
-    float        orbRadius  = 150.f;
-    sf::Vector3f orbForward = {  0.f, 0.f, -1.f }; // South
-    sf::Vector3f orbRight   = {  -1.f, 0.f,  0.f }; // West
-    sf::Vector3f orbUp      = {  0.f, 1.f,  0.f }; // Up
+    glm::vec4 orbCentreAndRadius = { 0.f, heightAt(0.0f, -500.0f) + 150.f, -500.f, 150.f };
+    glm::vec4 orbForwardAndDilation = {  0.f, 0.f, 1.f, 0.5f };
+    glm::vec4 orbRightAndEyelidClosure  = {  -1.f, 0.f,  0.f, 0.0f };
+    glm::vec4 orbUp      = {  0.f, 1.f,  0.f, 1.f }; // Up
+    glm::vec4 gazeDir = { -0.5f, 0.5f, 0.f, 0.f };
+    glm::vec4 tapetumColourAndPresence = { 1.f, 0.8f, 0.6f, 1.f }; // Warm golden tapetum
 
     // ==================== SFML STATE HANDOFF ====================
     window.setActive(true);
@@ -1363,6 +1370,7 @@ void Scene_IC_Camp::renderDemoSphere()
         glGetProgramInfoLog(prog, 1024, nullptr, log);
         std::cerr << "DemoSphere link error: " << log << std::endl;
     }
+    
     // Texture bindings
     GLint texLoc = glGetUniformLocation(prog, "u_wolfTex");
     glActiveTexture(GL_TEXTURE0);
@@ -1373,24 +1381,28 @@ void Scene_IC_Camp::renderDemoSphere()
     glBindTexture(GL_TEXTURE_2D, m_wolfHeight.getNativeHandle());
     glUniform1i(heightTexLoc, 1);
 
-
     // Camera uniforms
     glUniform2f(glGetUniformLocation(prog, "u_viewportSize"),
         static_cast<float>(camData.viewportSize.x),
         static_cast<float>(camData.viewportSize.y));
     glUniform1f(glGetUniformLocation(prog, "u_fovY"),          camData.fovY);
-    glUniform3f(glGetUniformLocation(prog, "u_cameraPos"),     camTransform.pos.x, camTransform.pos.y, camTransform.pos.z);
-    glUniform3f(glGetUniformLocation(prog, "u_cameraForward"), camFwd.x,   camFwd.y,   camFwd.z);
-    glUniform3f(glGetUniformLocation(prog, "u_cameraRight"),   camRight.x, camRight.y, camRight.z);
-    glUniform3f(glGetUniformLocation(prog, "u_cameraUp"),      camUp.x,    camUp.y,    camUp.z);
-    glUniform3f(glGetUniformLocation(prog, "u_sunDir"),        sunDir.x,   sunDir.y,   sunDir.z);
+    glUniform3fv(glGetUniformLocation(prog, "u_cameraPos"), 1, &camPos[0]);
+    glUniform3fv(glGetUniformLocation(prog, "u_cameraForward"), 1, &camFwd[0]);
+    glUniform3fv(glGetUniformLocation(prog, "u_cameraRight"), 1, &camRight[0]);
+    glUniform3fv(glGetUniformLocation(prog, "u_cameraUp"), 1, &camUp[0]);
+    glUniform3fv(glGetUniformLocation(prog, "u_sunDir"), 1, &sunDir[0]);
+    glUniform1f(glGetUniformLocation(prog, "u_headlampIntensity"), 1.0f);
+    glUniform1f(glGetUniformLocation(prog, "u_headlampRange"), 8500.0f);
+    glUniform1f(glGetUniformLocation(prog, "u_headlampConeCos"), 1.0f);
+    glUniform1f(glGetUniformLocation(prog, "u_headlampEnabled"), shouldHeadlightsBeOn() ? 1.0f : 0.0f);
 
     // Orb uniforms
-    glUniform3f(glGetUniformLocation(prog, "u_orbCentre"),  orbCentre.x,  orbCentre.y,  orbCentre.z);
-    glUniform1f(glGetUniformLocation(prog, "u_orbRadius"),  orbRadius);
-    glUniform3f(glGetUniformLocation(prog, "u_orbForward"), orbForward.x, orbForward.y, orbForward.z);
-    glUniform3f(glGetUniformLocation(prog, "u_orbRight"),   orbRight.x,   orbRight.y,   orbRight.z);
-    glUniform3f(glGetUniformLocation(prog, "u_orbUp"),      orbUp.x,      orbUp.y,      orbUp.z);
+    glUniform4fv(glGetUniformLocation(prog, "u_orbCentreAndRadius"), 1, &orbCentreAndRadius[0]);
+    glUniform4fv(glGetUniformLocation(prog, "u_orbForwardAndDilation"), 1, &orbForwardAndDilation[0]);
+    glUniform4fv(glGetUniformLocation(prog, "u_orbRightAndEyelidClosure"), 1, &orbRightAndEyelidClosure[0]);
+    glUniform4fv(glGetUniformLocation(prog, "u_orbUpPadded"), 1, &orbUp[0]);
+    glUniform4fv(glGetUniformLocation(prog, "u_gazeDirPadded"), 1, &gazeDir[0]);
+    glUniform4fv(glGetUniformLocation(prog, "u_tapetumColourAndPresence"), 1, &tapetumColourAndPresence[0]);
 
     // Full screen quad
     static const float quadVerts[] = {
