@@ -70,8 +70,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_bakeTexture.setSmooth(false);
     m_topdownTexture = Assets::Instance().getTexture("Test1");
     m_topdownImage = m_topdownTexture.copyToImage();
-    m_wolfTexture = Assets::Instance().getTexture("Croc");
-    m_wolfHeight = Assets::Instance().getTexture("CrocHeight");
+    m_wolfTexture = Assets::Instance().getTexture("DNeon");
+    m_wolfHeight = Assets::Instance().getTexture("DNeonHeight");
     float worldSize = Topography::BASE_SIZE;
     float worldMinCoord = -worldSize / 2.0f;
     m_topdownWorldMin = { worldMinCoord, worldMinCoord };

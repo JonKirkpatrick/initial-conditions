@@ -11,6 +11,12 @@ Texture   Wolf           images/species_textures/Wolf.jpg
 Texture   WolfHeight     images/species_textures/Wolf_height.png
 Texture   Croc           images/species_textures/Crocodile.png
 Texture   CrocHeight     images/species_textures/Crocodile_height.png
+Texture   Poop           images/species_textures/Poop.jpg
+Texture   PoopHeight     images/species_textures/Poop_height.jpg
+Texture   Neon           images/species_textures/Neon.jpg
+Texture   NeonHeight     images/species_textures/Neon_height.jpg
+Texture   DNeon          images/species_textures/Test.png
+Texture   DNeonHeight    images/species_textures/Test_height.png
 Music     MusicTitle     music/title_menu.mp3
 Music     MusicTitleLate music/title_menu_late.mp3
 Music     MusicTopDown   music/top_down_music.mp3

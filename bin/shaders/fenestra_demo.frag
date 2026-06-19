@@ -175,63 +175,33 @@ void main()
     
     vec3 baseColor = vec3(1.0);
 
-if (hitType == 0) {
-    vec3 localNorm = vec3(
-        dot(finalHit.normal, normalize(u_orbRight)),
-        dot(finalHit.normal, normalize(u_orbUp)),
-        dot(finalHit.normal, normalize(u_orbForward))
-    );
-    float u = (atan(localNorm.z, -localNorm.x) / 3.1415926535) * 0.5 + 0.5;
-    float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
-    vec2 uv = vec2(u, v);
+    if (hitType == 0) {
+        vec3 localNorm = vec3(
+            dot(finalHit.normal, normalize(u_orbRight)),
+            dot(finalHit.normal, normalize(u_orbUp)),
+            dot(finalHit.normal, normalize(u_orbForward))
+        );
+        float u = (atan(localNorm.z, -localNorm.x) / 3.1415926535) * 0.5 + 0.5;
+        float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
+        vec2 uv = vec2(u, v);
 
-    // Eye positions in local space — starting from your values
-    float eyeForward = 1.00;
-    float eyeSide    = 0.48;   // try 0.37–0.40 if eyes feel too close together
-    float eyeUp      = 0.40;
 
-    vec3 leftEyeDir  = normalize(vec3( eyeSide, eyeUp, eyeForward));
-    vec3 rightEyeDir = normalize(vec3(-eyeSide, eyeUp, eyeForward));
+        // === Production look (remove harsh green) ===
+        vec3 furColor = texture(u_wolfTex, uv).rgb;
+        // Softer darkening + thinning with quadratic falloff
+        baseColor = furColor;
 
-    float leftEyeU  = (atan(leftEyeDir.z, -leftEyeDir.x) / 3.1415926535) * 0.5 + 0.5;
-    float leftEyeV  = acos(clamp(leftEyeDir.y, -1.0, 1.0)) / 3.1415926535;
-    float rightEyeU = (atan(rightEyeDir.z, -rightEyeDir.x) / 3.1415926535) * 0.5 + 0.5;
-    float rightEyeV = acos(clamp(rightEyeDir.y, -1.0, 1.0)) / 3.1415926535;
 
-    vec2 leftUV  = vec2(leftEyeU, leftEyeV);
-    vec2 rightUV = vec2(rightEyeU, rightEyeV);
+        vec3 tangentNormal = normalFromHeightMap(uv, 5.0);
+        tangentNormal = normalize(tangentNormal);
 
-    // Distances
-    float distL = length(uv - leftUV);
-    float distR = length(uv - rightUV);
+        vec3 T = normalize(u_orbRight);
+        vec3 B = normalize(u_orbUp);
+        vec3 N = normalize(finalHit.normal);
+        vec3 worldNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
 
-    // Tighter, separate sockets
-    float maskL = smoothstep(0.0, 0.08, distL);   // tighter than 0.12
-    float maskR = smoothstep(0.0, 0.08, distR);
-    float eyeMask = min(maskL, maskR);
-
-    // === Production look (remove harsh green) ===
-    vec3 furColor = texture(u_wolfTex, uv).rgb;
-    // Softer darkening + thinning with quadratic falloff
-    baseColor = mix(vec3(0.20, 0.15, 0.11), furColor, eyeMask * eyeMask);
-
-    // === Socket depression ===
-    float socketDepth = max(
-        1.0 - smoothstep(0.0, 0.13, distL),
-        1.0 - smoothstep(0.0, 0.13, distR)
-    );
-
-    vec3 tangentNormal = normalFromHeightMap(uv, 5.0);
-    tangentNormal.z += socketDepth * -0.32;   // slightly softer depth
-    tangentNormal = normalize(tangentNormal);
-
-    vec3 T = normalize(u_orbRight);
-    vec3 B = normalize(u_orbUp);
-    vec3 N = normalize(finalHit.normal);
-    vec3 worldNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
-
-    diffuse = max(dot(worldNormal, sunDir), 0.0);
-}
+        diffuse = max(dot(worldNormal, sunDir), 0.0);
+    }
     else {
         // We hit an eyeball! Paint it black (or design a pupil using the eye's local normal)
         vec3 eyeCentre = (hitType == 1) ? leftEyeCentre : rightEyeCentre;
