@@ -75,8 +75,9 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_bakeTexture.setSmooth(false);
     m_topdownTexture = Assets::Instance().getTexture("Test1");
     m_topdownImage = m_topdownTexture.copyToImage();
-    m_wolfTexture = Assets::Instance().getTexture("DNeon");
-    m_wolfHeight = Assets::Instance().getTexture("DNeonHeight");
+    m_charTexture = Assets::Instance().getTexture("DNeon");
+    m_charHeight = Assets::Instance().getTexture("DNeonHeight");
+    m_charNormal = Assets::Instance().getTexture("DNeonNormal");
     float worldSize = Topography::BASE_SIZE;
     float worldMinCoord = -worldSize / 2.0f;
     m_topdownWorldMin = { worldMinCoord, worldMinCoord };
@@ -1372,13 +1373,13 @@ void Scene_IC_Camp::renderDemoSphere()
     }
     
     // Texture bindings
-    GLint texLoc = glGetUniformLocation(prog, "u_wolfTex");
+    GLint texLoc = glGetUniformLocation(prog, "u_charTex");
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_wolfTexture.getNativeHandle());
+    glBindTexture(GL_TEXTURE_2D, m_charTexture.getNativeHandle());
     glUniform1i(texLoc, 0);
-    GLint heightTexLoc = glGetUniformLocation(prog, "u_wolfHeightTex");
+    GLint heightTexLoc = glGetUniformLocation(prog, "u_charNormalTex");
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_wolfHeight.getNativeHandle());
+    glBindTexture(GL_TEXTURE_2D, m_charNormal.getNativeHandle());
     glUniform1i(heightTexLoc, 1);
 
     // Camera uniforms

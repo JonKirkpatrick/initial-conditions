@@ -154,8 +154,9 @@ protected:
     sf::RenderTexture m_minimapTexture;
     sf::RenderTexture m_bakeTexture;
     sf::Texture       m_bakeSFTexture;
-    sf::Texture       m_wolfTexture;
-    sf::Texture       m_wolfHeight;
+    sf::Texture       m_charTexture;
+    sf::Texture       m_charHeight;
+    sf::Texture       m_charNormal;
     unsigned int m_minimapTextureSize  = 256;
 
     // New bake pipeline

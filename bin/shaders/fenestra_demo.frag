@@ -3,8 +3,8 @@
 // Demo fragment shader for Fenestra.
 
 // Texture samples
-uniform sampler2D u_wolfTex;
-uniform sampler2D u_wolfHeightTex;
+uniform sampler2D u_charTex;
+uniform sampler2D u_charNormalTex;
 uniform sampler2D u_bakeTex; // For occlusion agains landscape
 
 // Camera uniforms
@@ -99,26 +99,14 @@ SphereHit intersectSphere(Ray ray, vec3 centre, float radius)
     return result;
 }
 
-vec3 normalFromHeightMap(vec2 uv, float strength)
+vec3 normalFromNormalMap(vec2 uv)
 {
-    // Sample neighbouring texels to compute gradient
-    vec2 texelSize = vec2(1.0) / vec2(textureSize(u_wolfHeightTex, 0));
-    
-    float hL = texture(u_wolfHeightTex, uv + vec2(-texelSize.x, 0.0)).r;
-    float hR = texture(u_wolfHeightTex, uv + vec2( texelSize.x, 0.0)).r;
-    float hD = texture(u_wolfHeightTex, uv + vec2(0.0, -texelSize.y)).r;
-    float hU = texture(u_wolfHeightTex, uv + vec2(0.0,  texelSize.y)).r;
-
-    // Finite difference gradient
-    vec3 tangentNormal = normalize(vec3(
-        (hL - hR) * strength,
-        (hD - hU) * strength,
-        1.0
-    ));
-    
+    vec2 packedNormal = texture(u_charNormalTex, uv).rg;
+    vec3 tangentNormal;
+    tangentNormal.xy = packedNormal * 2.0 - 1.0;
+    tangentNormal.z = sqrt(max(0.0, 1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
     return tangentNormal;
 }
-
 // == Main ======================================================================
 
 void main()
@@ -208,18 +196,11 @@ void main()
     float ambientNight = 0.012;
     float ambient      = mix(ambientNight, ambientDay, sunVisibility);
 
-    // 4. Calculate world-space diffuse from the global sun direction
-    float diffuse = max(dot(finalHit.normal, u_sunDir), 0.0);
-
-    // Scale sun diffuse by visibility so it completely vanishes after twilight
-    diffuse *= sunVisibility;
-
-
-    // ==================== 3. HEADLAMP VECTOR SETUP ====================
-    // Calculate these vectors FIRST so every shading step can use them
+    // ==================== HEADLAMP POWER SETUP ====================
+    // Calculate the raw strength of the flashlight beam hitting this point in space
     vec3 toFragment   = finalHit.pos - u_cameraPos;
     float distToCamera = length(toFragment);
-    vec3 toFragDir = normalize(toFragment);
+    vec3 toFragDir     = normalize(toFragment);
 
     vec3 raySpaceForward = vec3(u_cameraForward.x, u_cameraForward.y, -u_cameraForward.z);
     float spotCos = dot(raySpaceForward, toFragDir);
@@ -228,15 +209,16 @@ void main()
     float spotSpill = pow(max(spotCos, 0.0), 6.0) * 0.08;
     float spot      = spotTight + spotSpill;
     
-    // Calculate the overall flashlight beam intensity hitting this general area
     float distFalloff = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
     float nearFade    = smoothstep(0.0, 1.0, distToCamera);
+    
+    // This is the total photons arriving at this pixel from your flashlight
+    float lampIntensityMask = spot * distFalloff * nearFade * u_headlampIntensity * u_headlampEnabled;
     vec3 lightDir = -toFragDir;
-    float headDiff = max(dot(finalHit.normal, lightDir), 0.0);
-    float headlampDiffuse = headDiff * spot * distFalloff * nearFade 
-                                    * u_headlampIntensity * u_headlampEnabled;
-    // ==================================================================
+    // ==============================================================
 
+    // Declare active normal and default to the smooth sphere geometry
+    vec3 activeNormal = finalHit.normal;
 
     // === Shading Pass ===
 
@@ -253,18 +235,17 @@ void main()
         vec2 uv = vec2(u, v);
 
 
-        vec3 furColor = texture(u_wolfTex, uv).rgb;
+        vec3 furColor = texture(u_charTex, uv).rgb;
         baseColor = furColor;
 
-
-        vec3 tangentNormal = normalFromHeightMap(uv, 5.0);
-
+        vec3 tangentNormal = normalFromNormalMap(uv);
         vec3 N = finalHit.normal;
-
         vec3 T = normalize(vec3(-localNorm.z, 0.0, localNorm.x)); 
         T = normalize(T.x * u_orbRight + T.y * u_orbUp + T.z * u_orbForward);
         vec3 B = cross(N, T); 
-        vec3 worldNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
+        
+        // Update active normal with your heightmap data
+        activeNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
     }
     else {
         vec3 eyeCentre = (hitType == 1) ? leftEyeCentre : rightEyeCentre;
@@ -295,23 +276,23 @@ void main()
         );
         float furU = (atan(furLocalNorm.z, -furLocalNorm.x) / 3.1415926535) * 0.5 + 0.5;
         float furV = acos(clamp(furLocalNorm.y, -1.0, 1.0)) / 3.1415926535;
-        vec3 furSample = texture(u_wolfTex, vec2(furU, furV)).rgb;
+        vec3 furSample = texture(u_charTex, vec2(furU, furV)).rgb;
         
         // Create a basic forward-facing pupil on the eye surface
         if (eyeLocalZ > (1.0 - pupilRadius)) {
             baseColor = vec3(0.0); // Pitch black pupil base
             
             if (u_tapetumPresence > 0.5) {
-                // Flashlight vector is just ray.dir. Gaze vector is u_gazeDir.
-                // Retroreflection peaks when looking right down the animal's gaze axis
+                // The tapetum doesn't care about surface normals! It only cares about 
+                // camera alignment and the total incoming light arriving at the eye.
                 float alignment = max(dot(-normalize(ray.dir), u_gazeDir), 0.0);
-                float retroReflection = pow(alignment, 16.0) * headlampDiffuse;
+                float retroReflection = pow(alignment, 16.0) * lampIntensityMask;
                 
-                // Overwrite the black pupil base with the glowing tapetum color!
                 baseColor += u_tapetumColor * retroReflection * 5.0; 
             }
-        } else if (eyeLocalZ > (1.0 - irisRadius)) {
-            baseColor = vec3(0.2, 0.5, 0.8); // Iris placeholder
+        } 
+        else if (eyeLocalZ > (1.0 - irisRadius)) {
+            baseColor = vec3(0.2, 0.5, 0.8);
         }
 
         // --- EYELID CLOSURE MASK ---
@@ -328,16 +309,20 @@ void main()
         float eyeEdge = length(vec2(eyeLocalX, eyeLocalY));
         float furBlend = smoothstep(0.6, 1.0, eyeEdge);
         baseColor = mix(baseColor, furSample, furBlend);
+
+        activeNormal = eyeLocalNorm;
     }
+    // ==================== FINAL LIGHTING ACCUMULATION ====================
+    // 1. Sun Diffuse (Uses the bumped activeNormal)
+    float diffuse = max(dot(activeNormal, u_sunDir), 0.0) * sunVisibility;
+
+    // 2. Headlamp Diffuse (Uses the bumped activeNormal multiplied by the raw flashlight pool)
+    float headDiff = max(dot(activeNormal, lightDir), 0.0);
+    float headlampDiffuse = headDiff * lampIntensityMask;
+
     vec3 headlampContribution = vec3(0.0);
-
-    // 1. Vector from camera to the specific 3D surface fragment
-
-    if (distToCamera > 0.1) {
-
-        if (spot > 0.001) {
-            headlampContribution = baseColor * headlampDiffuse * vec3(1.0, 0.95, 0.85); // Warm white light
-        }
+    if (distToCamera > 0.1 && spot > 0.001) {
+        headlampContribution = baseColor * headlampDiffuse * vec3(1.0, 0.95, 0.85);
     }
 
     // Combine everything smoothly at the bottom

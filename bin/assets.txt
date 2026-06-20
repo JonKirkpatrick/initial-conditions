@@ -16,7 +16,8 @@ Texture   PoopHeight     images/species_textures/Poop_height.jpg
 Texture   Neon           images/species_textures/Neon.jpg
 Texture   NeonHeight     images/species_textures/Neon_height.jpg
 Texture   DNeon          images/species_textures/Test.png
-Texture   DNeonHeight    images/species_textures/Test_height.png
+Texture   DNeonHeight    images/species_textures/Dark_Neon_height.jpg
+Texture   DNeonNormal    images/species_textures/Dark_Neon_normal.jpg
 Music     MusicTitle     music/title_menu.mp3
 Music     MusicTitleLate music/title_menu_late.mp3
 Music     MusicTopDown   music/top_down_music.mp3
