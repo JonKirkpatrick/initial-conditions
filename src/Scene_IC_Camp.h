@@ -149,7 +149,7 @@ protected:
 
     sf::RenderTexture m_renderTexture;
     sf::RenderTexture m_skyTexture;
-    sf::Texture m_topdownTexture;
+    sf::Texture       m_topdownTexture;
     sf::Image         m_topdownImage;
     sf::RenderTexture m_minimapTexture;
     sf::RenderTexture m_bakeTexture;

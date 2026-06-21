@@ -5,7 +5,13 @@
 // Texture samples
 uniform sampler2D u_charTex;
 uniform sampler2D u_charNormalTex;
-uniform sampler2D u_bakeTex; // For occlusion agains landscape
+uniform sampler2D u_bakeTex;
+uniform sampler2D u_heightMap;
+
+// World bounds
+uniform vec2        u_topdownWorldMin;
+uniform vec2        u_topdownWorldSize;
+uniform float       u_topdownHeightMax;
 
 // Camera uniforms
 uniform vec2  u_viewportSize;
@@ -107,12 +113,81 @@ vec3 normalFromNormalMap(vec2 uv)
     tangentNormal.z = sqrt(max(0.0, 1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
     return tangentNormal;
 }
+
+// == World Space Reconstruction ================================================
+
+vec2 decodeXZ(vec4 c) {
+    return c.xy;
+}
+
+float rawHeightAt(ivec2 uv) {
+    vec4 c = texelFetch(u_heightMap, uv, 0);
+    vec3 bytes = floor(c.rgb * 255.0 + 0.5);
+    float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
+    return scaled * (u_topdownHeightMax / 16777215.0);
+}
+
+float decodeHeight(vec2 xz) {
+    vec2 uv = (xz - u_topdownWorldMin) / u_topdownWorldSize;
+    uv.y = 1.0 - uv.y;
+    
+    vec2 texSize = vec2(textureSize(u_heightMap, 0));
+    vec2 px = uv * (texSize - 1.0);
+    
+    ivec2 p0 = ivec2(floor(px));
+    vec2 f = fract(px);
+    
+    float h00 = rawHeightAt(p0);
+    float h10 = rawHeightAt(p0 + ivec2(1, 0));
+    float h01 = rawHeightAt(p0 + ivec2(0, 1));
+    float h11 = rawHeightAt(p0 + ivec2(1, 1));
+    
+    float h0 = mix(h00, h10, f.x);
+    float h1 = mix(h01, h11, f.x);
+    return mix(h0, h1, f.y);
+}
+
+// == Atmospheric Adjustments ===================================================
+
+vec3 getDampedNormal(vec3 rawNormal, float distanceToCam) {
+    // Distance boundaries defined in centimeters (1.0 = 1cm)
+    // Detail begins softening smoothly at 0.5 km and hits perfectly upright at 2.0 km
+    float startDampDist = 50000.0; 
+    float maxDampDist   = 200000.0; 
+    
+    // Compute our blending factor [0.0 = full detail, 1.0 = vertical flat]
+    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
+    
+    // Smooth out the blending rate so the transition at 1.5km isn't a harsh line
+    dampFactor = smoothstep(0.0, 1.0, dampFactor);
+    
+    // Blend smoothly from the computed slope vector straight up toward vec3(0.0, 1.0, 0.0)
+    vec3 straightUp = vec3(0.0, 1.0, 0.0);
+    return normalize(mix(rawNormal, straightUp, dampFactor));
+}
+
+vec3 getDampedColor(vec3 rawColor, float distanceToCam) {
+    float startDampDist = 50000.0;  // 0.5 km
+    float maxDampDist   = 200000.0; // 2.0 km
+    
+    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
+    dampFactor = smoothstep(0.0, 1.0, dampFactor);
+    
+    // Artistic Target Color: A desaturated, slightly atmospheric grey-blue hue.
+    // This forms a perfect bridge color before the final sky fog layer sweeps over it.
+    vec3 atmosphericBase = vec3(0.53, 0.58, 0.64); 
+    
+    return mix(rawColor, atmosphericBase, dampFactor);
+}
+
 // == Main ======================================================================
 
 void main()
 {
     // SFML Y-flip
     vec2 fragSFML = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
+    vec2 fragScreenUv = fragSFML / u_viewportSize;
+    vec4 bakeC = texture(u_bakeTex, fragScreenUv);
 
     Ray ray = reconstructRay(fragSFML);
 
@@ -180,6 +255,20 @@ void main()
         closestT = rightHit.t;
         finalHit = rightHit;
         hitType  = 2;
+    }
+
+    // === Occlude Against Terrain =====
+
+    vec2 landXZ = bakeC.rg;
+    vec3 landPos;
+    float landDist;
+    if (!(bakeC.a == 0.0 && bakeC.r == 0.0))
+    {
+        float landY   = decodeHeight(landXZ);
+        landPos = vec3(landXZ.x, landY, landXZ.y);
+        landDist = length(landPos - u_cameraPos);
+
+        if (closestT > landDist) discard;
     }
 
     // === Time of Day & Shading Calculations ===
@@ -312,6 +401,7 @@ void main()
 
         activeNormal = eyeLocalNorm;
     }
+    baseColor = getDampedColor(baseColor, closestT);
     // ==================== FINAL LIGHTING ACCUMULATION ====================
     // 1. Sun Diffuse (Uses the bumped activeNormal)
     float diffuse = max(dot(activeNormal, u_sunDir), 0.0) * sunVisibility;

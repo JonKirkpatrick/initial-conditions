@@ -33,7 +33,12 @@ uniform float u_shadowDarkness;
 
 out vec4 fragColor;
 
-// Helper: raw height at integer texel (nearest only)
+// ================== XZ DECODE ==================
+vec2 decodeXZ(vec4 c) {
+    return c.xy;
+}
+
+// ================== HEIGHT from topdown texture (Bilinear) ==================
 float rawHeightAt(ivec2 p) {
     vec4 c = texelFetch(heightMap, p, 0);
     vec3 bytes = floor(c.rgb * 255.0 + 0.5);
@@ -41,13 +46,6 @@ float rawHeightAt(ivec2 p) {
     return scaled * (u_heightMax / 16777215.0);
 }
 
-
-// ================== XZ DECODE ==================
-vec2 decodeXZ(vec4 c) {
-    return c.xy;
-}
-
-// ================== HEIGHT from topdown texture (Bilinear) ==================
 float decodeHeight(vec2 xz) {
     vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
     uv.y = 1.0 - uv.y;
@@ -71,15 +69,11 @@ float decodeHeight(vec2 xz) {
 }
 
 // ================== NORMAL from topdown texture ==================
-vec3 computeNormal(vec2 xz) {
-    float eps = topdownWorldSize.x / 1500.0;   // one texel width in world space
-    
-    float hL = decodeHeight(xz + vec2(-eps, 0.0));
-    float hR = decodeHeight(xz + vec2( eps, 0.0));
-    float hD = decodeHeight(xz + vec2(0.0, -eps));
-    float hU = decodeHeight(xz + vec2(0.0,  eps));
 
-    return normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
+vec3 computeNormal(vec4 bakeC) {
+    vec2 nxz = bakeC.zw;
+    float ny = sqrt(max(0.0, 1.0 - dot(nxz, nxz)));
+    return normalize(vec3(nxz.x, ny, nxz.y));
 }
 
 // ================== NORMAL DAMPING (HORIZON SMOOTHER) ==================
@@ -211,7 +205,7 @@ void main() {
 
     // ================== NORMAL (WITH HORIZON DAMPING) ==================
     // 1. Compute and damp the surface vectors
-    vec3 rawNormal = computeNormal(xz);
+    vec3 rawNormal = computeNormal(bakeC);
     vec3 exagNormal = normalize(vec3(rawNormal.x * u_reliefExaggeration,
                                      rawNormal.y,
                                      rawNormal.z * u_reliefExaggeration));

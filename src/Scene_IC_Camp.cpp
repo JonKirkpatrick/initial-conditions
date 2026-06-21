@@ -1359,7 +1359,7 @@ void Scene_IC_Camp::renderDemoSphere()
     sf::Vector2u windowSize = m_game.window().getSize();
     glViewport(0, 0, windowSize.x, windowSize.y);
     glDisable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
+    glDisable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     GLuint prog = m_demoSphereProgram;
@@ -1377,10 +1377,26 @@ void Scene_IC_Camp::renderDemoSphere()
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_charTexture.getNativeHandle());
     glUniform1i(texLoc, 0);
-    GLint heightTexLoc = glGetUniformLocation(prog, "u_charNormalTex");
+    GLint normalTexLoc = glGetUniformLocation(prog, "u_charNormalTex");
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, m_charNormal.getNativeHandle());
-    glUniform1i(heightTexLoc, 1);
+    glUniform1i(normalTexLoc, 1);
+    GLint bakeTexLoc = glGetUniformLocation(prog, "u_bakeTex");
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
+    glUniform1i(bakeTexLoc, 2);
+    GLint terrainHeightLoc = glGetUniformLocation(prog, "u_heightMap");
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+    glUniform1i(terrainHeightLoc, 3);
+
+    // World Bounds
+    glUniform2f(glGetUniformLocation(prog, "u_topdownWorldMin"),
+        m_topdownWorldMin.x, m_topdownWorldMin.y);
+    glUniform2f(glGetUniformLocation(prog, "u_topdownWorldSize"),
+        m_topdownWorldSize.x, m_topdownWorldSize.y);
+    glUniform1f(glGetUniformLocation(prog, "u_topdownHeightMax"),
+        m_topdownMaxHeight);
 
     // Camera uniforms
     glUniform2f(glGetUniformLocation(prog, "u_viewportSize"),
@@ -1434,8 +1450,13 @@ void Scene_IC_Camp::renderDemoSphere()
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
     glUseProgram(0);
+    glEnable(GL_BLEND);
 
     // Unbind textures — SFML needs unit 0 clean for HUD rendering
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE0);
