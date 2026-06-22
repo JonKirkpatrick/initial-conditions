@@ -1,3 +1,4 @@
+#include <GL/glew.h>
 #include "Scene_Menu.h"
 #include "Scene_IC_Camp.h"
 #include "Assets.h"

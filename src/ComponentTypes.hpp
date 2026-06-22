@@ -93,27 +93,33 @@ struct CInput
 
 struct COrb
 {
-    sf::Color color  = sf::Color::White;
-    float     radius = 50.0f;
+    float radius        = 50.0f;
+    sf::Color color     = sf::Color::White; // can retire later
+
+    // Orientation basis — previously implicit, now explicit
+    sf::Vector3f forward = { 0.0f, 0.0f, 1.0f };
+    sf::Vector3f right   = { 1.0f, 0.0f, 0.0f };
+    sf::Vector3f up      = { 0.0f, 1.0f, 0.0f };
+
+    // Visual properties
+    sf::Color    irisColor      = sf::Color::Blue;
+    int          speciesIdx     = 0;
+    sf::Vector3f squashDir      = { 0.0f, 1.0f, 0.0f };
+    float        squashAmount   = 1.0f;
 
     COrb() = default;
-    COrb(const sf::Color& c, float r)
-        : color(c), radius(r) {}
+    COrb(const sf::Color& c, float r) : color(c), radius(r) {}
 };
 
 struct CEyes
 {
-    sf::Vector3f gazeDirection  = { 0.0f, 0.0f, 1.0f };  // normalized look vector
-    float        pupilDilation  = 0.5f;                   // [0, 1] normalized
-    float        eyelidClosure  = 0.0f;                   // 0 = open, 1 = closed
+    sf::Vector2f gazeDirection  = { 0.0f, 0.0f };
+    float        pupilDilation  = 0.5f;
+    float        eyelidClosure  = 0.0f;
     bool         hasTapetum     = false;
-    sf::Color    tapetumColor   = sf::Color::White;
+    sf::Vector3f tapetumColor   = { 1.0f, 1.0f, 1.0f }; // was sf::Color
 
     CEyes() = default;
-    CEyes(const sf::Vector3f& gaze, float dilation, float closure,
-          bool tapetum, const sf::Color& tapetumCol = sf::Color::White)
-        : gazeDirection(gaze), pupilDilation(dilation), eyelidClosure(closure),
-          hasTapetum(tapetum), tapetumColor(tapetumCol) {}
 };
 
 static_assert(std::is_default_constructible_v<CTransform3D>);

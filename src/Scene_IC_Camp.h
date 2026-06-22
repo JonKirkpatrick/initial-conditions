@@ -1,5 +1,7 @@
 #pragma once
+#include <GL/glew.h>
 #include "Scene.h"
+#include "orbSSBO.h"
 #include "HUD.h"
 #include "Topography.h"
 #include "SoAEntityManager.hpp"
@@ -37,7 +39,7 @@ class Scene_IC_Camp : public Scene {
         sf::Vector3f cameraSpacePos;
         float        radiusPx;
         float        orbRadius;
-        sf::Vector3f gazeDirection;
+        sf::Vector2f gazeDirection;
         sf::Vector3f forward;
         float        hasTapetum;
         sf::Vector3f tapetumColor;
@@ -59,7 +61,7 @@ class Scene_IC_Camp : public Scene {
         std::vector<sf::Vector2f>    quadOrigins;
         std::vector<sf::Vector2f>    texSizes;
         std::vector<sf::Vector2f>    quadSizes;
-        std::vector<sf::Vector3f>    gazes;
+        std::vector<sf::Vector2f>    gazes;
         std::vector<sf::Vector3f>    forwards;
         std::vector<float>           hasTapetums;
         std::vector<sf::Vector3f>    tapetumColors;
@@ -200,6 +202,7 @@ protected:
     std::array<OrbDrawItem, 8192> m_orbDrawItems;
     int m_orbDrawItemCount = 0;
     std::vector<ShadowOrbEntry> m_shadowOrbList;
+    OrbSSBO m_orbSSBO;
 
     // =========================================================================
     // Rendering — HUD
@@ -249,13 +252,16 @@ protected:
     void spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius,
                   float bobRate = 2.0f, float bobMagnitude = 8.0f);
     void spawnOrbFauna(int hexQ, int hexR, const sf::Color& color, float radius,
-                      float bobRate = 2.0f, float bobMagnitude = 8.0f, const CEyes& eyes = CEyes());
+                      float bobRate = 2.0f, float bobMagnitude = 8.0f,
+                      const CEyes& eyes = CEyes(), float yaw = 0.0f);
     void spawnDebugOrbs(int count);
     void buildHud();
     void buildTerrainGrid();
     void initializeSkyCubemap();
     void initializeBakeFBO();
+    void initializeOrbShaderStorage();
     void debugDumpBakeTexture();
+    void debugPrintOrbSSBO();
 
     // =========================================================================
     // Per-Frame Updates

@@ -2,6 +2,21 @@
 
 // Demo fragment shader for Fenestra.
 
+struct OrbData {
+    vec4 centreAndRadius;           // xyz = centre,        w = radius
+    vec4 forwardAndDilation;        // xyz = forward,       w = dilation
+    vec4 rightAndEyelidClosure;     // xyz = right,         w = eyelidClosure
+    vec4 upPadded;                  // xyz = up,            w = (spare)
+    vec4 gazeDirPadded;             // xy  = gazeDir,       zw = (spare — 3 floats free!)
+    vec4 tapetumColourAndPresence;  // xyz = colour,        w = presence
+    vec4 squashAndDirection;        // xyz = direction,     w = squashAmount
+    vec4 irisAndSpeciesIdx;         // xyz = irisColour,    w = speciesRaw
+};
+
+layout(std430, binding = 0) readonly buffer OrbBuffer {
+    OrbData orbs[];
+};
+
 // Texture samples
 uniform sampler2D u_charTex;
 uniform sampler2D u_charNormalTex;
@@ -29,16 +44,8 @@ uniform float u_headlampRange;
 uniform float u_headlampCone; // cos(angle) of headlamp cone for cutoff
 uniform float u_headlampEnabled;
 
-// Per-orb uniforms — hardcoded for demo, will come from SSBO later
-uniform vec4  u_orbCentreAndRadius;
-uniform vec4  u_orbForwardAndDilation;
-uniform vec4  u_orbRightAndEyelidClosure;
-uniform vec4  u_orbUpPadded;
-uniform vec4  u_gazeDirPadded;
-uniform vec4  u_tapetumColourAndPresence;
+OrbData orb = orbs[0];
 
-
-in vec4 v_color;              // orb index — unused in demo but present for pipeline compatibility
 out vec4 fragColor;
 
 // == Ray helpers ==============================================================
@@ -193,21 +200,26 @@ void main()
 
     // Unpack Uniforms
 
-    vec3 u_orbCentre = u_orbCentreAndRadius.xyz;
-    float u_orbRadius = u_orbCentreAndRadius.w;
-    vec3 u_orbForward = u_orbForwardAndDilation.xyz;
-    float u_orbDilation = u_orbForwardAndDilation.w;
-    vec3 u_orbRight = u_orbRightAndEyelidClosure.xyz;
-    float u_orbEyelidClosure = u_orbRightAndEyelidClosure.w;
-    vec3 u_tapetumColor = u_tapetumColourAndPresence.xyz;
-    float u_tapetumPresence = u_tapetumColourAndPresence.w;
-    vec3 u_orbUp = u_orbUpPadded.xyz;
-    vec2 gazeDirRaw = u_gazeDirPadded.xy;
+    vec3 u_orbCentre            = orb.centreAndRadius.xyz;
+    float u_orbRadius           = orb.centreAndRadius.w;
+    vec3 u_orbForward           = orb.forwardAndDilation.xyz;
+    float u_orbDilation         = orb.forwardAndDilation.w;
+    vec3 u_orbRight             = orb.rightAndEyelidClosure.xyz;
+    float u_orbEyelidClosure    = orb.rightAndEyelidClosure.w;
+    vec3 u_tapetumColor         = orb.tapetumColourAndPresence.xyz;
+    float u_tapetumPresence     = orb.tapetumColourAndPresence.w;
+    vec3 u_orbUp                = orb.upPadded.xyz;
+    vec2 gazeDirRaw = orb.gazeDirPadded.xy;
     float maxGazeSpread = 0.57735027;
     vec3 gazeTarget = u_orbForward
                     + (gazeDirRaw.x * maxGazeSpread * u_orbRight)
                     + (gazeDirRaw.y * maxGazeSpread * u_orbUp);
-    vec3 u_gazeDir = normalize(gazeTarget);
+    
+    vec3 u_gazeDir              = normalize(gazeTarget);
+    vec3 u_squashDirection      = orb.squashAndDirection.xyz;
+    float u_squashAmount        = orb.squashAndDirection.w;
+    vec3 u_irisColour           = orb.irisAndSpeciesIdx.xyz;
+    float speciesRaw            = orb.irisAndSpeciesIdx.w; // Note to self, this will need to be cast as an Int
 
     // --- Eyeball Placement Geometry ---
     float eyeRadius  =  u_orbRadius * 0.22; // Scale eyeballs relative to body size
