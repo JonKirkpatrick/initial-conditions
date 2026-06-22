@@ -854,12 +854,6 @@ void Scene_IC_Camp::spawnCamera()
     m_entityManager.addTransform(m_camera, CTransform3D());
 }
 
-void Scene_IC_Camp::spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius, float bobRate, float bobMagnitude)
-{
-    return;
-}
-
-// World convention: Y is vertical (up). worldPos / hexToWorld() return XZ ground-plane coords.
 void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, const sf::Color& color, float radius,
                                    float bobRate, float bobMagnitude,
                                    const CEyes& eyes,
@@ -1289,49 +1283,6 @@ void Scene_IC_Camp::updateMinimapTexture()
     m_minimapTexture.display();
 }
 
-void Scene_IC_Camp::uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch,
-                                           const sf::Vector3f& sunDirView)
-{
-    int size = static_cast<int>(batch.centersView.size());
-    shader.setUniform("u_batchSize", size);
-
-    if (size > 0)
-    {
-        shader.setUniformArray("u_orbCenterView",   batch.centersView.data(),     size);
-        shader.setUniformArray("u_orbColor",        batch.colors.data(),          size);
-        shader.setUniformArray("u_orbDepthNorm",    batch.depthNorms.data(),      size);
-        shader.setUniformArray("u_quadOrigin",      batch.quadOrigins.data(),     size);
-        shader.setUniformArray("u_texSize",         batch.texSizes.data(),        size);
-        shader.setUniformArray("u_quadSize",        batch.quadSizes.data(),       size);
-        shader.setUniformArray("u_gazeDir",         batch.gazes.data(),           size);
-        shader.setUniformArray("u_orbForward",      batch.forwards.data(),        size);
-        shader.setUniformArray("u_hasTapetum",      batch.hasTapetums.data(),     size);
-        shader.setUniformArray("u_tapetumColor",    batch.tapetumColors.data(),   size);
-        shader.setUniformArray("u_pupilDilation",   batch.pupilDilations.data(),  size);
-        shader.setUniformArray("u_eyelidClosure",   batch.eyelidClosures.data(),  size);
-    }
-    auto& transform = m_entityManager.getTransform(m_camera);
-    shader.setUniform("cameraPos", transform.pos);
-    shader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    shader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    shader.setUniform("topdownHeightMax", m_topdownMaxHeight);
-    shader.setUniform("heightMap", m_topdownTexture);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    shader.setUniform("nearPlane", cameraData.nearPlane);
-    shader.setUniform("farPlane", cameraData.farPlane);
-    shader.setUniform("sunDir", sf::Glsl::Vec3(sunDirView.x, sunDirView.y, sunDirView.z));
-    shader.setUniform("sunDirWorld", m_astroState.sunDirection);
-    shader.setUniform("sunColor", m_astroState.sunColor);
-    shader.setUniform("u_viewportSize", sf::Glsl::Vec2(
-        static_cast<float>(m_bakeTexture.getSize().x),
-        static_cast<float>(m_bakeTexture.getSize().y)));
-
-    shader.setUniform("headlampEnabled", shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-    shader.setUniform("headlampIntensity", 2.5f);
-    shader.setUniform("headlampRange", 8500.0f);
-    shader.setUniform("headlampConeCos", 1.0f);
-}
-
 void Scene_IC_Camp::renderDemoSphere()
 {
     auto& window       = m_game.window();
@@ -1452,106 +1403,6 @@ void Scene_IC_Camp::renderDemoSphere()
     sf::Shader::bind(nullptr);
     sf::Texture::bind(nullptr);
     // =============================================================
-}
-
-void Scene_IC_Camp::renderOrbs()
-{
-    if (m_orbDrawItemCount == 0) return;
-
-    auto& window = m_game.window();
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    auto& camData = m_entityManager.getCamera(m_camera);
-
-    sf::Vector3f sunDirView = Camera::worldToCamera(
-        m_astroState.sunDirection, camTransform.pitch, camTransform.yaw, camTransform.roll);
-
-    constexpr int BATCH_SIZE = 64;
-    OrbBatch batch;
-    batch.reserve(BATCH_SIZE);
-    sf::VertexArray vertices(sf::PrimitiveType::Triangles, 0);
-
-    for (int i = 0; i < m_orbDrawItemCount; ++i)
-    {
-        float padding = 1.5f;
-        const auto& item = m_orbDrawItems[i];
-        const float r = item.radiusPx;
-        const sf::Vector2f origin(item.screenPos.x - r * padding, item.screenPos.y - r * padding);
-        const sf::Vector2f size(r * 2.f, r * 2.f);
-        const sf::Vector2f expandedSize = size * padding; // expand the quad to remove clipping
-
-        uint8_t idx = static_cast<uint8_t>(batch.centersView.size());
-        sf::Color indexColor(idx, 0, 0, 255);
-
-        sf::Vertex v1(origin, indexColor);
-        sf::Vertex v2({origin.x + expandedSize.x, origin.y}, indexColor);
-        sf::Vertex v3({origin.x + expandedSize.x, origin.y + expandedSize.y}, indexColor);
-        sf::Vertex v4({origin.x, origin.y + expandedSize.y}, indexColor);
-
-        vertices.append(v1);
-        vertices.append(v2);
-        vertices.append(v3);
-        vertices.append(v1);
-        vertices.append(v3);
-        vertices.append(v4);
-
-        batch.centersView.push_back(item.cameraSpacePos);
-        batch.colors.emplace_back(
-            item.color.r / 255.f, item.color.g / 255.f,
-            item.color.b / 255.f, item.color.a / 255.f);
-        batch.depthNorms.push_back(item.distNorm);
-        batch.quadOrigins.push_back(origin);
-        batch.texSizes.emplace_back(size);
-        batch.quadSizes.push_back(expandedSize);
-        batch.gazes.push_back(item.gazeDirection);
-        batch.forwards.push_back(item.forward);
-        batch.hasTapetums.push_back(item.hasTapetum);
-        batch.tapetumColors.push_back(item.tapetumColor);
-        batch.pupilDilations.push_back(item.pupilDilation);
-        batch.eyelidClosures.push_back(item.eyelidClosure);
-
-        if (batch.centersView.size() == BATCH_SIZE || i == m_orbDrawItemCount - 1)
-        {
-            uploadOrbBatchToShader(m_orbShader, batch, sunDirView);
-            
-            sf::RenderStates states;
-            states.shader = &m_orbShader;
-
-            // ==================== INJECTION POINT: HARDWARE TEXTURE LOCKS ====================
-            // 1. Force bind the shader program so we can query its uniform locations
-            sf::Shader::bind(&m_orbShader);
-            GLuint prog = m_orbShader.getNativeHandle();
-
-            // 2. Bind the Bake Texture (Texture coordinates map) to Unit 2
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
-            glUniform1i(glGetUniformLocation(prog, "bakeTex"), 2);
-
-            // 3. Bind the raw Heightmap Texture to Unit 3 (In case your orbs want to sample real heights)
-            glActiveTexture(GL_TEXTURE3);
-            glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-            glUniform1i(glGetUniformLocation(prog, "heightMap"), 3);
-            // =================================================================================
-
-            // SFML draws the vertex quad array using our state-locked texture configurations
-            window.draw(vertices, states);
-
-            // ==================== INJECTION POINT: CLEANUP RESTORATION ====================
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            glActiveTexture(GL_TEXTURE3);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            
-            glUseProgram(0);
-            sf::Shader::bind(nullptr);
-            sf::Texture::bind(nullptr);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            // =================================================================================
-
-            vertices.clear();
-            batch.clear();
-        }
-    }
 }
 
 void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
@@ -1762,23 +1613,6 @@ void Scene_IC_Camp::updateShadowOrbs()
         if (item.distSort > SHADOW_CUTOFF_DIST) continue;
 
         m_shadowOrbList.push_back({ item.worldPos, item.orbRadius });
-    }
-}
-
-void Scene_IC_Camp::uploadShadowOrbsToShader(sf::Shader& shader)
-{
-    int count = static_cast<int>(m_shadowOrbList.size());
-    shader.setUniform("u_shadowOrbCount", count);
-    shader.setUniform("u_shadowDarkness", 0.6f);
-
-    for (int i = 0; i < count; ++i)
-    {
-        std::string idx = "[" + std::to_string(i) + "]";
-        shader.setUniform("u_shadowOrbPos" + idx,
-            sf::Glsl::Vec3(m_shadowOrbList[i].worldPos.x,
-                           m_shadowOrbList[i].worldPos.y,
-                           m_shadowOrbList[i].worldPos.z));
-        shader.setUniform("u_shadowOrbRadius" + idx, m_shadowOrbList[i].radius);
     }
 }
 

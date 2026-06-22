@@ -249,8 +249,6 @@ protected:
     void loadLevel(const std::string& filename);
     void spawnPlayer();
     void spawnCamera();
-    void spawnOrb(int hexQ, int hexR, const sf::Color& color, float radius,
-                  float bobRate = 2.0f, float bobMagnitude = 8.0f);
     void spawnOrbFauna(int hexQ, int hexR, const sf::Color& color, float radius,
                       float bobRate = 2.0f, float bobMagnitude = 8.0f,
                       const CEyes& eyes = CEyes(), float yaw = 0.0f);
@@ -294,14 +292,12 @@ protected:
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
     void runBakePass();
     void runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix);
-    void renderOrbs();
     void renderDemoSphere();
 
     // =========================================================================
     // Shader Uniform Upload
     // =========================================================================
 
-    void uploadShadowOrbsToShader(sf::Shader& shader);
     void uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch,
                                 const sf::Vector3f& sunDirView);
 
