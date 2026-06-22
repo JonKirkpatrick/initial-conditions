@@ -1107,7 +1107,7 @@ void Scene_IC_Camp::initializeOrbShaderStorage()
         auto& c    = m_entityManager.getOrb(orb);
         auto& eyes = m_entityManager.getEyes(orb);
 
-        auto f = Camera::getForwardNeg(t);
+        auto f = Camera::getForward(t);
         auto r = Camera::getRight(t);
         auto u = -Camera::getUp(t);
 
@@ -1290,7 +1290,7 @@ void Scene_IC_Camp::renderDemoSphere()
     auto& camData      = m_entityManager.getCamera(m_camera);
 
     glm::vec3 camPos   = toGLMVec3(camTransform.pos);
-    glm::vec3 camFwd   = toGLMVec3(Camera::getForwardNeg(camTransform));
+    glm::vec3 camFwd   = toGLMVec3(Camera::getForward(camTransform));
     glm::vec3 camRight = toGLMVec3(Camera::getRight(camTransform));
     glm::vec3 camUp    = toGLMVec3(Camera::getUp(camTransform));
     glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);

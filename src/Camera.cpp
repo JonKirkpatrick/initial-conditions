@@ -90,12 +90,6 @@ namespace Camera {
     sf::Vector3f getForward(const CTransform3D& t) {
         float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
         float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
-        return sf::Vector3f(-sy * cp, sp, -cy * cp);
-    }
-
-    sf::Vector3f getForwardNeg(const CTransform3D& t) {
-        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
-        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
         return sf::Vector3f(sy * cp, -sp, cy * cp);
     }
 
@@ -110,7 +104,7 @@ namespace Camera {
     sf::Vector3f getUp(const CTransform3D& t) {
         // Up is the cross product of right and forward
         // ensuring an orthonormal basis
-        return normalize(cross(getForward(t), getRight(t)));
+        return normalize(cross(getRight(t), getForward(t)));
     }
 
     sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll) {

@@ -62,9 +62,6 @@ Ray reconstructRay(vec2 fragCoord)
     float aspectRatio = u_viewportSize.x / u_viewportSize.y;
     float halfTanFov  = tan(u_fovY * 0.5);
 
-    // Note: u_cameraForward is negated on upload (see renderDemoSphere).
-    // dir.z is flipped here to reconcile SFML/engine coordinate conventions
-    // with OpenGL's ray casting space. Both corrections are intentional.
     vec3 dir = normalize(
         u_cameraForward
         + ndc.x * aspectRatio * halfTanFov * u_cameraRight
