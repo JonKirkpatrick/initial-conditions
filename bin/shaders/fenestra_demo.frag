@@ -17,6 +17,8 @@ layout(std430, binding = 0) readonly buffer OrbBuffer {
     OrbData orbs[];
 };
 
+flat in int v_instanceID;
+
 // Texture samples
 uniform sampler2D u_charTex;
 uniform sampler2D u_charNormalTex;
@@ -44,7 +46,7 @@ uniform float u_headlampRange;
 uniform float u_headlampCone; // cos(angle) of headlamp cone for cutoff
 uniform float u_headlampEnabled;
 
-OrbData orb = orbs[0];
+OrbData orb = orbs[v_instanceID];
 
 out vec4 fragColor;
 

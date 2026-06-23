@@ -16,6 +16,9 @@ void GameEngine::init(const std::string & path)
 {
     sf::ContextSettings settings;
     settings.antiAliasingLevel = 8;
+    settings.depthBits = 24;
+    settings.stencilBits = 8;
+
     loadDefaultBindings();
     std::cout << "Loading sprite sheets..." << std::endl;
     auto modes = sf::VideoMode::getFullscreenModes();
@@ -38,7 +41,7 @@ void GameEngine::init(const std::string & path)
     if (err != GLEW_OK) {
         std::cerr << "GLEW init failed: " << glewGetErrorString(err) << std::endl;
     }
-
+    std::cout << glGetString(GL_VERSION) << std::endl;
 
     Assets::Instance().loadFromFile(path);
 

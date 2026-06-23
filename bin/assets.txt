@@ -47,3 +47,4 @@ Shader    Orb            shaders/orb_shader.frag
 Cubemap   NightSky       images/skymap
 GLProgram Bake           shaders/bake.vert shaders/bake.frag
 GLProgram DemoSphere     shaders/fenestra.vert shaders/fenestra_demo.frag
+GLProgram Blit           shaders/blit.vert shaders/blit.frag

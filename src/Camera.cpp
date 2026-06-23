@@ -211,7 +211,7 @@ namespace Camera {
 
         std::array<float, 16> P = {
             f / c.aspectRatio, 0.f,  0.f,                          0.f,
-            0.f,               -f,    0.f,                          0.f,
+            0.f,               f,    0.f,                          0.f,
             0.f,               0.f,  (zFar + zNear) / zRange,     -1.f,   // note the -1 for OpenGL convention
             0.f,               0.f,  (2.f * zFar * zNear) / zRange, 0.f
         };

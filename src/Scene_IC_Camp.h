@@ -151,6 +151,7 @@ protected:
 
     sf::RenderTexture m_renderTexture;
     sf::RenderTexture m_skyTexture;
+    sf::RenderTexture m_sphereTexture;
     sf::Texture       m_topdownTexture;
     sf::Image         m_topdownImage;
     sf::RenderTexture m_minimapTexture;
@@ -172,8 +173,21 @@ protected:
     GLuint m_bakeProgram    = Assets::Instance().getGLProgram("Bake");
 
     // New sphere impostor pipeline
+    GLuint m_sphereFBO      = 0;
+    GLuint m_sphereColorTex = 0;
+    GLuint m_sphereDepthRBO = 0;
+    GLuint m_cubeVAO = 0;
+    GLuint m_cubeVBO = 0;
+    GLuint m_cubeEBO = 0;
     GLuint m_demoSphereProgram = Assets::Instance().getGLProgram("DemoSphere");
-    
+
+    // =========================================================================
+    // Rendering — Blit
+    // =========================================================================
+
+    GLuint m_blitProgram = Assets::Instance().getGLProgram("Blit");
+    GLuint m_blitVAO     = 0;
+    GLuint m_blitVBO     = 0;
 
     // =========================================================================
     // Rendering — Sky Cubemap
@@ -255,10 +269,14 @@ protected:
     void spawnDebugOrbs(int count);
     void buildHud();
     void buildTerrainGrid();
+    void buildVertexCube();
     void initializeSkyCubemap();
     void initializeBakeFBO();
+    void initializeSphereFBO();
     void initializeOrbShaderStorage();
+    void updateOrbShaderStorage();
     void debugDumpBakeTexture();
+    void debugDumpSphereFBO();
     void debugPrintOrbSSBO();
 
     // =========================================================================
@@ -293,6 +311,7 @@ protected:
     void runBakePass();
     void runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix);
     void renderDemoSphere();
+    void blitToScreen(GLuint tex);
 
     // =========================================================================
     // Shader Uniform Upload

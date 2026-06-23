@@ -71,6 +71,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     sf::Vector2u windowSize = game.window().getSize();
     m_moonTexture = Assets::Instance().getTexture("Moon");
     m_renderTexture = sf::RenderTexture({windowSize.x, windowSize.y});
+    m_sphereTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     m_skyTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
     m_bakeTexture = sf::RenderTexture({windowSize.x, windowSize.y}, sf::ContextSettings(24));
@@ -98,6 +99,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_entityManager.update();
 
     buildTerrainGrid();
+    // buildVertexCube();
     buildHud();
     updateHUDData();
     updateSiderealTime();
@@ -106,8 +108,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     updateMoonPosition();
     initializeSkyCubemap();
     initializeBakeFBO();
+    initializeSphereFBO();
     initializeOrbShaderStorage();
-    debugPrintOrbSSBO();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -156,7 +158,7 @@ void Scene_IC_Camp::update() {
     updateSunPosition();
     updateStarRotation();
     updateMoonPosition();
-    // sortOrbs();
+    updateOrbShaderStorage();
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
         sGUI();
@@ -407,16 +409,22 @@ void Scene_IC_Camp::sRender() {
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
     auto worldToCamMatrix = toGlslMat3(Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll));
-    window.clear(sf::Color::Transparent);
+
     runBakePass();
     renderSky(worldToCamMatrix);
     runTerrainPass(worldToCamMatrix);
-    sf::Sprite finalSprite(m_renderTexture.getTexture());
+    renderDemoSphere();
+
+    // Composite to screen
+    window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
+    sf::Sprite finalSprite(m_renderTexture.getTexture());
     window.draw(backgroundSprite);
     window.draw(finalSprite);
-    renderDemoSphere();
+    window.setActive(true);         // reclaim GL context after SFML draws
+    blitToScreen(m_sphereColorTex); // raw GL blit on top
     m_hud->render(window, false);
+    window.display();
 }
 
 // =========================================================================
@@ -942,6 +950,49 @@ void Scene_IC_Camp::buildTerrainGrid() {
     glBindVertexArray(0);
 }
 
+void Scene_IC_Camp::buildVertexCube()
+{
+    static const float cubeVerts[] = {
+        -1,-1,-1,  1,-1,-1,  1, 1,-1, -1, 1,-1, // back face
+        -1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1, // front face
+    };
+
+    static const unsigned int cubeIndices[] = {
+        0,1,2,  2,3,0, // back
+        4,5,6,  6,7,4, // front
+        0,4,7,  7,3,0, // left
+        1,5,6,  6,2,1, // right
+        3,7,6,  6,2,3, // top
+        0,4,5,  5,1,0  // bottom
+    };
+
+    glGenVertexArrays(1, &m_cubeVAO);
+    glGenBuffers(1, &m_cubeVBO);
+    glGenBuffers(1, &m_cubeEBO);
+
+    glBindVertexArray(m_cubeVAO);
+
+    // Vertex positions
+    glBindBuffer(GL_ARRAY_BUFFER, m_cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVerts), cubeVerts, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(
+        0,          // location = 0 in your vert shader
+        3,          // vec3
+        GL_FLOAT,
+        GL_FALSE,
+        3 * sizeof(float),  // tightly packed
+        (void*)0
+    );
+    glEnableVertexAttribArray(0);
+
+    // Index buffer
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_cubeEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+}
+
 // =========================================================================
 // Rendering Systems & Pipeline
 // =========================================================================
@@ -1097,6 +1148,38 @@ void Scene_IC_Camp::initializeBakeFBO() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void Scene_IC_Camp::initializeSphereFBO() {
+    sf::Vector2u windowSize = m_game.window().getSize();
+
+    glGenTextures(1, &m_sphereColorTex);
+    glBindTexture(GL_TEXTURE_2D, m_sphereColorTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
+        windowSize.x, windowSize.y,
+        0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glGenRenderbuffers(1, &m_sphereDepthRBO);
+    glBindRenderbuffer(GL_RENDERBUFFER, m_sphereDepthRBO);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
+        windowSize.x, windowSize.y);
+
+    glGenFramebuffers(1, &m_sphereFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, m_sphereColorTex, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+        GL_RENDERBUFFER, m_sphereDepthRBO);
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "Sphere FBO incomplete: 0x" << std::hex << status << std::endl;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 void Scene_IC_Camp::initializeOrbShaderStorage()
 {
     std::vector<OrbData> orbData;
@@ -1133,6 +1216,46 @@ void Scene_IC_Camp::initializeOrbShaderStorage()
     m_orbSSBO.upload(orbData);
 }
 
+void Scene_IC_Camp::updateOrbShaderStorage()
+{
+    std::vector<OrbData> orbData;
+
+    for (auto& orb : m_entityManager.getEntities("orb"))
+    {
+        auto& t    = m_entityManager.getTransform(orb);
+        auto& c    = m_entityManager.getOrb(orb);
+        auto& eyes = m_entityManager.getEyes(orb);
+
+        auto f = Camera::getForward(t);
+        auto r = Camera::getRight(t);
+        auto u = -Camera::getUp(t);
+
+        sf::Vector3f tapetum = {
+            eyes.tapetumColor.x,
+            eyes.tapetumColor.y,
+            eyes.tapetumColor.z
+        };
+
+        OrbData data;
+        data.centreAndRadius            = { t.pos.x, t.pos.y, t.pos.z, c.radius };
+        data.forwardAndDilation         = { f.x, f.y, f.z, eyes.pupilDilation };
+        data.rightAndEyelidClosure      = { r.x, r.y, r.z, eyes.eyelidClosure };
+        data.upPadded                   = { u.x, u.y, u.z, 0.0f };
+        data.gazeDirPadded              = { eyes.gazeDirection.x, eyes.gazeDirection.y, 0.0f, 0.0f };
+        data.tapetumColourAndPresence   = { tapetum.x, tapetum.y, tapetum.z, eyes.hasTapetum ? 1.0f : 0.0f };
+        data.squashAndDirection         = { 0.0f, 1.0f, 0.0f, 1.0f }; // placeholder
+        data.irisAndSpeciesIdx          = { 0.2f, 0.5f, 0.8f, 0.0f }; // placeholder
+
+        orbData.push_back(data);
+    }
+
+    if (m_orbSSBO.count() != (int)orbData.size())
+        m_orbSSBO.upload(orbData);   // reallocate
+    else
+        m_orbSSBO.update(orbData);   // just update contents
+}
+
+
 void Scene_IC_Camp::debugDumpBakeTexture() {
     sf::Vector2u windowSize = m_game.window().getSize();
     std::vector<float> pixels(windowSize.x * windowSize.y * 4);
@@ -1151,6 +1274,24 @@ void Scene_IC_Camp::debugDumpBakeTexture() {
               << pixels[idx+1] << ", "  // should be world Z
               << pixels[idx+2] << ", "  // 0.0
               << pixels[idx+3] << "\n"; // 1.0 if terrain, 0.0 if sky
+}
+
+void Scene_IC_Camp::debugDumpSphereFBO() {
+    sf::Vector2u windowSize = m_game.window().getSize();
+    std::vector<unsigned char> pixels(windowSize.x * windowSize.y * 4);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
+    glReadPixels(0, 0, windowSize.x, windowSize.y, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    int cx = windowSize.x / 2;
+    int cy = windowSize.y / 2;
+    int idx = (cy * windowSize.x + cx) * 4;
+    std::cout << "Sphere FBO centre pixel: "
+        << (int)pixels[idx+0] << ", "  // should be 255 (red)
+        << (int)pixels[idx+1] << ", "  // should be 0
+        << (int)pixels[idx+2] << ", "  // should be 0
+        << (int)pixels[idx+3] << "\n"; // should be 255
 }
 
 void Scene_IC_Camp::debugPrintOrbSSBO()
@@ -1285,7 +1426,6 @@ void Scene_IC_Camp::updateMinimapTexture()
 
 void Scene_IC_Camp::renderDemoSphere()
 {
-    auto& window       = m_game.window();
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& camData      = m_entityManager.getCamera(m_camera);
 
@@ -1294,115 +1434,125 @@ void Scene_IC_Camp::renderDemoSphere()
     glm::vec3 camRight = toGLMVec3(Camera::getRight(camTransform));
     glm::vec3 camUp    = toGLMVec3(Camera::getUp(camTransform));
     glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);
+    auto      vp       = Camera::getVPMatrix(camTransform, camData);
 
-    // ==================== SFML STATE HANDOFF ====================
-    window.setActive(true);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);  // draw to window
+    // ==================== FBO SETUP ====================
+    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
+    sf::Vector2u windowSize = m_game.window().getSize();
+    glViewport(0, 0, windowSize.x, windowSize.y);
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+
+    // ==================== LAZY INIT ====================
+    if (m_cubeVAO == 0)
+        buildVertexCube();
+
+    // ==================== PROGRAM ====================
+    glUseProgram(m_demoSphereProgram);
+
+    // ==================== TEXTURES ====================
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_charTexture.getNativeHandle());
+    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_charTex"), 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_charNormal.getNativeHandle());
+    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_charNormalTex"), 1);
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
+    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_bakeTex"), 2);
+
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_heightMap"), 3);
+
+    // ==================== UNIFORMS ====================
+    glUniform2f(glGetUniformLocation(m_demoSphereProgram, "u_topdownWorldMin"),
+        m_topdownWorldMin.x, m_topdownWorldMin.y);
+    glUniform2f(glGetUniformLocation(m_demoSphereProgram, "u_topdownWorldSize"),
+        m_topdownWorldSize.x, m_topdownWorldSize.y);
+    glUniform1f(glGetUniformLocation(m_demoSphereProgram, "u_topdownHeightMax"),
+        m_topdownMaxHeight);
+
+    glUniform2f(glGetUniformLocation(m_demoSphereProgram, "u_viewportSize"),
+        static_cast<float>(camData.viewportSize.x),
+        static_cast<float>(camData.viewportSize.y));
+    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_fovY"),          camData.fovY);
+    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraPos"),     1, &camPos[0]);
+    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraForward"), 1, &camFwd[0]);
+    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraRight"),   1, &camRight[0]);
+    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraUp"),      1, &camUp[0]);
+    glUniformMatrix4fv(glGetUniformLocation(m_demoSphereProgram, "u_viewProj"),
+        1, GL_FALSE, vp.data());
+
+    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_sunDir"), 1, &sunDir[0]);
+    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampIntensity"), 1.0f);
+    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampRange"),     8500.0f);
+    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampConeCos"),   1.0f);
+    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampEnabled"),
+        shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+
+    // ==================== DRAW ====================
+    m_orbSSBO.bind(0);
+    glBindVertexArray(m_cubeVAO);
+    glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
+
+    // ==================== CLEANUP ====================
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glEnable(GL_BLEND);
+    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Scene_IC_Camp::blitToScreen(GLuint tex)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     sf::Vector2u windowSize = m_game.window().getSize();
     glViewport(0, 0, windowSize.x, windowSize.y);
     glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
+    glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    GLuint prog = m_demoSphereProgram;
-    glUseProgram(prog);
-    GLint linked = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        char log[1024];
-        glGetProgramInfoLog(prog, 1024, nullptr, log);
-        std::cerr << "DemoSphere link error: " << log << std::endl;
-    }
-    
-    // Texture bindings
-    GLint texLoc = glGetUniformLocation(prog, "u_charTex");
+    glUseProgram(m_blitProgram);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_charTexture.getNativeHandle());
-    glUniform1i(texLoc, 0);
-    GLint normalTexLoc = glGetUniformLocation(prog, "u_charNormalTex");
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_charNormal.getNativeHandle());
-    glUniform1i(normalTexLoc, 1);
-    GLint bakeTexLoc = glGetUniformLocation(prog, "u_bakeTex");
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
-    glUniform1i(bakeTexLoc, 2);
-    GLint terrainHeightLoc = glGetUniformLocation(prog, "u_heightMap");
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-    glUniform1i(terrainHeightLoc, 3);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glUniform1i(glGetUniformLocation(m_blitProgram, "u_tex"), 0);
 
-    // World Bounds
-    glUniform2f(glGetUniformLocation(prog, "u_topdownWorldMin"),
-        m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(prog, "u_topdownWorldSize"),
-        m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(prog, "u_topdownHeightMax"),
-        m_topdownMaxHeight);
+    // Fullscreen quad — built once, reused
+    if (m_blitVAO == 0) {
+        static const float quadVerts[] = {
+            -1.f, -1.f,
+             1.f, -1.f,
+             1.f,  1.f,
+            -1.f, -1.f,
+             1.f,  1.f,
+            -1.f,  1.f,
+        };
+        glGenVertexArrays(1, &m_blitVAO);
+        glGenBuffers(1, &m_blitVBO);
+        glBindVertexArray(m_blitVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, m_blitVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVerts), quadVerts, GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+    }
 
-    // Camera uniforms
-    glUniform2f(glGetUniformLocation(prog, "u_viewportSize"),
-        static_cast<float>(camData.viewportSize.x),
-        static_cast<float>(camData.viewportSize.y));
-    glUniform1f(glGetUniformLocation(prog, "u_fovY"),          camData.fovY);
-    glUniform3fv(glGetUniformLocation(prog, "u_cameraPos"), 1, &camPos[0]);
-    glUniform3fv(glGetUniformLocation(prog, "u_cameraForward"), 1, &camFwd[0]);
-    glUniform3fv(glGetUniformLocation(prog, "u_cameraRight"), 1, &camRight[0]);
-    glUniform3fv(glGetUniformLocation(prog, "u_cameraUp"), 1, &camUp[0]);
-    glUniform3fv(glGetUniformLocation(prog, "u_sunDir"), 1, &sunDir[0]);
-    glUniform1f(glGetUniformLocation(prog, "u_headlampIntensity"), 1.0f);
-    glUniform1f(glGetUniformLocation(prog, "u_headlampRange"), 8500.0f);
-    glUniform1f(glGetUniformLocation(prog, "u_headlampConeCos"), 1.0f);
-    glUniform1f(glGetUniformLocation(prog, "u_headlampEnabled"), shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-
-    // Orb uniforms
-    m_orbSSBO.bind(0);
-
-    // Full screen quad
-    static const float quadVerts[] = {
-        -1.f, -1.f,
-         1.f, -1.f,
-         1.f,  1.f,
-        -1.f, -1.f,
-         1.f,  1.f,
-        -1.f,  1.f,
-    };
-
-    GLuint vao, vbo;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVerts), quadVerts, GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
-
+    glBindVertexArray(m_blitVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
-    // ==================== CLEANUP RESTORATION ====================
-    glDisableVertexAttribArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    // Cleanup
     glBindVertexArray(0);
-    glDeleteBuffers(1, &vbo);
-    glDeleteVertexArrays(1, &vao);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
-    glEnable(GL_BLEND);
-
-    // Unbind textures — SFML needs unit 0 clean for HUD rendering
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Return SFML to a known state
-    sf::Shader::bind(nullptr);
-    sf::Texture::bind(nullptr);
-    // =============================================================
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
