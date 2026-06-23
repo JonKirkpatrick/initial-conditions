@@ -421,10 +421,9 @@ void Scene_IC_Camp::sRender() {
     sf::Sprite finalSprite(m_renderTexture.getTexture());
     window.draw(backgroundSprite);
     window.draw(finalSprite);
-    window.setActive(true);         // reclaim GL context after SFML draws
-    blitToScreen(m_sphereColorTex); // raw GL blit on top
+    window.setActive(true);
+    blitToScreen(m_sphereColorTex);
     m_hud->render(window, false);
-    window.display();
 }
 
 // =========================================================================

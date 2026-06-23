@@ -186,6 +186,28 @@ vec3 getDampedColor(vec3 rawColor, float distanceToCam) {
     return mix(rawColor, atmosphericBase, dampFactor);
 }
 
+// == Cheap Shadows on Sphere ===================================================
+
+bool shadowTestSphere(vec3 rayOrigin, vec3 rayDir, vec3 centre, float radius, float maxDist)
+{
+    vec3 oc = rayOrigin - centre;
+    float b = 2.0 * dot(oc, rayDir);
+    float c = dot(oc, oc) - radius * radius;
+    float discriminant = b * b - 4.0 * c; // Simplified assuming normalised rayDir (a = 1.0)
+
+    if (discriminant < 0.0) return false;
+    
+    float sqrtD = sqrt(discriminant);
+    float t0 = (-b - sqrtD) * 0.5;
+    float t1 = (-b + sqrtD) * 0.5;
+    
+    // Check if the intersection happens in front of us and before the max distance
+    if (t0 > 0.001 && t0 < maxDist) return true;
+    if (t1 > 0.001 && t1 < maxDist) return true;
+    
+    return false;
+}
+
 // == Main ======================================================================
 
 void main()
@@ -365,8 +387,6 @@ void main()
         float pupilRadius = 0.10 * u_orbDilation;
         float irisRadius  = 0.25;
 
-        // Sample fur texture at the same UV the body would have at this point
-        // Use the world position of the eye fragment projected onto the body's UV space
         vec3 eyeSurfaceWorld = finalHit.pos;
         vec3 bodyLocalNorm = normalize(eyeSurfaceWorld - u_orbCentre);
         vec3 furLocalNorm = vec3(
@@ -388,7 +408,7 @@ void main()
                 float alignment = max(dot(-normalize(ray.dir), u_gazeDir), 0.0);
                 float retroReflection = pow(alignment, 16.0) * lampIntensityMask;
                 
-                baseColor += u_tapetumColor * retroReflection * 5.0; 
+                baseColor += u_tapetumColor * retroReflection * 15.0; 
             }
         } 
         else if (eyeLocalZ > (1.0 - irisRadius)) {
@@ -405,17 +425,67 @@ void main()
         // Blend the fur texture over the eye surface wherever the eyelid is closed
         baseColor = mix(baseColor, furSample, eyelidMask);
 
-        // --- SQUASH INTO SOCKET EDGE ---
-        float eyeEdge = length(vec2(eyeLocalX, eyeLocalY));
-        float furBlend = smoothstep(0.6, 1.0, eyeEdge);
-        baseColor = mix(baseColor, furSample, furBlend);
-
         activeNormal = eyeLocalNorm;
     }
+
+    float blendRadius = u_orbRadius * 0.05; // Size of the blend seam zone
+
+    if (hitType == 1 || hitType == 2) {
+        // We are on an eye. Blend normal toward body normal near the seam.
+        float distToBodyCenter = length(finalHit.pos - u_orbCentre);
+        float distToBodySurface = abs(distToBodyCenter - u_orbRadius);
+        
+        if (distToBodySurface < blendRadius) {
+            float blendFactor = smoothstep(blendRadius, 0.0, distToBodySurface);
+            vec3 bodyNormalAtHit = normalize(finalHit.pos - u_orbCentre); 
+            activeNormal = normalize(mix(activeNormal, bodyNormalAtHit, blendFactor * 0.7));
+        }
+    } else if (hitType == 0) {
+        // We are on the body. Blend normal toward an inverted eye normal to bend INward.
+        float distToLeftEye = length(finalHit.pos - leftEyeCentre) - eyeRadius;
+        float distToRightEye = length(finalHit.pos - rightEyeCentre) - eyeRadius;
+        float minDistToEye = min(abs(distToLeftEye), abs(distToRightEye));
+        
+        if (minDistToEye < blendRadius) {
+            float blendFactor = smoothstep(blendRadius, 0.0, minDistToEye);
+            vec3 targetEyeCentre = (distToLeftEye < distToRightEye) ? leftEyeCentre : rightEyeCentre;
+            vec3 eyeNormalAtHit = normalize(finalHit.pos - targetEyeCentre);
+            vec3 invertedEyeNormal = -eyeNormalAtHit; 
+            vec3 carvedNormal = normalize(reflect(activeNormal, eyeNormalAtHit));
+            activeNormal = normalize(mix(activeNormal, carvedNormal, blendFactor * 0.8));
+        }
+    }
+
     baseColor = getDampedColor(baseColor, closestT);
+
+    // --- ANALYTICAL SELF-SHADOWING ---
+    float sunShadow = 1.0;
+    
+    // Push origin slightly off the surface to avoid self-intersection artifacts
+    vec3 shadowRayOrigin = finalHit.pos + activeNormal * 0.01; 
+    float maxShadowDist = u_orbRadius * 3.0; // No need to trace to infinity
+
+    if (hitType == 0) {
+        // We are on the BODY. Check if either EYE blocks the sun.
+        bool hitLeftEye  = shadowTestSphere(shadowRayOrigin, u_sunDir, leftEyeCentre, eyeRadius, maxShadowDist);
+        bool hitRightEye = shadowTestSphere(shadowRayOrigin, u_sunDir, rightEyeCentre, eyeRadius, maxShadowDist);
+        
+        if (hitLeftEye || hitRightEye) {
+            sunShadow = 0.0; // Fully occluded by an eyeball
+        }
+    } 
+    else if (hitType == 1 || hitType == 2) {
+        // We are on an EYE. Check if the BODY blocks the sun.
+        bool hitBody = shadowTestSphere(shadowRayOrigin, u_sunDir, u_orbCentre, u_orbRadius, maxShadowDist);
+        
+        if (hitBody) {
+            sunShadow = 0.0; // Fully occluded by the body socket
+        }
+    }
+
     // ==================== FINAL LIGHTING ACCUMULATION ====================
-    // 1. Sun Diffuse (Uses the bumped activeNormal)
-    float diffuse = max(dot(activeNormal, u_sunDir), 0.0) * sunVisibility;
+    // 1. Sun Diffuse (Now multiplied by our sunShadow factor!)
+    float diffuse = max(dot(activeNormal, u_sunDir), 0.0) * sunVisibility * sunShadow;
 
     // 2. Headlamp Diffuse (Uses the bumped activeNormal multiplied by the raw flashlight pool)
     float headDiff = max(dot(activeNormal, lightDir), 0.0);
