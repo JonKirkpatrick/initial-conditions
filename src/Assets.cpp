@@ -177,6 +177,27 @@ void Assets::loadFromFile(const std::string& path)
             file >> name >> path;
             addShader(name, path);
             std::cout << "Loaded shader: " << name << " from " << path << std::endl;
+        }
+        else if (str == "Species")
+        {
+            std::string name;
+            SpeciesData data;
+            
+            file >> name;
+            // Read Iris configuration
+            file >> data.irisColourAndRadius.x >> data.irisColourAndRadius.y 
+                >> data.irisColourAndRadius.z >> data.irisColourAndRadius.w;
+                
+            // Read Sclera configuration
+            file >> data.scleraColour.x >> data.scleraColour.y 
+                >> data.scleraColour.z >> data.scleraColour.w;
+                
+            // Read Tapetum configuration
+            file >> data.tapetumColourAndPresence.x >> data.tapetumColourAndPresence.y 
+                >> data.tapetumColourAndPresence.z >> data.tapetumColourAndPresence.w;
+
+            addSpecies(name, data);
+            std::cout << "Loaded species parameters for: " << name << std::endl;
         } 
         else if (str == "Cubemap")
         {
@@ -331,6 +352,34 @@ void Assets::addGLProgram(const std::string& name,
     glDeleteShader(frag);
 
     m_glProgramMap[name] = program;
+}
+
+void Assets::addSpecies(const std::string& name, const SpeciesData& data)
+{
+    // The current size of the registry vector naturally becomes the ID (0, 1, 2...)
+    int assignedId = static_cast<int>(m_speciesRegistry.size());
+    m_speciesIdMap[name] = assignedId;
+    m_speciesRegistry.push_back(data);
+}
+
+int Assets::getSpeciesId(const std::string& name) const
+{
+    auto it = m_speciesIdMap.find(name);
+    assert(it != m_speciesIdMap.end() && "Species name not found!");
+    return it->second;
+}
+
+void Assets::finalizeSpeciesBuffer()
+{
+    if (!m_speciesRegistry.empty())
+    {
+        m_speciesSSBO.upload(m_speciesRegistry);
+        std::cout << "Successfully generated Species SSBO with " 
+                  << m_speciesRegistry.size() << " entries.\n";
+        
+        // Optional: Clear out the CPU vector if you don't intend to use updateOne() 
+        // down the line, saving a bit of host memory.
+    }
 }
 
 GLuint Assets::getGLProgram(const std::string& name) const

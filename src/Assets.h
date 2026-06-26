@@ -1,9 +1,11 @@
 #pragma once
 
+#include <GL/glew.h>
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <SFML/OpenGL.hpp>
 #include "AudioManager.h"
+#include "SpeciesSSBO.h"
            
 #include <map>
 #include <cassert>
@@ -28,13 +30,16 @@ struct SpriteSheetDescriptor {
 
 class Assets
 {
-    std::map<std::string, sf::Texture>      m_textureMap;
-    std::map<std::string, sf::Font>         m_fontMap;
-    std::map<std::string, sf::SoundBuffer>  m_soundBufferMap;
-    std::map<std::string, sf::Sound>        m_soundMap;
-    std::map<std::string, std::unique_ptr<sf::Music>> m_musicMap;
-    std::map<std::string, std::unique_ptr<sf::Shader>> m_shaderMap;
-    std::map<std::string, GLuint> m_glProgramMap;
+    std::map<std::string, sf::Texture>                  m_textureMap;
+    std::map<std::string, sf::Font>                     m_fontMap;
+    std::map<std::string, sf::SoundBuffer>              m_soundBufferMap;
+    std::map<std::string, sf::Sound>                    m_soundMap;
+    std::map<std::string, std::unique_ptr<sf::Music>>   m_musicMap;
+    std::map<std::string, std::unique_ptr<sf::Shader>>  m_shaderMap;
+    std::map<std::string, GLuint>                       m_glProgramMap;
+    SpeciesSSBO                                         m_speciesSSBO;
+    std::map<std::string, int>                          m_speciesIdMap;
+    std::vector<SpeciesData>                            m_speciesRegistry;
 
     void addTexture(const std::string& textureName, const std::string& path, bool smooth = false);
     void addFont(const std::string& fontName, const std::string& path);
@@ -42,6 +47,7 @@ class Assets
     void addMusic(const std::string& musicName, const std::string& path);
     void addShader(const std::string& shaderName, const std::string& path);
     void addGLProgram(const std::string& name, const std::string& vertPath, const std::string& fragPath);
+    void addSpecies(const std::string& speciesName, const SpeciesData& speciesData);
 
     Assets() = default;
 
@@ -63,6 +69,7 @@ public:
     Assets& operator=(const Assets&) = delete;
 
     void loadFromFile(const std::string& path);
+    void finalizeSpeciesBuffer();
 
     const sf::Texture& getTexture(const std::string& textureName) const;
     const sf::Font& getFont(const std::string& fontName) const;
@@ -73,5 +80,8 @@ public:
     GLuint getCubemap(const std::string& name) const;
     GLuint getGLProgram(const std::string& name) const;
     const std::map<std::string, sf::Texture>& getTextures() const;
-
+    int getSpeciesId(const std::string& speciesName) const;
+    const SpeciesSSBO& getSpeciesSSBO() const {
+        return m_speciesSSBO;
+    };
 };
