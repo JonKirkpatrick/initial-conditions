@@ -33,6 +33,10 @@ static glm::vec3 toGLMVec3(const sf::Vector3f& v) {
     return glm::vec3(v.x, v.y, v.z);
 }
 
+static glm::vec4 toGLMVec4(const sf::Glsl::Vec4& v) {
+    return glm::vec4(v.x, v.y, v.z, v.w);
+}
+
 static sf::Vector3f forwardFromTransform(const CTransform3D& transform)
 {
     return Camera::cameraToWorld(sf::Vector3f(0.f, 0.f, -1.f), transform.pitch, transform.yaw, transform.roll);
@@ -79,7 +83,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_topdownTexture = Assets::Instance().getTexture("Test1");
     m_topdownImage = m_topdownTexture.copyToImage();
     m_charTexture = Assets::Instance().getTexture("DNeon");
-    m_charHeight = Assets::Instance().getTexture("DNeonHeight");
     m_charNormal = Assets::Instance().getTexture("DNeonNormal");
     float worldSize = Topography::BASE_SIZE;
     float worldMinCoord = -worldSize / 2.0f;
@@ -94,7 +97,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnPlayer();
     spawnCamera();
     updateCamera(0.001f);
-    spawnDebugOrbs(1);
+    spawnDebugOrbs(15000);
 
     m_entityManager.update();
 
@@ -158,7 +161,7 @@ void Scene_IC_Camp::update() {
     updateSunPosition();
     updateStarRotation();
     updateMoonPosition();
-    updateOrbShaderStorage();
+    // updateOrbShaderStorage();
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
         sGUI();
@@ -882,14 +885,107 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, const sf::Color& color, fl
 
 void Scene_IC_Camp::spawnDebugOrbs(int count)
 {
-    CEyes eyes;
-    eyes.gazeDirection = { -0.5f, 0.5f };
-    eyes.pupilDilation = 0.5f;
-    eyes.eyelidClosure = 0.0f;
-    eyes.hasTapetum    = true;
-    eyes.tapetumColor = { 1.0f, 0.8f, 0.6f }; // warm golden
+    // 1. Palettes
+    static const std::vector<sf::Color> palette = {
+        sf::Color(240, 208,  96, 190),
+        sf::Color(120, 194, 255, 170),
+        sf::Color(255, 140,  80, 180),
+        sf::Color(160, 255, 160, 175),
+        sf::Color(220, 130, 255, 185),
+    };
 
-    spawnOrbFauna(0, 5, sf::Color::White, 150.f, 1.0f, 150.f, eyes, 3.14159f / 4.0f);
+    // 2. Random Number Engine Setup
+    std::mt19937 rng(1337); // Seeded for consistency
+    
+    // Extents are -100 to 100 tiles. 
+    std::uniform_int_distribution<int> hexDist(-100, 100);
+    
+    // Tailored Ranges for your parameters
+    std::uniform_real_distribution<float> radiusDist(20.0f, 150.0f); // Expanded size range
+    std::uniform_real_distribution<float> bobRateDist(0.2f, 5.0f);
+    std::uniform_real_distribution<float> bobMagDist(5.0f, 150.0f);
+    std::uniform_real_distribution<float> gazeDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> dilationDist(0.05f, 1.0f);
+    std::uniform_real_distribution<float> closureDist(0.0f, 1.0f);
+    std::uniform_real_distribution<float> yawDist(0.0f, 2.0f * 3.141592f);
+    std::uniform_int_distribution<int>    tapetumChance(0, 1); // 50% chance
+
+    // 3. Spatial Coalescing & Hashing
+    struct PairHash {
+        std::size_t operator()(const std::pair<int,int>& p) const noexcept {
+            return std::hash<int>{}(p.first) ^ (std::hash<int>{}(p.second) << 16);
+        }
+    };
+    std::unordered_set<std::pair<int,int>, PairHash> usedCoords;
+
+    // --- Density Rule: Minimum hex distance separation ---
+    // If an orb is huge, we don't want another orb spawning 1 tile away.
+    // Setting this to 3 means any spawned orb blocks a 3-tile radius around it.
+    const int minHexDistance = 3; 
+
+    auto IsTooClose = [&](int q, int r) {
+        for (const auto& [uq, ur] : usedCoords) {
+            // Hexagonal Manhattan Distance formula
+            int dist = (std::abs(q - uq) + std::abs(q + r - uq - ur) + std::abs(r - ur)) / 2;
+            if (dist < minHexDistance) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    int spawned     = 0;
+    int maxAttempts = count * 50; // Increased window since density constraints drop hints
+    int attempts    = 0;
+
+    while (spawned < count && attempts < maxAttempts)
+    {
+        ++attempts;
+        int hexQ = hexDist(rng);
+        int hexR = hexDist(rng);
+
+        // Enforce the coordinate density rule
+        if (IsTooClose(hexQ, hexR)) continue;
+
+        // Reserve coordinates
+        usedCoords.insert({hexQ, hexR});
+
+        // Pull parameter selections
+        const sf::Color& color = palette[spawned % palette.size()];
+        float radius           = radiusDist(rng);
+        float bobRate          = bobRateDist(rng);
+        float bobMag           = bobMagDist(rng);
+        float yaw              = yawDist(rng);
+
+        // Setup Eye Vector/Object Data
+        sf::Vector2f gazeDirection = { gazeDist(rng), gazeDist(rng) };
+        // Simple normalization for a 2D Vector
+        float length = std::sqrt(gazeDirection.x * gazeDirection.x + gazeDirection.y * gazeDirection.y);
+        if (length > 0.0f) {
+            gazeDirection.x /= length;
+            gazeDirection.y /= length;
+        }
+
+        bool hasTapetum = (tapetumChance(rng) == 0);
+        
+        // Dynamic Tapetum Color (Derived from base color components inverted for high contrast)
+        sf::Vector3f tapetumCol = {
+            1.0f - (color.r / 255.0f),
+            1.0f - (color.g / 255.0f),
+            1.0f - (color.b / 255.0f)
+        };
+
+        CEyes eyes;
+        eyes.gazeDirection = gazeDirection;
+        eyes.pupilDilation = dilationDist(rng);
+        eyes.eyelidClosure = closureDist(rng);
+        eyes.hasTapetum    = hasTapetum;
+        eyes.tapetumColor  = tapetumCol;
+
+        // 4. Execution Call matching your signature
+        spawnOrbFauna(hexQ, hexR, color, radius, bobRate, bobMag, eyes, yaw);
+        ++spawned;
+    }
 }
 
 void Scene_IC_Camp::buildTerrainGrid() {
@@ -1179,79 +1275,47 @@ void Scene_IC_Camp::initializeSphereFBO() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::initializeOrbShaderStorage()
+std::vector<OrbData> Scene_IC_Camp::buildOrbData() const
 {
     std::vector<OrbData> orbData;
+    orbData.reserve(m_entityManager.getEntities("orb").size());
 
     for (auto& orb : m_entityManager.getEntities("orb"))
     {
         auto& t    = m_entityManager.getTransform(orb);
         auto& c    = m_entityManager.getOrb(orb);
         auto& eyes = m_entityManager.getEyes(orb);
-
         auto f = Camera::getForward(t);
         auto r = Camera::getRight(t);
         auto u = -Camera::getUp(t);
 
-        sf::Vector3f tapetum = {
-            eyes.tapetumColor.x,
-            eyes.tapetumColor.y,
-            eyes.tapetumColor.z
-        };
-
         OrbData data;
-        data.centreAndRadius            = { t.pos.x, t.pos.y, t.pos.z, c.radius };
-        data.forwardAndDilation         = { f.x, f.y, f.z, eyes.pupilDilation };
-        data.rightAndEyelidClosure      = { r.x, r.y, r.z, eyes.eyelidClosure };
-        data.upPadded                   = { u.x, u.y, u.z, 0.0f };
-        data.gazeDirPadded              = { eyes.gazeDirection.x, eyes.gazeDirection.y, 0.0f, 0.0f };
-        data.tapetumColourAndPresence   = { tapetum.x, tapetum.y, tapetum.z, eyes.hasTapetum ? 1.0f : 0.0f };
-        data.squashAndDirection         = { 0.0f, 1.0f, 0.0f, 1.0f }; // placeholder
-        data.irisAndSpeciesIdx          = { 0.2f, 0.5f, 0.8f, 0.0f }; // placeholder
-
+        data.centreAndRadius          = { t.pos.x, t.pos.y, t.pos.z, c.radius };
+        data.forwardAndDilation       = { f.x, f.y, f.z, eyes.pupilDilation };
+        data.rightAndEyelidClosure    = { r.x, r.y, r.z, eyes.eyelidClosure };
+        data.upPadded                 = { u.x, u.y, u.z, 0.0f };
+        data.gazeDirPadded            = { eyes.gazeDirection.x, eyes.gazeDirection.y, 0.0f, 0.0f };
+        data.tapetumColourAndPresence = { eyes.tapetumColor.x, eyes.tapetumColor.y, eyes.tapetumColor.z,
+                                          eyes.hasTapetum ? 1.0f : 0.0f };
+        data.squashAndDirection       = { 0.0f, 1.0f, 0.0f, 1.0f };
+        data.irisAndSpeciesIdx        = { 0.2f, 0.5f, 0.8f, static_cast<float>(c.speciesIdx) };
         orbData.push_back(data);
     }
+    return orbData;
+}
 
-    m_orbSSBO.upload(orbData);
+void Scene_IC_Camp::initializeOrbShaderStorage()
+{
+    m_orbSSBO.upload(buildOrbData());
 }
 
 void Scene_IC_Camp::updateOrbShaderStorage()
 {
-    std::vector<OrbData> orbData;
-
-    for (auto& orb : m_entityManager.getEntities("orb"))
-    {
-        auto& t    = m_entityManager.getTransform(orb);
-        auto& c    = m_entityManager.getOrb(orb);
-        auto& eyes = m_entityManager.getEyes(orb);
-
-        auto f = Camera::getForward(t);
-        auto r = Camera::getRight(t);
-        auto u = -Camera::getUp(t);
-
-        sf::Vector3f tapetum = {
-            eyes.tapetumColor.x,
-            eyes.tapetumColor.y,
-            eyes.tapetumColor.z
-        };
-
-        OrbData data;
-        data.centreAndRadius            = { t.pos.x, t.pos.y, t.pos.z, c.radius };
-        data.forwardAndDilation         = { f.x, f.y, f.z, eyes.pupilDilation };
-        data.rightAndEyelidClosure      = { r.x, r.y, r.z, eyes.eyelidClosure };
-        data.upPadded                   = { u.x, u.y, u.z, 0.0f };
-        data.gazeDirPadded              = { eyes.gazeDirection.x, eyes.gazeDirection.y, 0.0f, 0.0f };
-        data.tapetumColourAndPresence   = { tapetum.x, tapetum.y, tapetum.z, eyes.hasTapetum ? 1.0f : 0.0f };
-        data.squashAndDirection         = { 0.0f, 1.0f, 0.0f, 1.0f }; // placeholder
-        data.irisAndSpeciesIdx          = { 0.2f, 0.5f, 0.8f, 0.0f }; // placeholder
-
-        orbData.push_back(data);
-    }
-
-    if (m_orbSSBO.count() != (int)orbData.size())
-        m_orbSSBO.upload(orbData);   // reallocate
+    auto orbData = buildOrbData();
+    if (m_orbSSBO.count() != static_cast<int>(orbData.size()))
+        m_orbSSBO.upload(orbData);
     else
-        m_orbSSBO.update(orbData);   // just update contents
+        m_orbSSBO.update(orbData);
 }
 
 
@@ -1433,6 +1497,7 @@ void Scene_IC_Camp::renderDemoSphere()
     glm::vec3 camRight = toGLMVec3(Camera::getRight(camTransform));
     glm::vec3 camUp    = toGLMVec3(Camera::getUp(camTransform));
     glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);
+    glm::vec4 sunColor = toGLMVec4(m_astroState.sunColor);
     auto      vp       = Camera::getVPMatrix(camTransform, camData);
 
     // ==================== FBO SETUP ====================
@@ -1440,8 +1505,14 @@ void Scene_IC_Camp::renderDemoSphere()
     sf::Vector2u windowSize = m_game.window().getSize();
     glViewport(0, 0, windowSize.x, windowSize.y);
     glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_DEPTH_TEST);
+    
+    // Clear both color and depth buffers
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
+    
+    // CHANGE THIS: Enable depth testing so the GPU rejects further fragments
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL); 
+    
     glDisable(GL_BLEND);
 
     // ==================== LAZY INIT ====================
@@ -1488,6 +1559,7 @@ void Scene_IC_Camp::renderDemoSphere()
         1, GL_FALSE, vp.data());
 
     glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_sunDir"), 1, &sunDir[0]);
+    glUniform4fv(glGetUniformLocation(m_demoSphereProgram, "u_sunColor"), 1, &sunColor[0]);
     glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampIntensity"), 1.0f);
     glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampRange"),     8500.0f);
     glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampConeCos"),   1.0f);
@@ -1503,6 +1575,7 @@ void Scene_IC_Camp::renderDemoSphere()
     glBindVertexArray(0);
     glUseProgram(0);
     glEnable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, 0);

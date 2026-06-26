@@ -32,7 +32,7 @@ void main()
     float radius   = orb.centreAndRadius.w;
 
     // Scale the unit cube to the orb's radius and translate to its centre
-    vec3 worldPos  = a_cubePos * radius + centre;
+    vec3 worldPos  = a_cubePos * radius * 1.05 + centre;
 
     v_instanceID   = gl_InstanceID;
     gl_Position    = u_viewProj * vec4(worldPos, 1.0);

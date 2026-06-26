@@ -2,12 +2,16 @@
 
 // Demo fragment shader for Fenestra.
 
+// ==============================================================================
+// == SSBO Layout ===============================================================
+// ==============================================================================
+
 struct OrbData {
     vec4 centreAndRadius;           // xyz = centre,        w = radius
     vec4 forwardAndDilation;        // xyz = forward,       w = dilation
     vec4 rightAndEyelidClosure;     // xyz = right,         w = eyelidClosure
     vec4 upPadded;                  // xyz = up,            w = (spare)
-    vec4 gazeDirPadded;             // xy  = gazeDir,       zw = (spare — 3 floats free!)
+    vec4 gazeDirPadded;             // xy  = gazeDir,       zw = (spares)
     vec4 tapetumColourAndPresence;  // xyz = colour,        w = presence
     vec4 squashAndDirection;        // xyz = direction,     w = squashAmount
     vec4 irisAndSpeciesIdx;         // xyz = irisColour,    w = speciesRaw
@@ -19,6 +23,10 @@ layout(std430, binding = 0) readonly buffer OrbBuffer {
 
 flat in int v_instanceID;
 
+// ==============================================================================
+// == Uniforms ==================================================================
+// ==============================================================================
+
 // Texture samples
 uniform sampler2D u_charTex;
 uniform sampler2D u_charNormalTex;
@@ -26,41 +34,126 @@ uniform sampler2D u_bakeTex;
 uniform sampler2D u_heightMap;
 
 // World bounds
-uniform vec2        u_topdownWorldMin;
-uniform vec2        u_topdownWorldSize;
-uniform float       u_topdownHeightMax;
+uniform vec2      u_topdownWorldMin;
+uniform vec2      u_topdownWorldSize;
+uniform float     u_topdownHeightMax;
 
 // Camera uniforms
-uniform vec2  u_viewportSize;
-uniform float u_fovY;
-uniform vec3  u_cameraPos;
-uniform vec3  u_cameraRight;
-uniform vec3  u_cameraUp;
-uniform vec3  u_cameraForward;
+uniform vec2      u_viewportSize;
+uniform float     u_fovY;
+uniform vec3      u_cameraPos;
+uniform vec3      u_cameraRight;
+uniform vec3      u_cameraUp;
+uniform vec3      u_cameraForward;
 
 // Light uniforms
-uniform vec3  u_sunDir;       // world-space, normalised
-uniform vec3  u_sunColor;
-uniform float u_headlampIntensity;
-uniform float u_headlampRange;
-uniform float u_headlampCone; // cos(angle) of headlamp cone for cutoff
-uniform float u_headlampEnabled;
-
-OrbData orb = orbs[v_instanceID];
+uniform vec3      u_sunDir;
+uniform vec4      u_sunColor;
+uniform float     u_headlampIntensity;
+uniform float     u_headlampRange;
+uniform float     u_headlampCone;       // cos(angle) of headlamp cone for cutoff
+uniform float     u_headlampEnabled;
 
 out vec4 fragColor;
 
-// == Ray helpers ==============================================================
+// ==============================================================================
+// == OrbInstance — unpacked, derived per-instance data =========================
+// ==============================================================================
+
+struct OrbInstance {
+    // Directly unpacked from OrbData
+    vec3  centre;
+    float radius;
+    vec3  forward;
+    float dilation;
+    vec3  right;
+    float eyelidClosure;
+    vec3  up;
+    vec3  tapetumColor;
+    float tapetumPresence;
+    vec3  gazeDir;
+    vec3  squashDirection;
+    float squashAmount;
+    vec3  irisColour;
+    float speciesRaw;
+
+    // Derived geometry
+    vec3  leftEyeCentre;
+    vec3  rightEyeCentre;
+    float eyeRadius;
+};
+
+OrbInstance unpackOrb(int instanceID)
+{
+    OrbData raw = orbs[instanceID];
+    OrbInstance o;
+
+    o.centre          = raw.centreAndRadius.xyz;
+    o.radius          = raw.centreAndRadius.w;
+    o.forward         = raw.forwardAndDilation.xyz;
+    o.dilation        = raw.forwardAndDilation.w;
+    o.right           = raw.rightAndEyelidClosure.xyz;
+    o.eyelidClosure   = raw.rightAndEyelidClosure.w;
+    o.up              = raw.upPadded.xyz;
+    o.tapetumColor    = raw.tapetumColourAndPresence.xyz;
+    o.tapetumPresence = raw.tapetumColourAndPresence.w;
+    o.squashDirection = raw.squashAndDirection.xyz;
+    o.squashAmount    = raw.squashAndDirection.w;
+    o.irisColour      = raw.irisAndSpeciesIdx.xyz;
+    o.speciesRaw      = raw.irisAndSpeciesIdx.w;
+
+    // Decode gaze direction from compact 2D representation
+    float maxGazeSpread = 0.57735027;
+    vec2  gazeDirRaw    = raw.gazeDirPadded.xy;
+    vec3  gazeTarget    = o.forward
+                        + (gazeDirRaw.x * maxGazeSpread * o.right)
+                        + (gazeDirRaw.y * maxGazeSpread * o.up);
+    o.gazeDir = normalize(gazeTarget);
+
+    // Derive eye placement geometry
+    o.eyeRadius = o.radius * 0.22;
+    float forwardPush = o.radius * 0.78;
+    float sideSpread  = o.radius * 0.35;
+    float verticalUp  = o.radius * 0.35;
+
+    o.leftEyeCentre  = o.centre + o.forward * forwardPush + o.right * sideSpread + o.up * verticalUp;
+    o.rightEyeCentre = o.centre + o.forward * forwardPush - o.right * sideSpread + o.up * verticalUp;
+
+    return o;
+}
+
+// ==============================================================================
+// == G-Buffer Structs ==========================================================
+// ==============================================================================
+
+struct GeometrySample {
+    vec3  pos;
+    vec3  normal;    // world-space, after all normal map / blend / seam work
+    float depth;     // closestT
+    int   hitType;   // 0 = body, 1 = left eye, 2 = right eye
+};
+
+struct MaterialSample {
+    vec3  albedo;
+    float specPower;
+    float specMask;
+    float headSpecPower;
+    float headSpecMask;
+    float eyelidCoverage;
+};
+
+// ==============================================================================
+// == Ray Helpers ===============================================================
+// ==============================================================================
 
 struct Ray {
     vec3 origin;
     vec3 dir;
 };
 
-// Reconstruct a world-space ray for this fragment from camera parameters.
 Ray reconstructRay(vec2 fragCoord)
 {
-    vec2 ndc = (fragCoord / u_viewportSize) * 2.0 - 1.0;
+    vec2  ndc         = (fragCoord / u_viewportSize) * 2.0 - 1.0;
     float aspectRatio = u_viewportSize.x / u_viewportSize.y;
     float halfTanFov  = tan(u_fovY * 0.5);
 
@@ -74,7 +167,9 @@ Ray reconstructRay(vec2 fragCoord)
     return Ray(u_cameraPos, dir);
 }
 
-// == Sphere intersection =======================================================
+// ==============================================================================
+// == Sphere Intersection =======================================================
+// ==============================================================================
 
 struct SphereHit {
     bool  hit;
@@ -88,10 +183,10 @@ SphereHit intersectSphere(Ray ray, vec3 centre, float radius)
     SphereHit result;
     result.hit = false;
 
-    vec3  oc = ray.origin - centre;
-    float a  = dot(ray.dir, ray.dir);
-    float b  = 2.0 * dot(oc, ray.dir);
-    float c  = dot(oc, oc) - radius * radius;
+    vec3  oc           = ray.origin - centre;
+    float a            = dot(ray.dir, ray.dir);
+    float b            = 2.0 * dot(oc, ray.dir);
+    float c            = dot(oc, oc) - radius * radius;
     float discriminant = b * b - 4.0 * a * c;
 
     if (discriminant < 0.0) return result;
@@ -111,392 +206,407 @@ SphereHit intersectSphere(Ray ray, vec3 centre, float radius)
     return result;
 }
 
+// ==============================================================================
+// == Normal Map ================================================================
+// ==============================================================================
+
 vec3 normalFromNormalMap(vec2 uv)
 {
-    vec2 packedNormal = texture(u_charNormalTex, uv).rg;
+    vec2 packedNormal   = texture(u_charNormalTex, uv).rg;
     vec3 tangentNormal;
-    tangentNormal.xy = packedNormal * 2.0 - 1.0;
-    tangentNormal.z = sqrt(max(0.0, 1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
+    tangentNormal.xy    = packedNormal * 2.0 - 1.0;
+    tangentNormal.z     = sqrt(max(0.0, 1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
     return tangentNormal;
 }
 
-// == World Space Reconstruction ================================================
+// ==============================================================================
+// == World Space / Terrain =====================================================
+// ==============================================================================
 
-vec2 decodeXZ(vec4 c) {
-    return c.xy;
-}
-
-float rawHeightAt(ivec2 uv) {
-    vec4 c = texelFetch(u_heightMap, uv, 0);
-    vec3 bytes = floor(c.rgb * 255.0 + 0.5);
+float rawHeightAt(ivec2 uv)
+{
+    vec4  c      = texelFetch(u_heightMap, uv, 0);
+    vec3  bytes  = floor(c.rgb * 255.0 + 0.5);
     float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
     return scaled * (u_topdownHeightMax / 16777215.0);
 }
 
-float decodeHeight(vec2 xz) {
-    vec2 uv = (xz - u_topdownWorldMin) / u_topdownWorldSize;
-    uv.y = 1.0 - uv.y;
-    
+float decodeHeight(vec2 xz)
+{
+    vec2 uv      = (xz - u_topdownWorldMin) / u_topdownWorldSize;
+    uv.y         = 1.0 - uv.y;
     vec2 texSize = vec2(textureSize(u_heightMap, 0));
-    vec2 px = uv * (texSize - 1.0);
-    
-    ivec2 p0 = ivec2(floor(px));
-    vec2 f = fract(px);
-    
+    vec2 px      = uv * (texSize - 1.0);
+
+    ivec2 p0  = ivec2(floor(px));
+    vec2  f   = fract(px);
     float h00 = rawHeightAt(p0);
     float h10 = rawHeightAt(p0 + ivec2(1, 0));
     float h01 = rawHeightAt(p0 + ivec2(0, 1));
     float h11 = rawHeightAt(p0 + ivec2(1, 1));
-    
-    float h0 = mix(h00, h10, f.x);
-    float h1 = mix(h01, h11, f.x);
-    return mix(h0, h1, f.y);
+
+    return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
 }
 
+// ==============================================================================
 // == Atmospheric Adjustments ===================================================
+// ==============================================================================
 
-vec3 getDampedNormal(vec3 rawNormal, float distanceToCam) {
-    // Distance boundaries defined in centimeters (1.0 = 1cm)
-    // Detail begins softening smoothly at 0.5 km and hits perfectly upright at 2.0 km
-    float startDampDist = 50000.0; 
-    float maxDampDist   = 200000.0; 
-    
-    // Compute our blending factor [0.0 = full detail, 1.0 = vertical flat]
-    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
-    
-    // Smooth out the blending rate so the transition at 1.5km isn't a harsh line
-    dampFactor = smoothstep(0.0, 1.0, dampFactor);
-    
-    // Blend smoothly from the computed slope vector straight up toward vec3(0.0, 1.0, 0.0)
-    vec3 straightUp = vec3(0.0, 1.0, 0.0);
-    return normalize(mix(rawNormal, straightUp, dampFactor));
-}
-
-vec3 getDampedColor(vec3 rawColor, float distanceToCam) {
-    float startDampDist = 50000.0;  // 0.5 km
-    float maxDampDist   = 200000.0; // 2.0 km
-    
-    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
-    dampFactor = smoothstep(0.0, 1.0, dampFactor);
-    
-    // Artistic Target Color: A desaturated, slightly atmospheric grey-blue hue.
-    // This forms a perfect bridge color before the final sky fog layer sweeps over it.
-    vec3 atmosphericBase = vec3(0.53, 0.58, 0.64); 
-    
+vec3 getDampedColor(vec3 rawColor, float distanceToCam)
+{
+    float startDampDist   = 50000.0;
+    float maxDampDist     = 200000.0;
+    float dampFactor      = smoothstep(0.0, 1.0,
+                            clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0));
+    vec3  atmosphericBase = vec3(0.53, 0.58, 0.64);
     return mix(rawColor, atmosphericBase, dampFactor);
 }
 
-// == Cheap Shadows on Sphere ===================================================
+// ==============================================================================
+// == Shadow Test ===============================================================
+// ==============================================================================
 
 bool shadowTestSphere(vec3 rayOrigin, vec3 rayDir, vec3 centre, float radius, float maxDist)
 {
-    vec3 oc = rayOrigin - centre;
-    float b = 2.0 * dot(oc, rayDir);
-    float c = dot(oc, oc) - radius * radius;
-    float discriminant = b * b - 4.0 * c; // Simplified assuming normalised rayDir (a = 1.0)
+    vec3  oc           = rayOrigin - centre;
+    float b            = 2.0 * dot(oc, rayDir);
+    float c            = dot(oc, oc) - radius * radius;
+    float discriminant = b * b - 4.0 * c;
 
     if (discriminant < 0.0) return false;
-    
+
     float sqrtD = sqrt(discriminant);
-    float t0 = (-b - sqrtD) * 0.5;
-    float t1 = (-b + sqrtD) * 0.5;
-    
-    // Check if the intersection happens in front of us and before the max distance
+    float t0    = (-b - sqrtD) * 0.5;
+    float t1    = (-b + sqrtD) * 0.5;
+
     if (t0 > 0.001 && t0 < maxDist) return true;
     if (t1 > 0.001 && t1 < maxDist) return true;
-    
+
     return false;
 }
 
+// ==============================================================================
+// == PHASE 1 — Geometry ========================================================
+// ==============================================================================
+
+GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int hitType)
+{
+    GeometrySample geo;
+    geo.pos     = finalHit.pos;
+    geo.normal  = finalHit.normal;   // will be refined below
+    geo.depth   = finalHit.t;
+    geo.hitType = hitType;
+
+    vec3 activeNormal = finalHit.normal;
+
+    if (hitType == 0)
+    {
+        // Body — apply normal map in tangent space
+        vec3 localNorm = vec3(
+            dot(finalHit.normal, orb.right),
+            dot(finalHit.normal, orb.up),
+            dot(finalHit.normal, orb.forward)
+        );
+
+        float u = (atan(localNorm.z, -localNorm.x) / 3.1415926535) * 0.5 + 0.5;
+        float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
+        vec2  uv = vec2(u, v);
+
+        vec3 tangentNormal = normalFromNormalMap(uv);
+        vec3 N = finalHit.normal;
+        vec3 T = normalize(vec3(-localNorm.z, 0.0, localNorm.x));
+        T = normalize(T.x * orb.right + T.y * orb.up + T.z * orb.forward);
+        vec3 B = cross(N, T);
+
+        activeNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
+    }
+    else
+    {
+        // Eye — compute local coordinates relative to the struck eye
+        vec3 eyeCentre   = (hitType == 1) ? orb.leftEyeCentre : orb.rightEyeCentre;
+        vec3 eyeLocalNorm = normalize(finalHit.pos - eyeCentre);
+        float eyeLocalY   = dot(eyeLocalNorm, orb.up);
+
+        activeNormal = eyeLocalNorm;
+
+        // Eyelid closure normal bend
+        float eyelidThreshold = mix(-0.6, 1.0, orb.eyelidClosure);
+        float lipWidth        = 0.03;
+        float eyelidMask      = smoothstep(eyelidThreshold, eyelidThreshold - lipWidth, -eyeLocalY);
+        float lipFactor       = 4.0 * eyelidMask * (1.0 - eyelidMask);
+
+        if (lipFactor > 0.0) {
+            vec3 lidTiltDir      = orb.up * sign(-eyeLocalY - eyelidThreshold);
+            vec3 thicknessNormal = normalize(eyeLocalNorm * 0.3 + lidTiltDir * 0.7);
+            activeNormal         = normalize(mix(activeNormal, thicknessNormal, lipFactor * 0.8));
+        }
+    }
+
+    // Seam blending between eye and body normals
+    float blendRadius = orb.radius * 0.05;
+
+    if (hitType == 1 || hitType == 2)
+    {
+        // On an eye — blend normal toward body near the socket seam,
+        // but suppress where the eyelid is already painting over
+        vec3  eyeCentre       = (hitType == 1) ? orb.leftEyeCentre : orb.rightEyeCentre;
+        vec3  eyeLocalNorm    = normalize(finalHit.pos - eyeCentre);
+        float eyeLocalY       = dot(eyeLocalNorm, orb.up);
+        float eyelidThreshold = mix(-0.6, 1.0, orb.eyelidClosure);
+        float lipWidth        = 0.03;
+        float eyelidMask      = smoothstep(eyelidThreshold, eyelidThreshold - lipWidth, -eyeLocalY);
+
+        float distToBodyCenter  = length(finalHit.pos - orb.centre);
+        float distToBodySurface = abs(distToBodyCenter - orb.radius);
+
+        if (distToBodySurface < blendRadius) {
+            float blendFactor   = smoothstep(blendRadius, 0.0, distToBodySurface);
+            blendFactor        *= eyelidMask;
+            vec3 bodyNormal     = normalize(finalHit.pos - orb.centre);
+            activeNormal        = normalize(mix(activeNormal, bodyNormal, blendFactor * 0.7));
+        }
+    }
+    else // hitType == 0
+    {
+        // On the body — carve a subtle concave socket where the eyes sit
+        float distToLeftEye  = length(finalHit.pos - orb.leftEyeCentre)  - orb.eyeRadius;
+        float distToRightEye = length(finalHit.pos - orb.rightEyeCentre) - orb.eyeRadius;
+        float minDistToEye   = min(abs(distToLeftEye), abs(distToRightEye));
+
+        if (minDistToEye < blendRadius) {
+            float blendFactor    = smoothstep(blendRadius, 0.0, minDistToEye);
+            vec3  targetEyeCentre = (abs(distToLeftEye) < abs(distToRightEye))
+                                  ? orb.leftEyeCentre : orb.rightEyeCentre;
+
+            vec3  bodyToEye       = normalize(finalHit.pos - targetEyeCentre);
+            float eyeLocalY       = dot(bodyToEye, orb.up);
+            float eyelidThreshold = mix(-0.6, 1.0, orb.eyelidClosure);
+            float lipWidth        = 0.03;
+            float lidCoverage     = smoothstep(eyelidThreshold, eyelidThreshold - lipWidth, -eyeLocalY);
+
+            vec3 eyeNormalAtHit = normalize(finalHit.pos - targetEyeCentre);
+            vec3 invertedCarve  = normalize(reflect(activeNormal, eyeNormalAtHit));
+
+            activeNormal = normalize(mix(activeNormal, invertedCarve,
+                                        blendFactor * (1.0 - lidCoverage) * 0.8));
+        }
+    }
+
+    geo.normal = activeNormal;
+    return geo;
+}
+
+// ==============================================================================
+// == PHASE 2 — Material ========================================================
+// ==============================================================================
+
+MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, float lampIntensityMask)
+{
+    MaterialSample mat;
+    mat.eyelidCoverage = 0.0;
+
+    vec3 albedo = vec3(1.0);
+
+    if (geo.hitType == 0)
+    {
+        // Inside resolveMaterial (hitType == 0)
+        vec3 rawSurfaceNormal = normalize(geo.pos - orb.centre); // Recover pristine surface vector
+
+        vec3 localNorm = vec3(
+            dot(rawSurfaceNormal, orb.right),
+            dot(rawSurfaceNormal, orb.up),
+            dot(rawSurfaceNormal, orb.forward)
+        );
+        float u = (atan(localNorm.z, -localNorm.x) / 3.1415926535) * 0.5 + 0.5;
+        float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
+        albedo = texture(u_charTex, vec2(u, v)).rgb;
+
+        mat.specPower     = 12.0;
+        mat.specMask      = 0.14;
+        mat.headSpecPower = 12.0;
+        mat.headSpecMask  = 0.04;
+    }
+    else
+    {
+        // Eye — resolve pupil / iris / eyelid layers
+        vec3  eyeCentre    = (geo.hitType == 1) ? orb.leftEyeCentre : orb.rightEyeCentre;
+        vec3  eyeLocalNorm = normalize(geo.pos - eyeCentre);
+        float eyeLocalY    = dot(eyeLocalNorm, orb.up);
+        float eyeLocalZ    = dot(eyeLocalNorm, orb.gazeDir);
+
+        float pupilRadius  = 0.10 * orb.dilation;
+        float irisRadius   = 0.25;
+
+        if (eyeLocalZ > (1.0 - pupilRadius)) {
+            albedo = vec3(0.0);
+
+            if (orb.tapetumPresence > 0.5) {
+                float alignment      = max(dot(-normalize(ray.dir), orb.gazeDir), 0.0);
+                float retroReflection = pow(alignment, 16.0) * lampIntensityMask;
+                albedo              += orb.tapetumColor * retroReflection * 15.0;
+            }
+        }
+        else if (eyeLocalZ > (1.0 - irisRadius)) {
+            albedo = orb.irisColour;
+        }
+
+        // Eyelid — paint body texture over the eye where the lid has closed
+        float eyelidThreshold = mix(-0.6, 1.0, orb.eyelidClosure);
+        float lipWidth        = 0.03;
+        float eyelidMask      = smoothstep(eyelidThreshold, eyelidThreshold - lipWidth, -eyeLocalY);
+        mat.eyelidCoverage    = eyelidMask;
+
+        if (eyelidMask > 0.0) {
+            vec3 bodyLocalNorm = normalize(geo.pos - orb.centre);
+            vec3 furLocalNorm  = vec3(
+                dot(bodyLocalNorm, orb.right),
+                dot(bodyLocalNorm, orb.up),
+                dot(bodyLocalNorm, orb.forward)
+            );
+            float furU   = (atan(furLocalNorm.z, -furLocalNorm.x) / 3.1415926535) * 0.5 + 0.5;
+            float furV   = acos(clamp(furLocalNorm.y, -1.0, 1.0)) / 3.1415926535;
+            vec3  furSample = texture(u_charTex, vec2(furU, furV)).rgb;
+            albedo       = mix(albedo, furSample, eyelidMask);
+        }
+
+        // Blend spec parameters toward body values wherever the eyelid covers the eye
+        mat.specPower     = mix(64.0,  12.0, eyelidMask);
+        mat.specMask      = mix(0.85,  0.14, eyelidMask);
+        mat.headSpecPower = mix(64.0,  12.0, eyelidMask);
+        mat.headSpecMask  = mix(0.35,  0.04, eyelidMask);
+    }
+
+    mat.albedo = getDampedColor(albedo, geo.depth);
+    return mat;
+}
+
+// ==============================================================================
+// == PHASE 3 — Lighting ========================================================
+// ==============================================================================
+
+vec3 resolveLight(
+    GeometrySample geo,
+    MaterialSample mat,
+    OrbInstance    orb,
+    float          sunVisibility,
+    float          ambient,
+    float          lampIntensityMask,
+    vec3           lightDir,
+    float          spot,
+    float          distToCamera)
+{
+    // Analytical self-shadowing
+    float sunShadow      = 1.0;
+    vec3  shadowOrigin   = geo.pos + geo.normal * (orb.radius * 0.01);
+    float maxShadowDist  = orb.radius * 3.0;
+
+    if (geo.hitType == 0) {
+        bool hitLeft  = shadowTestSphere(shadowOrigin, u_sunDir, orb.leftEyeCentre,  orb.eyeRadius, maxShadowDist);
+        bool hitRight = shadowTestSphere(shadowOrigin, u_sunDir, orb.rightEyeCentre, orb.eyeRadius, maxShadowDist);
+        if (hitLeft || hitRight) sunShadow = 0.0;
+    }
+    else {
+        bool hitBody = shadowTestSphere(shadowOrigin, u_sunDir, orb.centre, orb.radius, maxShadowDist);
+        if (hitBody) sunShadow = 0.0;
+    }
+
+    vec3 viewDir = normalize(u_cameraPos - geo.pos);
+
+    // Sun diffuse
+    float diffuse = max(dot(geo.normal, u_sunDir), 0.0) * sunVisibility * sunShadow;
+
+    // Sun specular (Blinn-Phong)
+    vec3  sunHalf  = normalize(u_sunDir + viewDir);
+    float sunSpec  = pow(max(dot(geo.normal, sunHalf), 0.0), mat.specPower)
+                   * mat.specMask * sunVisibility * sunShadow;
+
+    // Headlamp diffuse
+    float headDiff        = max(dot(geo.normal, lightDir), 0.0);
+    float headlampDiffuse = headDiff * lampIntensityMask;
+
+    // Headlamp specular
+    vec3  headHalf     = normalize(lightDir + viewDir);
+    float headlampSpec = pow(max(dot(geo.normal, headHalf), 0.0), mat.headSpecPower)
+                       * mat.headSpecMask * lampIntensityMask;
+
+    vec3 headlampContribution = vec3(0.0);
+    if (distToCamera > 0.1 && spot > 0.001) {
+        vec3 lampColor        = vec3(1.0, 0.95, 0.85);
+        headlampContribution  = mat.albedo * headlampDiffuse * lampColor
+                              + vec3(headlampSpec) * lampColor;
+    }
+
+    vec3 sunSpecColor = u_sunColor.xyz * sunSpec;
+    return mat.albedo * (ambient + (1.0 - ambient) * diffuse)
+         + sunSpecColor
+         + headlampContribution;
+}
+
+// ==============================================================================
 // == Main ======================================================================
+// ==============================================================================
 
 void main()
 {
     // SFML Y-flip
-    vec2 fragSFML = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
+    vec2 fragSFML    = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
     vec2 fragScreenUv = fragSFML / u_viewportSize;
-    vec4 bakeC = texture(u_bakeTex, fragScreenUv);
+    vec4 bakeC       = texture(u_bakeTex, fragScreenUv);
 
-    Ray ray = reconstructRay(fragSFML);
+    Ray         ray = reconstructRay(fragSFML);
+    OrbInstance orb = unpackOrb(v_instanceID);
 
-    // Unpack Uniforms
+    // Intersect ray with body and both eyes
+    SphereHit bodyHit  = intersectSphere(ray, orb.centre,         orb.radius);
+    SphereHit leftHit  = intersectSphere(ray, orb.leftEyeCentre,  orb.eyeRadius);
+    SphereHit rightHit = intersectSphere(ray, orb.rightEyeCentre, orb.eyeRadius);
 
-    vec3 u_orbCentre            = orb.centreAndRadius.xyz;
-    float u_orbRadius           = orb.centreAndRadius.w;
-    vec3 u_orbForward           = orb.forwardAndDilation.xyz;
-    float u_orbDilation         = orb.forwardAndDilation.w;
-    vec3 u_orbRight             = orb.rightAndEyelidClosure.xyz;
-    float u_orbEyelidClosure    = orb.rightAndEyelidClosure.w;
-    vec3 u_tapetumColor         = orb.tapetumColourAndPresence.xyz;
-    float u_tapetumPresence     = orb.tapetumColourAndPresence.w;
-    vec3 u_orbUp                = orb.upPadded.xyz;
-    vec2 gazeDirRaw = orb.gazeDirPadded.xy;
-    float maxGazeSpread = 0.57735027;
-    vec3 gazeTarget = u_orbForward
-                    + (gazeDirRaw.x * maxGazeSpread * u_orbRight)
-                    + (gazeDirRaw.y * maxGazeSpread * u_orbUp);
-    
-    vec3 u_gazeDir              = normalize(gazeTarget);
-    vec3 u_squashDirection      = orb.squashAndDirection.xyz;
-    float u_squashAmount        = orb.squashAndDirection.w;
-    vec3 u_irisColour           = orb.irisAndSpeciesIdx.xyz;
-    float speciesRaw            = orb.irisAndSpeciesIdx.w; // Note to self, this will need to be cast as an Int
+    if (!bodyHit.hit && !leftHit.hit && !rightHit.hit) discard;
 
-    // --- Eyeball Placement Geometry ---
-    float eyeRadius  =  u_orbRadius * 0.22; // Scale eyeballs relative to body size
-    float forwardPush = u_orbRadius * 0.78; // Push eyes toward the front face
-    float sideSpread  = u_orbRadius * 0.35; // Spread eyes out to the left/right sides
-    float verticalUp  = u_orbRadius * 0.35; // Elevate eyes slightly up from center
-
-    // Combine basis vectors to find true 3D world space centers for both eyes
-    vec3 leftEyeCentre  = u_orbCentre 
-                        + u_orbForward * forwardPush 
-                        + u_orbRight   * sideSpread 
-                        + u_orbUp      * verticalUp;
-
-    vec3 rightEyeCentre = u_orbCentre 
-                        + u_orbForward * forwardPush 
-                        - u_orbRight   * sideSpread 
-                        + u_orbUp      * verticalUp;
-
-    // Intersect the single camera ray with all three physical structures
-    SphereHit bodyHit  = intersectSphere(ray, u_orbCentre, u_orbRadius);
-    SphereHit leftHit  = intersectSphere(ray, leftEyeCentre, eyeRadius);
-    SphereHit rightHit = intersectSphere(ray, rightEyeCentre, eyeRadius);
-
-    // If the ray completely misses all three shapes, get rid of the fragment
-    if (!bodyHit.hit && !leftHit.hit && !rightHit.hit) {
-        discard;
-    }
-
-    // Determine which surface is closest to the camera lens (Z-occlusion)
-    float closestT = 1e10;
+    // Select the closest surface
+    float    closestT = 1e10;
     SphereHit finalHit;
-    int hitType = 0; // 0 = Body, 1 = Left Eye, 2 = Right Eye
+    int      hitType = 0;
 
-    if (bodyHit.hit && bodyHit.t < closestT) {
-        closestT = bodyHit.t;
-        finalHit = bodyHit;
-        hitType  = 0;
-    }
-    if (leftHit.hit && leftHit.t < closestT) {
-        closestT = leftHit.t;
-        finalHit = leftHit;
-        hitType  = 1;
-    }
-    if (rightHit.hit && rightHit.t < closestT) {
-        closestT = rightHit.t;
-        finalHit = rightHit;
-        hitType  = 2;
-    }
+    if (bodyHit.hit  && bodyHit.t  < closestT) { closestT = bodyHit.t;  finalHit = bodyHit;  hitType = 0; }
+    if (leftHit.hit  && leftHit.t  < closestT) { closestT = leftHit.t;  finalHit = leftHit;  hitType = 1; }
+    if (rightHit.hit && rightHit.t < closestT) { closestT = rightHit.t; finalHit = rightHit; hitType = 2; }
 
-    // === Occlude Against Terrain =====
-
-    vec2 landXZ = bakeC.rg;
-    vec3 landPos;
-    float landDist;
-    if (!(bakeC.a == 0.0 && bakeC.r == 0.0))
-    {
+    // Occlude against terrain
+    if (!(bakeC.a == 0.0 && bakeC.r == 0.0)) {
+        vec2  landXZ  = bakeC.rg;
         float landY   = decodeHeight(landXZ);
-        landPos = vec3(landXZ.x, landY, landXZ.y);
-        landDist = length(landPos - u_cameraPos);
-
+        vec3  landPos = vec3(landXZ.x, landY, landXZ.y);
+        float landDist = length(landPos - u_cameraPos);
         if (closestT > landDist) discard;
     }
 
-    // === Time of Day & Shading Calculations ===
-
-    // 1. Calculate Sun Elevation in Degrees from the Y component
+    // Time of day factors
     float sunElevationDeg = asin(clamp(u_sunDir.y, -1.0, 1.0)) * 180.0 / 3.1415926535;
+    float sunVisibility   = smoothstep(-12.0, 6.0, sunElevationDeg);
+    float nightFactor     = smoothstep(-5.0, -15.0, sunElevationDeg);
+    float ambient         = mix(0.012, 0.33, sunVisibility);
 
-    // 2. Generate smooth environment factors
-    float sunVisibility = smoothstep(-12.0, 6.0, sunElevationDeg);
-    float nightFactor    = smoothstep(-5.0, -15.0, sunElevationDeg);
+    // Headlamp
+    vec3  toFragment    = finalHit.pos - u_cameraPos;
+    float distToCamera  = length(toFragment);
+    vec3  toFragDir     = normalize(toFragment);
 
-    // 3. Replicate your precise old ambient values scaled by sun state
-    float ambientDay   = 0.33;
-    float ambientNight = 0.012;
-    float ambient      = mix(ambientNight, ambientDay, sunVisibility);
-
-    // ==================== HEADLAMP POWER SETUP ====================
-    // Calculate the raw strength of the flashlight beam hitting this point in space
-    vec3 toFragment   = finalHit.pos - u_cameraPos;
-    float distToCamera = length(toFragment);
-    vec3 toFragDir     = normalize(toFragment);
-
-    vec3 raySpaceForward = vec3(u_cameraForward.x, u_cameraForward.y, -u_cameraForward.z);
-    float spotCos = dot(raySpaceForward, toFragDir);
-
-    float spotTight = pow(max(spotCos, 0.0), 48.0);
-    float spotSpill = pow(max(spotCos, 0.0), 6.0) * 0.08;
-    float spot      = spotTight + spotSpill;
-    
-    float distFalloff = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
-    float nearFade    = smoothstep(0.0, 1.0, distToCamera);
-    
-    // This is the total photons arriving at this pixel from your flashlight
+    vec3  raySpaceForward  = vec3(u_cameraForward.x, u_cameraForward.y, -u_cameraForward.z);
+    float spotCos          = dot(raySpaceForward, toFragDir);
+    float spot             = pow(max(spotCos, 0.0), 48.0) + pow(max(spotCos, 0.0), 6.0) * 0.08;
+    float distFalloff      = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
+    float nearFade         = smoothstep(0.0, 1.0, distToCamera);
     float lampIntensityMask = spot * distFalloff * nearFade * u_headlampIntensity * u_headlampEnabled;
-    vec3 lightDir = -toFragDir;
-    // ==============================================================
+    vec3  lightDir         = -toFragDir;
 
-    // Declare active normal and default to the smooth sphere geometry
-    vec3 activeNormal = finalHit.normal;
+    // Three-phase evaluation
+    GeometrySample geo = resolveGeometry(ray, orb, finalHit, hitType);
+    MaterialSample mat = resolveMaterial(geo, orb, ray, lampIntensityMask);
+    vec3 finalColor    = resolveLight(geo, mat, orb,
+                                      sunVisibility, ambient,
+                                      lampIntensityMask, lightDir,
+                                      spot, distToCamera);
 
-    // === Shading Pass ===
-
-    vec3 baseColor = vec3(1.0);
-
-    if (hitType == 0) {
-        vec3 localNorm = vec3(
-            dot(finalHit.normal, u_orbRight),
-            dot(finalHit.normal, u_orbUp),
-            dot(finalHit.normal, u_orbForward)
-        );
-        float u = (atan(localNorm.z, -localNorm.x) / 3.1415926535) * 0.5 + 0.5;
-        float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
-        vec2 uv = vec2(u, v);
-
-
-        vec3 furColor = texture(u_charTex, uv).rgb;
-        baseColor = furColor;
-
-        vec3 tangentNormal = normalFromNormalMap(uv);
-        vec3 N = finalHit.normal;
-        vec3 T = normalize(vec3(-localNorm.z, 0.0, localNorm.x)); 
-        T = normalize(T.x * u_orbRight + T.y * u_orbUp + T.z * u_orbForward);
-        vec3 B = cross(N, T); 
-        
-        // Update active normal with your heightmap data
-        activeNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
-    }
-    else {
-        vec3 eyeCentre = (hitType == 1) ? leftEyeCentre : rightEyeCentre;
-        
-        // Find the local normal of the eyeball itself
-        vec3 eyeLocalNorm = normalize(finalHit.pos - eyeCentre);
-
-        // Project into the eye's local coordinate system
-        float eyeLocalX = dot(eyeLocalNorm, u_orbRight);
-        float eyeLocalY = dot(eyeLocalNorm, u_orbUp);
-        float eyeLocalZ = dot(eyeLocalNorm, u_gazeDir);
-
-        // Project the 3D local normal onto the eyeball's local right and up axes
-        float eyeEdgeX = dot(eyeLocalNorm, u_orbRight);
-        float eyeEdgeY = dot(eyeLocalNorm, u_orbUp);
-
-        float pupilRadius = 0.10 * u_orbDilation;
-        float irisRadius  = 0.25;
-
-        vec3 eyeSurfaceWorld = finalHit.pos;
-        vec3 bodyLocalNorm = normalize(eyeSurfaceWorld - u_orbCentre);
-        vec3 furLocalNorm = vec3(
-            dot(bodyLocalNorm, u_orbRight),
-            dot(bodyLocalNorm, u_orbUp),
-            dot(bodyLocalNorm, u_orbForward)
-        );
-        float furU = (atan(furLocalNorm.z, -furLocalNorm.x) / 3.1415926535) * 0.5 + 0.5;
-        float furV = acos(clamp(furLocalNorm.y, -1.0, 1.0)) / 3.1415926535;
-        vec3 furSample = texture(u_charTex, vec2(furU, furV)).rgb;
-        
-        // Create a basic forward-facing pupil on the eye surface
-        if (eyeLocalZ > (1.0 - pupilRadius)) {
-            baseColor = vec3(0.0); // Pitch black pupil base
-            
-            if (u_tapetumPresence > 0.5) {
-                // The tapetum doesn't care about surface normals! It only cares about 
-                // camera alignment and the total incoming light arriving at the eye.
-                float alignment = max(dot(-normalize(ray.dir), u_gazeDir), 0.0);
-                float retroReflection = pow(alignment, 16.0) * lampIntensityMask;
-                
-                baseColor += u_tapetumColor * retroReflection * 15.0; 
-            }
-        } 
-        else if (eyeLocalZ > (1.0 - irisRadius)) {
-            baseColor = vec3(0.2, 0.5, 0.8);
-        }
-
-        // --- EYELID CLOSURE MASK ---
-        // Maps closure [0.0, 1.0] to a vertical threshold descending from 1.0 down to -0.2
-        float eyelidThreshold = mix(-0.6, 1.0, u_orbEyelidClosure);
-        
-        // Smooth the lid edge slightly to prevent raw pixel jaggedness
-        float eyelidMask = smoothstep(eyelidThreshold, eyelidThreshold - 0.02, -eyeLocalY);
-        
-        // Blend the fur texture over the eye surface wherever the eyelid is closed
-        baseColor = mix(baseColor, furSample, eyelidMask);
-
-        activeNormal = eyeLocalNorm;
-    }
-
-    float blendRadius = u_orbRadius * 0.05; // Size of the blend seam zone
-
-    if (hitType == 1 || hitType == 2) {
-        // We are on an eye. Blend normal toward body normal near the seam.
-        float distToBodyCenter = length(finalHit.pos - u_orbCentre);
-        float distToBodySurface = abs(distToBodyCenter - u_orbRadius);
-        
-        if (distToBodySurface < blendRadius) {
-            float blendFactor = smoothstep(blendRadius, 0.0, distToBodySurface);
-            vec3 bodyNormalAtHit = normalize(finalHit.pos - u_orbCentre); 
-            activeNormal = normalize(mix(activeNormal, bodyNormalAtHit, blendFactor * 0.7));
-        }
-    } else if (hitType == 0) {
-        // We are on the body. Blend normal toward an inverted eye normal to bend INward.
-        float distToLeftEye = length(finalHit.pos - leftEyeCentre) - eyeRadius;
-        float distToRightEye = length(finalHit.pos - rightEyeCentre) - eyeRadius;
-        float minDistToEye = min(abs(distToLeftEye), abs(distToRightEye));
-        
-        if (minDistToEye < blendRadius) {
-            float blendFactor = smoothstep(blendRadius, 0.0, minDistToEye);
-            vec3 targetEyeCentre = (distToLeftEye < distToRightEye) ? leftEyeCentre : rightEyeCentre;
-            vec3 eyeNormalAtHit = normalize(finalHit.pos - targetEyeCentre);
-            vec3 invertedEyeNormal = -eyeNormalAtHit; 
-            vec3 carvedNormal = normalize(reflect(activeNormal, eyeNormalAtHit));
-            activeNormal = normalize(mix(activeNormal, carvedNormal, blendFactor * 0.8));
-        }
-    }
-
-    baseColor = getDampedColor(baseColor, closestT);
-
-    // --- ANALYTICAL SELF-SHADOWING ---
-    float sunShadow = 1.0;
-    
-    // Push origin slightly off the surface to avoid self-intersection artifacts
-    vec3 shadowRayOrigin = finalHit.pos + activeNormal * 0.01; 
-    float maxShadowDist = u_orbRadius * 3.0; // No need to trace to infinity
-
-    if (hitType == 0) {
-        // We are on the BODY. Check if either EYE blocks the sun.
-        bool hitLeftEye  = shadowTestSphere(shadowRayOrigin, u_sunDir, leftEyeCentre, eyeRadius, maxShadowDist);
-        bool hitRightEye = shadowTestSphere(shadowRayOrigin, u_sunDir, rightEyeCentre, eyeRadius, maxShadowDist);
-        
-        if (hitLeftEye || hitRightEye) {
-            sunShadow = 0.0; // Fully occluded by an eyeball
-        }
-    } 
-    else if (hitType == 1 || hitType == 2) {
-        // We are on an EYE. Check if the BODY blocks the sun.
-        bool hitBody = shadowTestSphere(shadowRayOrigin, u_sunDir, u_orbCentre, u_orbRadius, maxShadowDist);
-        
-        if (hitBody) {
-            sunShadow = 0.0; // Fully occluded by the body socket
-        }
-    }
-
-    // ==================== FINAL LIGHTING ACCUMULATION ====================
-    // 1. Sun Diffuse (Now multiplied by our sunShadow factor!)
-    float diffuse = max(dot(activeNormal, u_sunDir), 0.0) * sunVisibility * sunShadow;
-
-    // 2. Headlamp Diffuse (Uses the bumped activeNormal multiplied by the raw flashlight pool)
-    float headDiff = max(dot(activeNormal, lightDir), 0.0);
-    float headlampDiffuse = headDiff * lampIntensityMask;
-
-    vec3 headlampContribution = vec3(0.0);
-    if (distToCamera > 0.1 && spot > 0.001) {
-        headlampContribution = baseColor * headlampDiffuse * vec3(1.0, 0.95, 0.85);
-    }
-
-    // Combine everything smoothly at the bottom
-    vec3 finalColor = baseColor * (ambient + (1.0 - ambient) * diffuse) + headlampContribution;
     fragColor = vec4(finalColor, 1.0);
 }

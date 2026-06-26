@@ -217,6 +217,7 @@ protected:
     int m_orbDrawItemCount = 0;
     std::vector<ShadowOrbEntry> m_shadowOrbList;
     OrbSSBO m_orbSSBO;
+    std::vector<OrbData> buildOrbData() const;
 
     // =========================================================================
     // Rendering — HUD
@@ -274,7 +275,6 @@ protected:
     void initializeBakeFBO();
     void initializeSphereFBO();
     void initializeOrbShaderStorage();
-    void updateOrbShaderStorage();
     void debugDumpBakeTexture();
     void debugDumpSphereFBO();
     void debugPrintOrbSSBO();
@@ -290,6 +290,7 @@ protected:
     void updateSunPosition();
     void updateStarRotation();
     void updateMoonPosition();
+    void updateOrbShaderStorage();
     void updateShadowOrbs();
     void updateBob(SoAEntityHandle e, float dt, float horizSpeed);
     void updateOrbBobbing(SoAEntityHandle e, float dt);

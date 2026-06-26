@@ -151,6 +151,7 @@ public:
     void addPhysics(SoAEntityHandle h, const CPhysics& p) { if (!m_soaPool.valid(h)) return; auto v = p; m_compPhysics.add(h, v); }
     bool hasPhysics(SoAEntityHandle h) const { return m_compPhysics.has(h); }
     CPhysics& getPhysics(SoAEntityHandle h) { return m_compPhysics.get(h); }
+    const CPhysics& getPhysics(SoAEntityHandle h) const { return m_compPhysics.get(h); }
     void removePhysics(SoAEntityHandle h) { m_compPhysics.remove(h); }
     template<typename F> void forEachPhysics(F&& f) { m_compPhysics.each([this,&f](uint32_t entIndex, CPhysics& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
 
@@ -158,6 +159,7 @@ public:
     void addBob(SoAEntityHandle h, const CBob& b) { if (!m_soaPool.valid(h)) return; auto v = b; m_compBob.add(h, v); }
     bool hasBob(SoAEntityHandle h) const { return m_compBob.has(h); }
     CBob& getBob(SoAEntityHandle h) { return m_compBob.get(h); }
+    const CBob& getBob(SoAEntityHandle h) const { return m_compBob.get(h); }
     void removeBob(SoAEntityHandle h) { m_compBob.remove(h); }
     template<typename F> void forEachBob(F&& f) { m_compBob.each([this,&f](uint32_t entIndex, CBob& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
 
@@ -165,6 +167,7 @@ public:
     void addPlayer(SoAEntityHandle h, const CPlayer& p) { if (!m_soaPool.valid(h)) return; auto v = p; m_compPlayer.add(h, v); }
     bool hasPlayer(SoAEntityHandle h) const { return m_compPlayer.has(h); }
     CPlayer& getPlayer(SoAEntityHandle h) { return m_compPlayer.get(h); }
+    const CPlayer& getPlayer(SoAEntityHandle h) const { return m_compPlayer.get(h); }
     void removePlayer(SoAEntityHandle h) { m_compPlayer.remove(h); }
     template<typename F> void forEachPlayer(F&& f) { m_compPlayer.each([this,&f](uint32_t entIndex, CPlayer& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
 
@@ -172,6 +175,7 @@ public:
     void addCamera(SoAEntityHandle h, const CCamera& c) { if (!m_soaPool.valid(h)) return; auto v = c; m_compCamera.add(h, v); }
     bool hasCamera(SoAEntityHandle h) const { return m_compCamera.has(h); }
     CCamera& getCamera(SoAEntityHandle h) { return m_compCamera.get(h); }
+    const CCamera& getCamera(SoAEntityHandle h) const { return m_compCamera.get(h); }
     void removeCamera(SoAEntityHandle h) { m_compCamera.remove(h); }
     template<typename F> void forEachCamera(F&& f) { m_compCamera.each([this,&f](uint32_t entIndex, CCamera& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
 
@@ -179,6 +183,7 @@ public:
     void addInput(SoAEntityHandle h, const CInput& i) { if (!m_soaPool.valid(h)) return; auto v = i; m_compInput.add(h, v); }
     bool hasInput(SoAEntityHandle h) const { return m_compInput.has(h); }
     CInput& getInput(SoAEntityHandle h) { return m_compInput.get(h); }
+    const CInput& getInput(SoAEntityHandle h) const { return m_compInput.get(h); }
     void removeInput(SoAEntityHandle h) { m_compInput.remove(h); }
     template<typename F> void forEachInput(F&& f) { m_compInput.each([this,&f](uint32_t entIndex, CInput& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
 
@@ -186,6 +191,7 @@ public:
     void addOrb(SoAEntityHandle h, const COrb& o) { if (!m_soaPool.valid(h)) return; auto v = o; m_compOrb.add(h, v); }
     bool hasOrb(SoAEntityHandle h) const { return m_compOrb.has(h); }
     COrb& getOrb(SoAEntityHandle h) { return m_compOrb.get(h); }
+    const COrb& getOrb(SoAEntityHandle h) const { return m_compOrb.get(h); }
     void removeOrb(SoAEntityHandle h) { m_compOrb.remove(h); }
     template<typename F> void forEachOrb(F&& f) { m_compOrb.each([this,&f](uint32_t entIndex, COrb& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
     template<typename F>
@@ -206,6 +212,7 @@ public:
     void addEyes(SoAEntityHandle h, const CEyes& e) { if (!m_soaPool.valid(h)) return; auto v = e; m_compEyes.add(h, v); }
     bool hasEyes(SoAEntityHandle h) const { return m_compEyes.has(h); }
     CEyes& getEyes(SoAEntityHandle h) { return m_compEyes.get(h); }
+    const CEyes& getEyes(SoAEntityHandle h) const { return m_compEyes.get(h); }
     void removeEyes(SoAEntityHandle h) { m_compEyes.remove(h); }
     template<typename F> void forEachEyes(F&& f) { m_compEyes.each([this,&f](uint32_t entIndex, CEyes& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
     template<typename F>

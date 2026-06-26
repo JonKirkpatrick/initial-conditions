@@ -1,0 +1,34 @@
+1. Deer
+
+Body: Muted sage / olive green (6B8A6F)
+Glyph: Bright gold (F0D070)
+
+2. Bear
+
+Body: Warm dark brown / taupe (6B5A48)
+Glyph: Bright amber (FFBB55)
+
+3. Wolf
+
+Body: Slate / steel gray (778787)
+Glyph: Vivid yellow-gold (D4AF37)
+
+4. Crane
+
+Body: Muted teal / slate blue (4A6F85)
+Glyph: Icy silver-cyan (B8E6E8)
+
+5. Hare
+
+Body: Warm khaki / light olive (8A8F6E)
+Glyph: Vibrant rose-gold (F0B070)
+
+6. Eagle
+
+Body: Dark rust / maroon (7A4A4A)
+Glyph: Brilliant gold (FFE070)
+
+7. Bison
+
+Body: Deep earthy brown (5F4A38)
+Glyph: Turquoise or verdigris (2EC4B6)
