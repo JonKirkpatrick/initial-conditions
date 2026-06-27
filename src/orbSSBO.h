@@ -4,16 +4,13 @@
 #include <glm/glm.hpp>
 
 struct OrbData {
-    glm::vec4 centreAndRadius;
-    glm::vec4 forwardAndDilation;
-    glm::vec4 rightAndEyelidClosure;
+    glm::vec4 centreAndSpeciesIdx;
+    glm::vec4 forwardAndRadius;
+    glm::vec4 rightPadded;
     glm::vec4 upPadded;
-    glm::vec4 gazeDirPadded;
-    glm::vec4 tapetumColourAndPresence;
-    glm::vec4 squashAndDirection;
-    glm::vec4 irisAndSpeciesIdx;
+    glm::vec4 gazeDirDilationAndEyelidClosure;
 };
-static_assert(sizeof(OrbData) == 128, "OrbData must be exactly 128 bytes");
+static_assert(sizeof(OrbData) == 80, "OrbData must be exactly 80 bytes");
 
 class OrbSSBO {
 public:

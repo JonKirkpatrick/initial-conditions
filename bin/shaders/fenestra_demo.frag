@@ -7,18 +7,25 @@
 // ==============================================================================
 
 struct OrbData {
-    vec4 centreAndRadius;           // xyz = centre,        w = radius
-    vec4 forwardAndDilation;        // xyz = forward,       w = dilation
-    vec4 rightAndEyelidClosure;     // xyz = right,         w = eyelidClosure
-    vec4 upPadded;                  // xyz = up,            w = (spare)
-    vec4 gazeDirPadded;             // xy  = gazeDir,       zw = (spares)
-    vec4 tapetumColourAndPresence;  // xyz = colour,        w = presence
-    vec4 squashAndDirection;        // xyz = direction,     w = squashAmount
-    vec4 irisAndSpeciesIdx;         // xyz = irisColour,    w = speciesRaw
+    vec4 centreAndSpeciesIdx;               // xyz = centre,        w = species
+    vec4 forwardAndRadius;                  // xyz = forward,       w = radius
+    vec4 rightPadded;                       // xyz = right,         w = spare
+    vec4 upPadded;                          // xyz = up,            w = spare
+    vec4 gazeDirDilationAndEyelidClosure;   // xy  = gazeDir,       zw = Dilation and Eylid
 };
 
 layout(std430, binding = 0) readonly buffer OrbBuffer {
     OrbData orbs[];
+};
+
+struct SpeciesData {
+    vec4 irisColourAndRadius;               // xyz = irisColour,    w = irisRadius
+    vec4 scleraColour;                      // xyz = scleraColour,  w = spare
+    vec4 tapetumColourAndPresence;          // xyz = tepetumColour, w = presence (0 or 1)
+};
+
+layout(std430, binding = 1) readonly buffer SpeciesBuffer {
+    SpeciesData species[];
 };
 
 flat in int v_instanceID;
@@ -48,13 +55,13 @@ uniform vec3      u_cameraForward;
 
 // Light uniforms
 uniform vec3      u_sunDir;
-uniform vec4      u_sunColor;
+uniform vec4      u_sunColour;
 uniform float     u_headlampIntensity;
 uniform float     u_headlampRange;
 uniform float     u_headlampCone;       // cos(angle) of headlamp cone for cutoff
 uniform float     u_headlampEnabled;
 
-out vec4 fragColor;
+out vec4 fragColour;
 
 // ==============================================================================
 // == OrbInstance — unpacked, derived per-instance data =========================
@@ -63,24 +70,26 @@ out vec4 fragColor;
 struct OrbInstance {
     // Directly unpacked from OrbData
     vec3  centre;
-    float radius;
-    vec3  forward;
-    float dilation;
-    vec3  right;
-    float eyelidClosure;
-    vec3  up;
-    vec3  tapetumColor;
-    float tapetumPresence;
-    vec3  gazeDir;
-    vec3  squashDirection;
-    float squashAmount;
-    vec3  irisColour;
     float speciesRaw;
+    vec3  forward;
+    float radius;
+    vec3  right;
+    vec3  up;
+    vec3  gazeDir;
+    float dilation;
+    float eyelidClosure;
 
     // Derived geometry
     vec3  leftEyeCentre;
     vec3  rightEyeCentre;
     float eyeRadius;
+
+    // Pulled from Species SSBO
+    vec3  irisColour;
+    float irisRadius;
+    vec3  scleraColour;
+    vec3  tapetumColour;
+    float tapetumPresence;
 };
 
 OrbInstance unpackOrb(int instanceID)
@@ -88,23 +97,18 @@ OrbInstance unpackOrb(int instanceID)
     OrbData raw = orbs[instanceID];
     OrbInstance o;
 
-    o.centre          = raw.centreAndRadius.xyz;
-    o.radius          = raw.centreAndRadius.w;
-    o.forward         = raw.forwardAndDilation.xyz;
-    o.dilation        = raw.forwardAndDilation.w;
-    o.right           = raw.rightAndEyelidClosure.xyz;
-    o.eyelidClosure   = raw.rightAndEyelidClosure.w;
+    o.centre          = raw.centreAndSpeciesIdx.xyz;
+    o.speciesRaw      = raw.centreAndSpeciesIdx.w;
+    o.forward         = raw.forwardAndRadius.xyz;
+    o.radius          = raw.forwardAndRadius.w;
+    o.dilation        = raw.gazeDirDilationAndEyelidClosure.z;
+    o.right           = raw.rightPadded.xyz;
+    o.eyelidClosure   = raw.gazeDirDilationAndEyelidClosure.w;
     o.up              = raw.upPadded.xyz;
-    o.tapetumColor    = raw.tapetumColourAndPresence.xyz;
-    o.tapetumPresence = raw.tapetumColourAndPresence.w;
-    o.squashDirection = raw.squashAndDirection.xyz;
-    o.squashAmount    = raw.squashAndDirection.w;
-    o.irisColour      = raw.irisAndSpeciesIdx.xyz;
-    o.speciesRaw      = raw.irisAndSpeciesIdx.w;
 
     // Decode gaze direction from compact 2D representation
     float maxGazeSpread = 0.57735027;
-    vec2  gazeDirRaw    = raw.gazeDirPadded.xy;
+    vec2  gazeDirRaw    = raw.gazeDirDilationAndEyelidClosure.xy;
     vec3  gazeTarget    = o.forward
                         + (gazeDirRaw.x * maxGazeSpread * o.right)
                         + (gazeDirRaw.y * maxGazeSpread * o.up);
@@ -118,6 +122,16 @@ OrbInstance unpackOrb(int instanceID)
 
     o.leftEyeCentre  = o.centre + o.forward * forwardPush + o.right * sideSpread + o.up * verticalUp;
     o.rightEyeCentre = o.centre + o.forward * forwardPush - o.right * sideSpread + o.up * verticalUp;
+
+    // Pull species data
+    int speciesIdx = int(o.speciesRaw);
+    SpeciesData sp = species[speciesIdx];
+
+    o.irisColour      = sp.irisColourAndRadius.xyz;
+    o.irisRadius      = sp.irisColourAndRadius.w;
+    o.scleraColour    = sp.scleraColour.xyz;
+    o.tapetumColour   = sp.tapetumColourAndPresence.xyz;
+    o.tapetumPresence = sp.tapetumColourAndPresence.w;
 
     return o;
 }
@@ -252,14 +266,14 @@ float decodeHeight(vec2 xz)
 // == Atmospheric Adjustments ===================================================
 // ==============================================================================
 
-vec3 getDampedColor(vec3 rawColor, float distanceToCam)
+vec3 getDampedColour(vec3 rawColour, float distanceToCam)
 {
     float startDampDist   = 50000.0;
     float maxDampDist     = 200000.0;
     float dampFactor      = smoothstep(0.0, 1.0,
                             clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0));
     vec3  atmosphericBase = vec3(0.53, 0.58, 0.64);
-    return mix(rawColor, atmosphericBase, dampFactor);
+    return mix(rawColour, atmosphericBase, dampFactor);
 }
 
 // ==============================================================================
@@ -405,7 +419,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
     MaterialSample mat;
     mat.eyelidCoverage = 0.0;
 
-    vec3 albedo = vec3(1.0);
+    vec3 albedo = orb.scleraColour;
 
     if (geo.hitType == 0)
     {
@@ -435,7 +449,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
         float eyeLocalZ    = dot(eyeLocalNorm, orb.gazeDir);
 
         float pupilRadius  = 0.10 * orb.dilation;
-        float irisRadius   = 0.25;
+        float irisRadius   = orb.irisRadius;
 
         if (eyeLocalZ > (1.0 - pupilRadius)) {
             albedo = vec3(0.0);
@@ -443,7 +457,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
             if (orb.tapetumPresence > 0.5) {
                 float alignment      = max(dot(-normalize(ray.dir), orb.gazeDir), 0.0);
                 float retroReflection = pow(alignment, 16.0) * lampIntensityMask;
-                albedo              += orb.tapetumColor * retroReflection * 15.0;
+                albedo              += orb.tapetumColour * retroReflection * 15.0;
             }
         }
         else if (eyeLocalZ > (1.0 - irisRadius)) {
@@ -476,7 +490,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
         mat.headSpecMask  = mix(0.35,  0.04, eyelidMask);
     }
 
-    mat.albedo = getDampedColor(albedo, geo.depth);
+    mat.albedo = getDampedColour(albedo, geo.depth);
     return mat;
 }
 
@@ -531,14 +545,14 @@ vec3 resolveLight(
 
     vec3 headlampContribution = vec3(0.0);
     if (distToCamera > 0.1 && spot > 0.001) {
-        vec3 lampColor        = vec3(1.0, 0.95, 0.85);
-        headlampContribution  = mat.albedo * headlampDiffuse * lampColor
-                              + vec3(headlampSpec) * lampColor;
+        vec3 lampColour        = vec3(1.0, 0.95, 0.85);
+        headlampContribution  = mat.albedo * headlampDiffuse * lampColour
+                              + vec3(headlampSpec) * lampColour;
     }
 
-    vec3 sunSpecColor = u_sunColor.xyz * sunSpec;
+    vec3 sunSpecColour = u_sunColour.xyz * sunSpec;
     return mat.albedo * (ambient + (1.0 - ambient) * diffuse)
-         + sunSpecColor
+         + sunSpecColour
          + headlampContribution;
 }
 
@@ -603,10 +617,10 @@ void main()
     // Three-phase evaluation
     GeometrySample geo = resolveGeometry(ray, orb, finalHit, hitType);
     MaterialSample mat = resolveMaterial(geo, orb, ray, lampIntensityMask);
-    vec3 finalColor    = resolveLight(geo, mat, orb,
+    vec3 finalColour    = resolveLight(geo, mat, orb,
                                       sunVisibility, ambient,
                                       lampIntensityMask, lightDir,
                                       spot, distToCamera);
 
-    fragColor = vec4(finalColor, 1.0);
+    fragColour = vec4(finalColour, 1.0);
 }

@@ -264,7 +264,7 @@ protected:
     void loadLevel(const std::string& filename);
     void spawnPlayer();
     void spawnCamera();
-    void spawnOrbFauna(int hexQ, int hexR, const sf::Color& color, float radius,
+    void spawnOrbFauna(int hexQ, int hexR, float radius,
                       float bobRate = 2.0f, float bobMagnitude = 8.0f,
                       const CEyes& eyes = CEyes(), float yaw = 0.0f);
     void spawnDebugOrbs(int count);
@@ -277,7 +277,6 @@ protected:
     void initializeOrbShaderStorage();
     void debugDumpBakeTexture();
     void debugDumpSphereFBO();
-    void debugPrintOrbSSBO();
 
     // =========================================================================
     // Per-Frame Updates
@@ -341,7 +340,6 @@ protected:
     sf::Vector2i   worldToHex(float x, float z) const;
     sf::Vector2f   hexToWorld(int q, int r) const;
     sf::Vector3f   screenToWorld(sf::Vector2i mousePos) const;
-    void           sortOrbs();
 
 public:
 

@@ -5,18 +5,25 @@
 // camera uniforms, then intersects it with the orb's geometry.
 
 struct OrbData {
-    vec4 centreAndRadius;           // xyz = centre,        w = radius
-    vec4 forwardAndDilation;        // xyz = forward,       w = dilation
-    vec4 rightAndEyelidClosure;     // xyz = right,         w = eyelidClosure
-    vec4 upPadded;                  // xyz = up,            w = (spare)
-    vec4 gazeDirPadded;             // xy  = gazeDir,       zw = (spare)
-    vec4 tapetumColourAndPresence;  // xyz = colour,        w = presence
-    vec4 squashAndDirection;        // xyz = direction,     w = squashAmount
-    vec4 irisAndSpeciesIdx;         // xyz = irisColour,    w = speciesRaw
+    vec4 centreAndSpeciesIdx;               // xyz = centre,        w = species
+    vec4 forwardAndRadius;                  // xyz = forward,       w = radius
+    vec4 rightPadded;                       // xyz = right,         w = spare
+    vec4 upPadded;                          // xyz = up,            w = spare
+    vec4 gazeDirDilationAndEyelidClosure;   // xy  = gazeDir,       zw = Dilation and Eylid
 };
 
 layout(std430, binding = 0) readonly buffer OrbBuffer {
     OrbData orbs[];
+};
+
+struct SpeciesData {
+    vec4 irisColourAndRadius;               // xyz = irisColour,    w = irisRadius
+    vec4 scleraColour;                      // xyz = scleraColour,  w = spare
+    vec4 tapetumColourAndPresence;          // xyz = tepetumColour, w = presence (0 or 1)
+};
+
+layout(std430, binding = 1) readonly buffer SpeciesBuffer {
+    SpeciesData species[];
 };
 
 layout(location = 0) in vec3 a_cubePos;
@@ -28,8 +35,8 @@ flat out int v_instanceID;
 void main()
 {
     OrbData orb    = orbs[gl_InstanceID];
-    vec3 centre    = orb.centreAndRadius.xyz;
-    float radius   = orb.centreAndRadius.w;
+    vec3 centre    = orb.centreAndSpeciesIdx.xyz;
+    float radius   = orb.forwardAndRadius.w;
 
     // Scale the unit cube to the orb's radius and translate to its centre
     vec3 worldPos  = a_cubePos * radius * 1.05 + centre;

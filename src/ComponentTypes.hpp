@@ -94,7 +94,6 @@ struct CInput
 struct COrb
 {
     float radius        = 50.0f;
-    sf::Color color     = sf::Color::White; // can retire later
 
     // Orientation basis — previously implicit, now explicit
     sf::Vector3f forward = { 0.0f, 0.0f, 1.0f };
@@ -102,13 +101,10 @@ struct COrb
     sf::Vector3f up      = { 0.0f, 1.0f, 0.0f };
 
     // Visual properties
-    sf::Color    irisColor      = sf::Color::Blue;
-    int          speciesIdx     = 0;
-    sf::Vector3f squashDir      = { 0.0f, 1.0f, 0.0f };
-    float        squashAmount   = 1.0f;
+    int          speciesIdx     = 6;
 
     COrb() = default;
-    COrb(const sf::Color& c, float r) : color(c), radius(r) {}
+    COrb(float r) : radius(r) {}
 };
 
 struct CEyes
@@ -116,8 +112,6 @@ struct CEyes
     sf::Vector2f gazeDirection  = { 0.0f, 0.0f };
     float        pupilDilation  = 0.5f;
     float        eyelidClosure  = 0.0f;
-    bool         hasTapetum     = false;
-    sf::Vector3f tapetumColor   = { 1.0f, 1.0f, 1.0f }; // was sf::Color
 
     CEyes() = default;
 };

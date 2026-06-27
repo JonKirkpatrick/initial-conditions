@@ -213,6 +213,11 @@ void Assets::loadFromFile(const std::string& path)
             addGLProgram(name, vertPath, fragPath);
             std::cout << "Loaded GL program: " << name << std::endl;
         }
+        else if (str == "#") // Comment line, skip the rest of the line
+        {
+            std::string comment;
+            std::getline(file, comment);
+        }
         else
         {
             std::cerr << "Unknown Asset Type: " << str << std::endl;
