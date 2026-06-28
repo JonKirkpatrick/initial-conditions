@@ -1,4 +1,4 @@
-#pragma once
+#pragma onceawndeb
 #include <GL/glew.h>
 #include "Scene.h"
 #include "orbSSBO.h"
@@ -190,7 +190,7 @@ protected:
     void spawnCamera();
     void spawnOrbFauna(int hexQ, int hexR, float radius,
                       float bobRate = 2.0f, float bobMagnitude = 8.0f,
-                      const CEyes& eyes = CEyes(), float yaw = 0.0f);
+                      const CEyes& eyes = CEyes(), float yaw = 0.0f, int species = 0);
     void spawnDebugOrbs(int count);
     void buildHud();
     void buildTerrainGrid();

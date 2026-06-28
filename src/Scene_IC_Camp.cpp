@@ -867,7 +867,7 @@ void Scene_IC_Camp::spawnCamera()
 void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
                                    float bobRate, float bobMagnitude,
                                    const CEyes& eyes,
-                                   float yaw)
+                                   float yaw, int species)
 {
     auto orb = m_entityManager.addEntity("orb");
     const sf::Vector2f groundXZ = hexToWorld(hexQ, hexR);
@@ -881,6 +881,7 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
     m_entityManager.addOrb(orb, COrb(radius));
     m_entityManager.addBob(orb, CBob(bobRate, bobMagnitude, 0.0f));
     m_entityManager.addEyes(orb, eyes);
+    m_entityManager.getOrb(orb).speciesIdx = species;
 }
 
 void Scene_IC_Camp::spawnDebugOrbs(int count)
@@ -899,6 +900,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     std::uniform_real_distribution<float> dilationDist(0.05f, 1.0f);
     std::uniform_real_distribution<float> closureDist(0.0f, 1.0f);
     std::uniform_real_distribution<float> yawDist(0.0f, 2.0f * 3.141592f);
+    std::uniform_int_distribution<int> speciesDist(0, 6);
 
     // 2. Spatial Coalescing & Hashing
     struct PairHash {
@@ -945,7 +947,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         float bobRate          = bobRateDist(rng);
         float bobMag           = bobMagDist(rng);
         float yaw              = yawDist(rng);
-
+        int species            = speciesDist(rng);
         // Setup Eye Vector/Object Data
         sf::Vector2f gazeDirection = { gazeDist(rng), gazeDist(rng) };
         // Simple normalization for a 2D Vector
@@ -962,7 +964,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         eyes.eyelidClosure = closureDist(rng);
 
         // 4. Execution Call matching your signature
-        spawnOrbFauna(hexQ, hexR, radius, bobRate, bobMag, eyes, yaw);
+        spawnOrbFauna(hexQ, hexR, radius, bobRate, bobMag, eyes, yaw, species);
         ++spawned;
     }
 }
