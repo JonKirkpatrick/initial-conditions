@@ -1,0 +1,86 @@
+[
+  {
+    "name": "Wolf",
+    "textures": {
+      "diffuse": "images/species_textures/wolf_texture.png",
+      "normal":  "images/species_textures/wolf_normal.png"
+    },
+    "eye": {
+      "iris":    { "r": 0.80, "g": 0.55, "b": 0.10, "radius": 0.50 },
+      "sclera":  { "r": 0.90, "g": 0.85, "b": 0.75, "w": 0.0 },
+      "tapetum": { "r": 0.10, "g": 0.80, "b": 0.60, "presence": 1.00 }
+    }
+  },
+  {
+    "name": "Bear",
+    "textures": {
+      "diffuse": "images/species_textures/bear_texture.png",
+      "normal":  "images/species_textures/bear_normal.png"
+    },
+    "eye": {
+      "iris":    { "r": 0.25, "g": 0.15, "b": 0.05, "radius": 0.45 },
+      "sclera":  { "r": 0.20, "g": 0.14, "b": 0.08, "w": 0.0 },
+      "tapetum": { "r": 0.85, "g": 0.55, "b": 0.15, "presence": 1.00 }
+    }
+  },
+  {
+    "name": "Deer",
+    "textures": {
+      "diffuse": "images/species_textures/deer_texture.png",
+      "normal":  "images/species_textures/deer_normal.png"
+    },
+    "eye": {
+      "iris":    { "r": 0.55, "g": 0.35, "b": 0.10, "radius": 0.70 },
+      "sclera":  { "r": 0.15, "g": 0.10, "b": 0.05, "w": 0.0 },
+      "tapetum": { "r": 0.75, "g": 0.90, "b": 1.00, "presence": 1.00 }
+    }
+  },
+  {
+    "name": "Bison",
+    "textures": {
+      "diffuse": "images/species_textures/bison_texture.png",
+      "normal":  "images/species_textures/bison_normal.png"
+    },
+    "eye": {
+      "iris":    { "r": 0.20, "g": 0.12, "b": 0.04, "radius": 0.65 },
+      "sclera":  { "r": 0.12, "g": 0.08, "b": 0.04, "w": 0.0 },
+      "tapetum": { "r": 0.20, "g": 0.75, "b": 0.30, "presence": 1.00 }
+    }
+  },
+  {
+    "name": "Hare",
+    "textures": {
+      "diffuse": "images/species_textures/hare_texture.png",
+      "normal":  "images/species_textures/hare_normal.png"
+    },
+    "eye": {
+      "iris":    { "r": 0.65, "g": 0.40, "b": 0.10, "radius": 0.75 },
+      "sclera":  { "r": 0.95, "g": 0.88, "b": 0.85, "w": 0.0 },
+      "tapetum": { "r": 0.90, "g": 0.30, "b": 0.10, "presence": 1.00 }
+    }
+  },
+  {
+    "name": "Crane",
+    "textures": {
+      "diffuse": "images/species_textures/crane_texture.png",
+      "normal":  "images/species_textures/crane_normal.png"
+    },
+    "eye": {
+      "iris":    { "r": 0.80, "g": 0.15, "b": 0.05, "radius": 0.40 },
+      "sclera":  { "r": 0.85, "g": 0.85, "b": 0.82, "w": 0.0 },
+      "tapetum": { "r": 0.00, "g": 0.00, "b": 0.00, "presence": 0.00 }
+    }
+  },
+  {
+    "name": "Eagle",
+    "textures": {
+      "diffuse": "images/species_textures/eagle_texture.png",
+      "normal":  "images/species_textures/eagle_normal.png"
+    },
+    "eye": {
+      "iris":    { "r": 0.90, "g": 0.75, "b": 0.20, "radius": 0.55 },
+      "sclera":  { "r": 0.88, "g": 0.83, "b": 0.65, "w": 0.0 },
+      "tapetum": { "r": 0.00, "g": 0.00, "b": 0.00, "presence": 0.00 }
+    }
+  }
+]

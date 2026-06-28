@@ -8,6 +8,7 @@
 #include <cassert>
 #include <iostream>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 static constexpr std::array<Assets::CubeFaceSpec, 6> SKY_CUBEMAP_FACES = {{
     {"right",  GL_TEXTURE_CUBE_MAP_POSITIVE_X},
@@ -178,27 +179,6 @@ void Assets::loadFromFile(const std::string& path)
             addShader(name, path);
             std::cout << "Loaded shader: " << name << " from " << path << std::endl;
         }
-        else if (str == "Species")
-        {
-            std::string name;
-            SpeciesData data;
-            
-            file >> name;
-            // Read Iris configuration
-            file >> data.irisColourAndRadius.x >> data.irisColourAndRadius.y 
-                >> data.irisColourAndRadius.z >> data.irisColourAndRadius.w;
-                
-            // Read Sclera configuration
-            file >> data.scleraColour.x >> data.scleraColour.y 
-                >> data.scleraColour.z >> data.scleraColour.w;
-                
-            // Read Tapetum configuration
-            file >> data.tapetumColourAndPresence.x >> data.tapetumColourAndPresence.y 
-                >> data.tapetumColourAndPresence.z >> data.tapetumColourAndPresence.w;
-
-            addSpecies(name, data);
-            std::cout << "Loaded species parameters for: " << name << std::endl;
-        } 
         else if (str == "Cubemap")
         {
             std::string name, folderPath;
@@ -223,6 +203,119 @@ void Assets::loadFromFile(const std::string& path)
             std::cerr << "Unknown Asset Type: " << str << std::endl;
         }
     }
+}
+
+void Assets::loadFromSpeciesJSON(const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file.is_open())
+    {
+        std::cerr << "Failed to open species file: " << path << std::endl;
+        return;
+    }
+
+    nlohmann::json j;
+    try { file >> j; }
+    catch (const nlohmann::json::parse_error& e)
+    {
+        std::cerr << "Species JSON parse error: " << e.what() << std::endl;
+        return;
+    }
+
+    for (const auto& entry : j)
+    {
+        const std::string name = entry.at("name");
+
+        // --- Eye parameters ---
+        SpeciesData data;
+        const auto& iris    = entry.at("eye").at("iris");
+        const auto& sclera  = entry.at("eye").at("sclera");
+        const auto& tapetum = entry.at("eye").at("tapetum");
+
+        data.irisColourAndRadius      = { iris["r"],    iris["g"],    iris["b"],    iris["radius"]   };
+        data.scleraColour             = { sclera["r"],  sclera["g"],  sclera["b"],  sclera["w"]      };
+        data.tapetumColourAndPresence = { tapetum["r"], tapetum["g"], tapetum["b"], tapetum["presence"] };
+
+        // --- Textures (array index == species index from addSpecies) ---
+        const auto& tex = entry.at("textures");
+        m_speciesTexturePaths.push_back({ tex.at("diffuse"), tex.at("normal") });
+        buildSpeciesTextureArrays(); // Rebuild the texture arrays after adding new textures
+
+        addSpecies(name, data);
+        std::cout << "Loaded species: " << name << std::endl;
+    }
+}
+
+void Assets::buildSpeciesTextureArrays()
+{
+    // Load first image to establish dimensions — all layers must match
+    sf::Image probe;
+    if (!probe.loadFromFile(m_speciesTexturePaths[0].diffuse))
+    {
+        std::cerr << "Failed to load probe texture for array dimensions" << std::endl;
+        return;
+    }
+
+    const GLsizei width  = static_cast<GLsizei>(probe.getSize().x);
+    const GLsizei height = static_cast<GLsizei>(probe.getSize().y);
+    const GLsizei layers = static_cast<GLsizei>(m_speciesTexturePaths.size());
+
+    auto uploadArray = [&](GLuint& texID,
+                           auto pathSelector) // pathSelector: SpeciesTexturePaths -> std::string
+    {
+        glGenTextures(1, &texID);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, texID);
+
+        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8,
+                     width, height, layers,
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+        for (GLsizei i = 0; i < layers; ++i)
+        {
+            sf::Image img;
+            const std::string& imgPath = pathSelector(m_speciesTexturePaths[i]);
+            if (!img.loadFromFile(imgPath))
+            {
+                std::cerr << "Failed to load species texture layer " << i
+                          << ": " << imgPath << std::endl;
+                continue;
+            }
+
+            if (static_cast<GLsizei>(img.getSize().x) != width ||
+                static_cast<GLsizei>(img.getSize().y) != height)
+            {
+                std::cerr << "Species texture size mismatch at layer " << i
+                          << " (" << imgPath << ") — skipping" << std::endl;
+                continue;
+            }
+
+            glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
+                            0, 0, i,           // x, y, layer offset
+                            width, height, 1,  // width, height, one layer
+                            GL_RGBA, GL_UNSIGNED_BYTE, img.getPixelsPtr());
+        }
+
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    };
+
+    uploadArray(m_speciesDiffuseArray, [](const SpeciesTexturePaths& p){ return p.diffuse; });
+    uploadArray(m_speciesNormalArray,  [](const SpeciesTexturePaths& p){ return p.normal;  });
+
+    std::cout << "Built species texture arrays: "
+              << layers << " layers at "
+              << width << "x" << height << std::endl;
+}
+
+void Assets::releaseSpeciesTextures()
+{
+    if (m_speciesDiffuseArray) { glDeleteTextures(1, &m_speciesDiffuseArray); m_speciesDiffuseArray = 0; }
+    if (m_speciesNormalArray)  { glDeleteTextures(1, &m_speciesNormalArray);  m_speciesNormalArray  = 0; }
 }
 
 const sf::Texture& Assets::getTexture(const std::string& textureName) const

@@ -1,7 +1,5 @@
 #version 460 core
 
-// Demo fragment shader for Fenestra.
-
 // ==============================================================================
 // == SSBO Layout ===============================================================
 // ==============================================================================
@@ -35,8 +33,8 @@ flat in int v_instanceID;
 // ==============================================================================
 
 // Texture samples
-uniform sampler2D u_charTex;
-uniform sampler2D u_charNormalTex;
+uniform sampler2DArray u_charDiffuseTex;
+uniform sampler2DArray u_charNormalTex;
 uniform sampler2D u_bakeTex;
 uniform sampler2D u_heightMap;
 
@@ -224,9 +222,9 @@ SphereHit intersectSphere(Ray ray, vec3 centre, float radius)
 // == Normal Map ================================================================
 // ==============================================================================
 
-vec3 normalFromNormalMap(vec2 uv)
+vec3 normalFromNormalMap(vec2 uv, float speciesIdx)
 {
-    vec2 packedNormal   = texture(u_charNormalTex, uv).rg;
+    vec2 packedNormal   = texture(u_charNormalTex, vec3(uv, speciesIdx)).rg;
     vec3 tangentNormal;
     tangentNormal.xy    = packedNormal * 2.0 - 1.0;
     tangentNormal.z     = sqrt(max(0.0, 1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
@@ -326,7 +324,7 @@ GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int
         float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
         vec2  uv = vec2(u, v);
 
-        vec3 tangentNormal = normalFromNormalMap(uv);
+        vec3 tangentNormal = normalFromNormalMap(uv, orb.speciesRaw);
         vec3 N = finalHit.normal;
         vec3 T = normalize(vec3(-localNorm.z, 0.0, localNorm.x));
         T = normalize(T.x * orb.right + T.y * orb.up + T.z * orb.forward);
@@ -433,7 +431,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
         );
         float u = (atan(localNorm.z, -localNorm.x) / 3.1415926535) * 0.5 + 0.5;
         float v = acos(clamp(localNorm.y, -1.0, 1.0)) / 3.1415926535;
-        albedo = texture(u_charTex, vec2(u, v)).rgb;
+        albedo = texture(u_charDiffuseTex, vec3(u, v, orb.speciesRaw)).rgb;
 
         mat.specPower     = 12.0;
         mat.specMask      = 0.14;
@@ -479,7 +477,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
             );
             float furU   = (atan(furLocalNorm.z, -furLocalNorm.x) / 3.1415926535) * 0.5 + 0.5;
             float furV   = acos(clamp(furLocalNorm.y, -1.0, 1.0)) / 3.1415926535;
-            vec3  furSample = texture(u_charTex, vec2(furU, furV)).rgb;
+            vec3  furSample = texture(u_charDiffuseTex, vec3(furU, furV, orb.speciesRaw)).rgb;
             albedo       = mix(albedo, furSample, eyelidMask);
         }
 

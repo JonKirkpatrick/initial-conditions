@@ -101,7 +101,7 @@ struct COrb
     sf::Vector3f up      = { 0.0f, 1.0f, 0.0f };
 
     // Visual properties
-    int          speciesIdx     = 6;
+    int          speciesIdx     = 5;
 
     COrb() = default;
     COrb(float r) : radius(r) {}

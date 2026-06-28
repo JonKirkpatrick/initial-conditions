@@ -1,8 +1,4 @@
 #version 460 core
-// fenestra.vert
-// Projects the eight world-space corners of an orb's AABB into clip space.
-// The fragment shader reconstructs the view ray from gl_FragCoord and
-// camera uniforms, then intersects it with the orb's geometry.
 
 struct OrbData {
     vec4 centreAndSpeciesIdx;               // xyz = centre,        w = species

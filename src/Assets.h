@@ -28,6 +28,12 @@ struct SpriteSheetDescriptor {
     std::vector<RowConfigData> rowConfigs;
 };
 
+struct SpeciesTexturePaths
+{
+    std::string diffuse;
+    std::string normal;
+};
+
 class Assets
 {
     std::map<std::string, sf::Texture>                  m_textureMap;
@@ -37,11 +43,16 @@ class Assets
     std::map<std::string, std::unique_ptr<sf::Music>>   m_musicMap;
     std::map<std::string, std::unique_ptr<sf::Shader>>  m_shaderMap;
     std::map<std::string, GLuint>                       m_glProgramMap;
+    std::vector<SpeciesTexturePaths>                    m_speciesTexturePaths;
     SpeciesSSBO                                         m_speciesSSBO;
+    GLuint                                              m_speciesDiffuseArray = 0;
+    GLuint                                              m_speciesNormalArray = 0;
     std::map<std::string, int>                          m_speciesIdMap;
     std::vector<SpeciesData>                            m_speciesRegistry;
 
     void addTexture(const std::string& textureName, const std::string& path, bool smooth = false);
+    void buildSpeciesTextureArrays();
+    void releaseSpeciesTextures();
     void addFont(const std::string& fontName, const std::string& path);
     void addSound(const std::string& soundName, const std::string& path);
     void addMusic(const std::string& musicName, const std::string& path);
@@ -69,6 +80,7 @@ public:
     Assets& operator=(const Assets&) = delete;
 
     void loadFromFile(const std::string& path);
+    void loadFromSpeciesJSON(const std::string& path);
     void finalizeSpeciesBuffer();
 
     const sf::Texture& getTexture(const std::string& textureName) const;
@@ -79,6 +91,8 @@ public:
     void addCubemap(const std::string& name, const std::filesystem::path& folderPath);
     GLuint getCubemap(const std::string& name) const;
     GLuint getGLProgram(const std::string& name) const;
+    GLuint getSpeciesDiffuseArray() const { return m_speciesDiffuseArray; }
+    GLuint getSpeciesNormalArray()  const { return m_speciesNormalArray;  } 
     const std::map<std::string, sf::Texture>& getTextures() const;
     int getSpeciesId(const std::string& speciesName) const;
     const SpeciesSSBO& getSpeciesSSBO() const {

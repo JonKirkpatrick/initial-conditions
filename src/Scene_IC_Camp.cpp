@@ -416,7 +416,7 @@ void Scene_IC_Camp::sRender() {
     runBakePass();
     renderSky(worldToCamMatrix);
     runTerrainPass(worldToCamMatrix);
-    renderDemoSphere();
+    renderOrbCreature();
 
     // Composite to screen
     window.clear(sf::Color::Transparent);
@@ -1438,7 +1438,7 @@ void Scene_IC_Camp::updateMinimapTexture()
     m_minimapTexture.display();
 }
 
-void Scene_IC_Camp::renderDemoSphere()
+void Scene_IC_Camp::renderOrbCreature()
 {
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& camData      = m_entityManager.getCamera(m_camera);
@@ -1471,50 +1471,50 @@ void Scene_IC_Camp::renderDemoSphere()
         buildVertexCube();
 
     // ==================== PROGRAM ====================
-    glUseProgram(m_demoSphereProgram);
+    glUseProgram(m_OrbCreatureProgram);
 
     // ==================== TEXTURES ====================
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_charTexture.getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_charTex"), 0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getSpeciesDiffuseArray());
+    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_charDiffuseTex"), 0);
 
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_charNormal.getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_charNormalTex"), 1);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getSpeciesNormalArray());
+    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_charNormalTex"), 1);
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
-    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_bakeTex"), 2);
+    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_bakeTex"), 2);
 
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_demoSphereProgram, "u_heightMap"), 3);
+    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_heightMap"), 3);
 
     // ==================== UNIFORMS ====================
-    glUniform2f(glGetUniformLocation(m_demoSphereProgram, "u_topdownWorldMin"),
+    glUniform2f(glGetUniformLocation(m_OrbCreatureProgram, "u_topdownWorldMin"),
         m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_demoSphereProgram, "u_topdownWorldSize"),
+    glUniform2f(glGetUniformLocation(m_OrbCreatureProgram, "u_topdownWorldSize"),
         m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(m_demoSphereProgram, "u_topdownHeightMax"),
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram, "u_topdownHeightMax"),
         m_topdownMaxHeight);
 
-    glUniform2f(glGetUniformLocation(m_demoSphereProgram, "u_viewportSize"),
+    glUniform2f(glGetUniformLocation(m_OrbCreatureProgram, "u_viewportSize"),
         static_cast<float>(camData.viewportSize.x),
         static_cast<float>(camData.viewportSize.y));
-    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_fovY"),          camData.fovY);
-    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraPos"),     1, &camPos[0]);
-    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraForward"), 1, &camFwd[0]);
-    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraRight"),   1, &camRight[0]);
-    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_cameraUp"),      1, &camUp[0]);
-    glUniformMatrix4fv(glGetUniformLocation(m_demoSphereProgram, "u_viewProj"),
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_fovY"),          camData.fovY);
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraPos"),     1, &camPos[0]);
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraForward"), 1, &camFwd[0]);
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraRight"),   1, &camRight[0]);
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraUp"),      1, &camUp[0]);
+    glUniformMatrix4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_viewProj"),
         1, GL_FALSE, vp.data());
 
-    glUniform3fv(glGetUniformLocation(m_demoSphereProgram, "u_sunDir"), 1, &sunDir[0]);
-    glUniform4fv(glGetUniformLocation(m_demoSphereProgram, "u_sunColor"), 1, &sunColor[0]);
-    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampIntensity"), 1.0f);
-    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampRange"),     8500.0f);
-    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampConeCos"),   1.0f);
-    glUniform1f(glGetUniformLocation(m_demoSphereProgram,  "u_headlampEnabled"),
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunDir"), 1, &sunDir[0]);
+    glUniform4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunColor"), 1, &sunColor[0]);
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampIntensity"), 1.0f);
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampRange"),     8500.0f);
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampConeCos"),   1.0f);
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampEnabled"),
         shouldHeadlightsBeOn() ? 1.0f : 0.0f);
 
     // ==================== DRAW ====================
@@ -1530,8 +1530,8 @@ void Scene_IC_Camp::renderDemoSphere()
     glDisable(GL_DEPTH_TEST);
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -1686,23 +1686,6 @@ void Scene_IC_Camp::runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix) {
 // =========================================================================
 // Orb & Shadow Pipelines
 // =========================================================================
-
-void Scene_IC_Camp::updateShadowOrbs()
-{
-    m_shadowOrbList.clear();
-    constexpr int   MAX_SHADOW_ORBS    = 64;
-    constexpr float SHADOW_CUTOFF_DIST = 5000.0f;
-
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-
-    for (int i = m_orbDrawItemCount - 1; i >= 0 && (int)m_shadowOrbList.size() < MAX_SHADOW_ORBS; --i)
-    {
-        const auto& item = m_orbDrawItems[i];
-        if (item.distSort > SHADOW_CUTOFF_DIST) continue;
-
-        m_shadowOrbList.push_back({ item.worldPos, item.orbRadius });
-    }
-}
 
 void Scene_IC_Camp::updateOrbBobbing(SoAEntityHandle e, float dt)
 {

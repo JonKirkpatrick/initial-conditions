@@ -28,122 +28,49 @@ class Scene_IC_Camp : public Scene {
 
     enum class HeadlightState { Off, On, Auto };
 
-    struct ShadowOrbEntry {
-        sf::Vector3f worldPos;
-        float        radius;
-    };
-
-    struct OrbDrawItem
-    {
-        sf::Vector2f screenPos;
-        sf::Vector3f cameraSpacePos;
-        float        radiusPx;
-        float        orbRadius;
-        sf::Vector2f gazeDirection;
-        sf::Vector3f forward;
-        float        hasTapetum;
-        sf::Vector3f tapetumColor;
-        float        pupilDilation;
-        float        eyelidClosure;
-        sf::Vector3f worldPos;
-        float        distSort;
-        float        distNorm;
-        sf::Color    color;
-    };
-
-    struct OrbBatch
-    {
-        static constexpr int MAX_BATCH_SIZE = 64;
-
-        std::vector<sf::Vector3f>    centersView;
-        std::vector<sf::Glsl::Vec4>  colors;
-        std::vector<float>           depthNorms;
-        std::vector<sf::Vector2f>    quadOrigins;
-        std::vector<sf::Vector2f>    texSizes;
-        std::vector<sf::Vector2f>    quadSizes;
-        std::vector<sf::Vector2f>    gazes;
-        std::vector<sf::Vector3f>    forwards;
-        std::vector<float>           hasTapetums;
-        std::vector<sf::Vector3f>    tapetumColors;
-        std::vector<float>           pupilDilations;
-        std::vector<float>           eyelidClosures;
-        void clear()
-        {
-            centersView.clear();
-            colors.clear();
-            depthNorms.clear();
-            quadOrigins.clear();
-            texSizes.clear();
-            quadSizes.clear();
-            gazes.clear();
-            forwards.clear();
-            hasTapetums.clear();
-            tapetumColors.clear();
-            pupilDilations.clear();
-            eyelidClosures.clear();
-        }
-
-        void reserve(size_t n)
-        {
-            centersView.reserve(n);
-            colors.reserve(n);
-            depthNorms.reserve(n);
-            quadOrigins.reserve(n);
-            texSizes.reserve(n);
-            quadSizes.reserve(n);
-            gazes.reserve(n);
-            forwards.reserve(n);
-            hasTapetums.reserve(n);
-            tapetumColors.reserve(n);
-            pupilDilations.reserve(n);
-            eyelidClosures.reserve(n);
-        }
-    };
-
 protected:
 
     // =========================================================================
     // Core Scene State
     // =========================================================================
 
-    std::string      m_levelPath;
-    SoAEntityHandle  m_camera;
-    SoAEntityHandle  m_player;
-    CameraConfig     m_cameraConfig;
-    PlayerConfig     m_playerConfig;
+    std::string     m_levelPath;
+    SoAEntityHandle m_camera;
+    SoAEntityHandle m_player;
+    CameraConfig    m_cameraConfig;
+    PlayerConfig    m_playerConfig;
 
-    float        m_hexSize = 100.f;
-    sf::Color    m_gridColor;
-    sf::Vector2f m_homeLocationXZ{0.f, 0.f};
+    float           m_hexSize = 100.f;
+    sf::Color       m_gridColor;
+    sf::Vector2f    m_homeLocationXZ{0.f, 0.f};
 
     // =========================================================================
     // Time, Date and Location
     // =========================================================================
 
-    int    m_gameYear       = 2000;
-    int    m_gameMonth      = 1;
-    int    m_gameDayOfMonth = 1;
-    double m_gameTimeOfDay  = 12.0;
-    float  m_latitude       = 0.f;
-    float  m_longitude      = 0.f;
-    Astro::State m_astroState;
+    int             m_gameYear       = 2000;
+    int             m_gameMonth      = 1;
+    int             m_gameDayOfMonth = 1;
+    double          m_gameTimeOfDay  = 12.0;
+    float           m_latitude       = 0.f;
+    float           m_longitude      = 0.f;
+    Astro::State    m_astroState;
 
     // =========================================================================
     // Terrain
     // =========================================================================
 
-    float    m_topdownMaxHeight = 1.f;
-    sf::Vector2f m_topdownWorldMin{0.f, 0.f};
-    sf::Vector2f m_topdownWorldSize{1.f, 1.f};
+    float           m_topdownMaxHeight = 1.f;
+    sf::Vector2f    m_topdownWorldMin{0.f, 0.f};
+    sf::Vector2f    m_topdownWorldSize{1.f, 1.f};
 
     // =========================================================================
     // Rendering — Shaders
     // =========================================================================
 
-    sf::Shader& m_terrainShader     = Assets::Instance().getShader("Terrain");
-    sf::Shader& m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
-    sf::Shader& m_sky               = Assets::Instance().getShader("Sky");
-    sf::Shader& m_orbShader         = Assets::Instance().getShader("Orb");
+    sf::Shader&     m_terrainShader     = Assets::Instance().getShader("Terrain");
+    sf::Shader&     m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
+    sf::Shader&     m_sky               = Assets::Instance().getShader("Sky");
 
     // =========================================================================
     // Rendering — Render Textures and OpenGL Resources
@@ -179,7 +106,7 @@ protected:
     GLuint m_cubeVAO = 0;
     GLuint m_cubeVBO = 0;
     GLuint m_cubeEBO = 0;
-    GLuint m_demoSphereProgram = Assets::Instance().getGLProgram("DemoSphere");
+    GLuint m_OrbCreatureProgram = Assets::Instance().getGLProgram("OrbCreature");
 
     // =========================================================================
     // Rendering — Blit
@@ -213,9 +140,6 @@ protected:
     // Rendering — Orbs
     // =========================================================================
 
-    std::array<OrbDrawItem, 8192> m_orbDrawItems;
-    int m_orbDrawItemCount = 0;
-    std::vector<ShadowOrbEntry> m_shadowOrbList;
     OrbSSBO m_orbSSBO;
     std::vector<OrbData> buildOrbData() const;
 
@@ -289,8 +213,6 @@ protected:
     void updateSunPosition();
     void updateStarRotation();
     void updateMoonPosition();
-    void updateOrbShaderStorage();
-    void updateShadowOrbs();
     void updateBob(SoAEntityHandle e, float dt, float horizSpeed);
     void updateOrbBobbing(SoAEntityHandle e, float dt);
 
@@ -310,15 +232,14 @@ protected:
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
     void runBakePass();
     void runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix);
-    void renderDemoSphere();
+    void renderOrbCreature();
     void blitToScreen(GLuint tex);
 
     // =========================================================================
     // Shader Uniform Upload
     // =========================================================================
 
-    void uploadOrbBatchToShader(sf::Shader& shader, const OrbBatch& batch,
-                                const sf::Vector3f& sunDirView);
+    void updateOrbShaderStorage();
 
     // =========================================================================
     // Terrain Query Helpers
