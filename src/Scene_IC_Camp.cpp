@@ -161,7 +161,7 @@ void Scene_IC_Camp::update() {
     updateSunPosition();
     updateStarRotation();
     updateMoonPosition();
-    // updateOrbShaderStorage();
+    updateOrbShaderStorage();
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
         sGUI();
@@ -894,11 +894,11 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     
     // Tailored Ranges for your parameters
     std::uniform_real_distribution<float> radiusDist(20.0f, 150.0f); // Expanded size range
-    std::uniform_real_distribution<float> bobRateDist(0.2f, 5.0f);
-    std::uniform_real_distribution<float> bobMagDist(5.0f, 150.0f);
+    std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
+    std::uniform_real_distribution<float> bobMagDist(5.0f, 50.0f);
     std::uniform_real_distribution<float> gazeDist(-1.0f, 1.0f);
-    std::uniform_real_distribution<float> dilationDist(0.05f, 1.0f);
-    std::uniform_real_distribution<float> closureDist(0.0f, 1.0f);
+    std::uniform_real_distribution<float> dilationDist(0.5f, 1.0f);
+    std::uniform_real_distribution<float> closureDist(0.0f, 0.0f);
     std::uniform_real_distribution<float> yawDist(0.0f, 2.0f * 3.141592f);
     std::uniform_int_distribution<int> speciesDist(0, 6);
 
