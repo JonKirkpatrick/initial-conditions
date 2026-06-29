@@ -35,13 +35,6 @@ flat in int v_instanceID;
 // Texture samples
 uniform sampler2DArray u_charDiffuseTex;
 uniform sampler2DArray u_charNormalTex;
-uniform sampler2D u_bakeTex;
-uniform sampler2D u_heightMap;
-
-// World bounds
-uniform vec2      u_topdownWorldMin;
-uniform vec2      u_topdownWorldSize;
-uniform float     u_topdownHeightMax;
 
 // Camera uniforms
 uniform vec2      u_viewportSize;
@@ -229,35 +222,6 @@ vec3 normalFromNormalMap(vec2 uv, float speciesIdx)
     tangentNormal.xy    = packedNormal * 2.0 - 1.0;
     tangentNormal.z     = sqrt(max(0.0, 1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
     return tangentNormal;
-}
-
-// ==============================================================================
-// == World Space / Terrain =====================================================
-// ==============================================================================
-
-float rawHeightAt(ivec2 uv)
-{
-    vec4  c      = texelFetch(u_heightMap, uv, 0);
-    vec3  bytes  = floor(c.rgb * 255.0 + 0.5);
-    float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
-    return scaled * (u_topdownHeightMax / 16777215.0);
-}
-
-float decodeHeight(vec2 xz)
-{
-    vec2 uv      = (xz - u_topdownWorldMin) / u_topdownWorldSize;
-    uv.y         = 1.0 - uv.y;
-    vec2 texSize = vec2(textureSize(u_heightMap, 0));
-    vec2 px      = uv * (texSize - 1.0);
-
-    ivec2 p0  = ivec2(floor(px));
-    vec2  f   = fract(px);
-    float h00 = rawHeightAt(p0);
-    float h10 = rawHeightAt(p0 + ivec2(1, 0));
-    float h01 = rawHeightAt(p0 + ivec2(0, 1));
-    float h11 = rawHeightAt(p0 + ivec2(1, 1));
-
-    return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
 }
 
 // ==============================================================================
@@ -562,8 +526,6 @@ void main()
 {
     // SFML Y-flip
     vec2 fragSFML    = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
-    vec2 fragScreenUv = fragSFML / u_viewportSize;
-    vec4 bakeC       = texture(u_bakeTex, fragScreenUv);
 
     Ray         ray = reconstructRay(fragSFML);
     OrbInstance orb = unpackOrb(v_instanceID);

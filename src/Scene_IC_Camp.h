@@ -1,7 +1,7 @@
-#pragma onceawndeb
+#pragma once
 #include <GL/glew.h>
 #include "Scene.h"
-#include "orbSSBO.h"
+#include "OrbSSBO.h"
 #include "HUD.h"
 #include "Topography.h"
 #include "SoAEntityManager.hpp"
@@ -68,7 +68,6 @@ protected:
     // Rendering — Shaders
     // =========================================================================
 
-    sf::Shader&     m_terrainShader     = Assets::Instance().getShader("Terrain");
     sf::Shader&     m_topoMinimapShader = Assets::Instance().getShader("TopoMiniMap");
     sf::Shader&     m_sky               = Assets::Instance().getShader("Sky");
 
@@ -78,29 +77,20 @@ protected:
 
     sf::RenderTexture m_renderTexture;
     sf::RenderTexture m_skyTexture;
-    sf::RenderTexture m_sphereTexture;
     sf::Texture       m_topdownTexture;
     sf::Image         m_topdownImage;
     sf::RenderTexture m_minimapTexture;
-    sf::RenderTexture m_bakeTexture;
-    sf::Texture       m_bakeSFTexture;
-    sf::Texture       m_charTexture;
-    sf::Texture       m_charHeight;
-    sf::Texture       m_charNormal;
     unsigned int m_minimapTextureSize  = 256;
 
-    // New bake pipeline
-    GLuint m_bakeFBO        = 0;
-    GLuint m_bakeColorTex   = 0;
-    GLuint m_bakeDepthRBO   = 0;
+    // New terrain pipeline
     GLuint m_gridVAO        = 0;
     GLuint m_gridVBO        = 0;
     GLuint m_gridEBO        = 0;
     GLuint m_gridIndexCount = 0;
-    GLuint m_bakeProgram    = Assets::Instance().getGLProgram("Bake");
+    GLuint m_terrainProgram    = Assets::Instance().getGLProgram("Terrain");
 
     // New sphere impostor pipeline
-    GLuint m_sphereFBO      = 0;
+    GLuint m_mainFBO      = 0;
     GLuint m_sphereColorTex = 0;
     GLuint m_sphereDepthRBO = 0;
     GLuint m_cubeVAO = 0;
@@ -196,10 +186,8 @@ protected:
     void buildTerrainGrid();
     void buildVertexCube();
     void initializeSkyCubemap();
-    void initializeBakeFBO();
-    void initializeSphereFBO();
+    void initializeMainFBO();
     void initializeOrbShaderStorage();
-    void debugDumpSphereFBO();
 
     // =========================================================================
     // Per-Frame Updates
@@ -229,7 +217,7 @@ protected:
     // =========================================================================
 
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
-    void runBakePass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
+    void runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
     void renderOrbCreature();
     void blitToScreen(GLuint tex);
 

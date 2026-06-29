@@ -8,8 +8,6 @@ Texture     HLAuto          images/gui_elements/HL_Auto.png
 Texture     Moon            images/skymap/Moon_Cropped.png
 
 Texture     Test1           images/terrain/set5x5.png
-Texture     DNeon           images/species_textures/wolf_texture.png
-Texture     DNeonNormal     images/species_textures/wolf_normal.png
 
 Music       MusicTitle      music/title_menu.mp3
 
@@ -20,10 +18,9 @@ Font        Good            fonts/good-timing-bd.otf
 
 Cubemap     NightSky        images/skymap
 
-Shader      Terrain         shaders/terrain.frag
 Shader      TopoMiniMap     shaders/minimap_topo.frag
 Shader      Sky             shaders/sky.frag
 
-GLProgram   Bake            shaders/bake.vert shaders/terrain.frag
+GLProgram   Terrain         shaders/terrain.vert shaders/terrain.frag
 GLProgram   OrbCreature     shaders/orbCreature.vert shaders/orbCreature.frag
 GLProgram   Blit            shaders/blit.vert shaders/blit.frag

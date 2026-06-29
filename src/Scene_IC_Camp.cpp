@@ -1,7 +1,7 @@
 #include <GL/glew.h>
 #include "Scene_IC_Camp.h"
 #include "GameEngine.h"
-#include "orbSSBO.h"
+#include "OrbSSBO.h"
 #include <SFML/Graphics.hpp>
 #include <SFML/OpenGL.hpp>
 #include <SFML/Graphics/CoordinateType.hpp>
@@ -74,23 +74,15 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     settings.antiAliasingLevel = 8;
     sf::Vector2u windowSize = game.window().getSize();
     m_moonTexture = Assets::Instance().getTexture("Moon");
-    m_renderTexture = sf::RenderTexture({windowSize.x, windowSize.y});
-    m_sphereTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     m_skyTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
-    m_bakeTexture = sf::RenderTexture({windowSize.x, windowSize.y}, sf::ContextSettings(24));
-    m_bakeTexture.setSmooth(false);
     m_topdownTexture = Assets::Instance().getTexture("Test1");
     m_topdownImage = m_topdownTexture.copyToImage();
-    m_charTexture = Assets::Instance().getTexture("DNeon");
-    m_charNormal = Assets::Instance().getTexture("DNeonNormal");
     float worldSize = Topography::BASE_SIZE;
     float worldMinCoord = -worldSize / 2.0f;
     m_topdownWorldMin = { worldMinCoord, worldMinCoord };
     m_topdownWorldSize = { worldSize, worldSize };
     m_gridColour = Theme::color("cerulean");
-    GLint linked;
-    glGetProgramiv(m_bakeProgram, GL_LINK_STATUS, &linked);
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
     loadLevel(m_levelPath);
@@ -109,8 +101,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     updateStarRotation();
     updateMoonPosition();
     initializeSkyCubemap();
-    initializeBakeFBO();
-    initializeSphereFBO();
+    initializeMainFBO();
     initializeOrbShaderStorage();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
@@ -412,7 +403,7 @@ void Scene_IC_Camp::sRender() {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto rawWorldToCamMatrix = Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll);
     auto worldToCamMatrix = toGlslMat3(rawWorldToCamMatrix);
-    runBakePass(rawWorldToCamMatrix);
+    runTerrainPass(rawWorldToCamMatrix);
     renderOrbCreature();
     renderSky(worldToCamMatrix);
 
@@ -1182,45 +1173,7 @@ void Scene_IC_Camp::initializeSkyCubemap()
         std::cerr << "Sky cubemap 'NightSky' not found in Assets; falling back to procedural sky." << std::endl;
 }
 
-void Scene_IC_Camp::initializeBakeFBO() {
-    sf::Vector2u windowSize = m_game.window().getSize();
-
-    // Create the float texture to store XZ world coordinates
-    glGenTextures(1, &m_bakeColorTex);
-    glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F,
-                 windowSize.x, windowSize.y,
-                 0, GL_RGBA, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    // Create depth renderbuffer so depth testing works during the bake
-    glGenRenderbuffers(1, &m_bakeDepthRBO);
-    glBindRenderbuffer(GL_RENDERBUFFER, m_bakeDepthRBO);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
-                          windowSize.x, windowSize.y);
-
-    // Assemble the FBO
-    glGenFramebuffers(1, &m_bakeFBO);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_bakeFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D, m_bakeColorTex, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                              GL_RENDERBUFFER, m_bakeDepthRBO);
-
-    // Verify it's complete before leaving
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-        // You can hook this into whatever logging you use
-        std::cerr << "Bake FBO incomplete: 0x" << std::hex << status << std::endl;
-    }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-}
-
-void Scene_IC_Camp::initializeSphereFBO() {
+void Scene_IC_Camp::initializeMainFBO() {
     sf::Vector2u windowSize = m_game.window().getSize();
 
     glGenTextures(1, &m_sphereColorTex);
@@ -1238,8 +1191,8 @@ void Scene_IC_Camp::initializeSphereFBO() {
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
         windowSize.x, windowSize.y);
 
-    glGenFramebuffers(1, &m_sphereFBO);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
+    glGenFramebuffers(1, &m_mainFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_mainFBO);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
         GL_TEXTURE_2D, m_sphereColorTex, 0);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
@@ -1291,26 +1244,7 @@ void Scene_IC_Camp::updateOrbShaderStorage()
         m_orbSSBO.update(orbData);
 }
 
-
-void Scene_IC_Camp::debugDumpSphereFBO() {
-    sf::Vector2u windowSize = m_game.window().getSize();
-    std::vector<unsigned char> pixels(windowSize.x * windowSize.y * 4);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
-    glReadPixels(0, 0, windowSize.x, windowSize.y, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    int cx = windowSize.x / 2;
-    int cy = windowSize.y / 2;
-    int idx = (cy * windowSize.x + cx) * 4;
-    std::cout << "Sphere FBO centre pixel: "
-        << (int)pixels[idx+0] << ", "  // should be 255 (red)
-        << (int)pixels[idx+1] << ", "  // should be 0
-        << (int)pixels[idx+2] << ", "  // should be 0
-        << (int)pixels[idx+3] << "\n"; // should be 255
-}
-
-void Scene_IC_Camp::runBakePass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix) {
+void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix) {
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     auto viewMatrix = Camera::getViewMatrix(transform);
@@ -1320,49 +1254,51 @@ void Scene_IC_Camp::runBakePass(const std::array<std::array<float, 3>, 3>& world
 
     sf::Vector2u windowSize = m_game.window().getSize();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_mainFBO);
     glViewport(0, 0, windowSize.x, windowSize.y);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 
-    glUseProgram(m_bakeProgram);
+    glUseProgram(m_terrainProgram);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_bakeProgram, "u_topoTopdownTex"), 0);
-    glUniform2f(glGetUniformLocation(m_bakeProgram, "u_topdownWorldMin"),
+
+    // Uniforms for the Vertex Portion of the Shader
+    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_topoTopdownTex"), 0);
+    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_topdownWorldMin"),
                 m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_bakeProgram, "u_topdownWorldSize"),
+    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_topdownWorldSize"),
                 m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_heightMax"), m_topdownMaxHeight);
-    glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram, "u_View"),
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_heightMax"), m_topdownMaxHeight);
+    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_View"),
                        1, GL_FALSE, viewMatrix.data());
-    glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram, "u_Projection"),
+    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_Projection"),
                        1, GL_FALSE, projMatrix.data());
 
     // Uniforms for the Fragment Portion of the Shader
-    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_cameraPos"), transform.pos.x, transform.pos.y, transform.pos.z);
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_cameraHeight"), getCameraHeightAboveGround(transform.pos));
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_farPlane"), cameraData.farPlane);
-    glUniformMatrix3fv(glGetUniformLocation(m_bakeProgram, "u_worldToCamMatrix"), 1, GL_FALSE, &worldToCamMatrix[0][0]);
+    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_cameraPos"), transform.pos.x, transform.pos.y, transform.pos.z);
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_cameraHeight"), getCameraHeightAboveGround(transform.pos));
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_farPlane"), cameraData.farPlane);
+    glUniformMatrix3fv(glGetUniformLocation(m_terrainProgram, "u_worldToCamMatrix"), 1, GL_FALSE, &worldToCamMatrix[0][0]);
 
-    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_sunDir"), m_astroState.sunDirection.x, m_astroState.sunDirection.y, m_astroState.sunDirection.z);
-    glUniform4f(glGetUniformLocation(m_bakeProgram, "u_sunColor"), m_astroState.sunColor.x, m_astroState.sunColor.y, m_astroState.sunColor.z, m_astroState.sunColor.w);
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_ambientStrength"), m_sunIntensity);
+    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_sunDir"), m_astroState.sunDirection.x, m_astroState.sunDirection.y, m_astroState.sunDirection.z);
+    glUniform4f(glGetUniformLocation(m_terrainProgram, "u_sunColor"), m_astroState.sunColor.x, m_astroState.sunColor.y, m_astroState.sunColor.z, m_astroState.sunColor.w);
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_ambientStrength"), m_sunIntensity);
 
-    glUniform1i(glGetUniformLocation(m_bakeProgram, "u_headlampOn"), shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_headlampIntensity"), 4.0f);
-    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_headlampColour"), 255.f / 255.f, 244.f / 255.f, 214.f / 255.f);
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_headlampRange"), 15000.0f);
+    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_headlampOn"), shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_headlampIntensity"), 4.0f);
+    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_headlampColour"), 255.f / 255.f, 244.f / 255.f, 214.f / 255.f);
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_headlampRange"), 15000.0f);
     
-    glUniform1i(glGetUniformLocation(m_bakeProgram, "u_cursorMode"), static_cast<int>(m_cursorMode));
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_hexSize"), m_hexSize);
-    glUniform2f(glGetUniformLocation(m_bakeProgram, "u_hoveredHex"), hex.x, hex.y);
-    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_gridColour"), m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
+    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_cursorMode"), static_cast<int>(m_cursorMode));
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_hexSize"), m_hexSize);
+    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_hoveredHex"), hex.x, hex.y);
+    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_gridColour"), m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
     
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_reliefExaggeration"), 1.0f);
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_reliefExaggeration"), 1.0f);
 
     glBindVertexArray(m_gridVAO);
     glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
@@ -1453,12 +1389,10 @@ void Scene_IC_Camp::renderOrbCreature()
     auto      vp       = Camera::getVPMatrix(camTransform, camData);
 
     // ==================== FBO SETUP ====================
-    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_mainFBO);
     
-    // CHANGE THIS: Enable depth testing so the GPU rejects further fragments
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL); 
-    
     glDisable(GL_BLEND);
 
     // ==================== LAZY INIT ====================
@@ -1477,22 +1411,7 @@ void Scene_IC_Camp::renderOrbCreature()
     glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getSpeciesNormalArray());
     glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_charNormalTex"), 1);
 
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
-    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_bakeTex"), 2);
-
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_heightMap"), 3);
-
     // ==================== UNIFORMS ====================
-    glUniform2f(glGetUniformLocation(m_OrbCreatureProgram, "u_topdownWorldMin"),
-        m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_OrbCreatureProgram, "u_topdownWorldSize"),
-        m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram, "u_topdownHeightMax"),
-        m_topdownMaxHeight);
-
     glUniform2f(glGetUniformLocation(m_OrbCreatureProgram, "u_viewportSize"),
         static_cast<float>(camData.viewportSize.x),
         static_cast<float>(camData.viewportSize.y));
@@ -1523,8 +1442,6 @@ void Scene_IC_Camp::renderOrbCreature()
     glUseProgram(0);
     glEnable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
-    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1593,8 +1510,6 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     {
         glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
     }
-    m_renderTexture.clear(sf::Color::Transparent);
-    m_renderTexture.display();
     m_skyTexture.clear(sf::Color::Transparent);
     m_skyTexture.draw(skyQuad, &m_sky);
     m_skyTexture.setSmooth(true);
