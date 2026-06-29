@@ -170,7 +170,7 @@ namespace Camera {
         // Retains your engine's custom Y-axis inversion (-f)
         return {
             f / c.aspectRatio, 0.f,  0.f,                          0.f,
-            0.f,               -f,   0.f,                          0.f,
+            0.f,               f,   0.f,                          0.f,
             0.f,               0.f,  (zFar + zNear) / zRange,     -1.f,   
             0.f,               0.f,  (2.f * zFar * zNear) / zRange, 0.f
         };

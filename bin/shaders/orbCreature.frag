@@ -584,15 +584,6 @@ void main()
     if (leftHit.hit  && leftHit.t  < closestT) { closestT = leftHit.t;  finalHit = leftHit;  hitType = 1; }
     if (rightHit.hit && rightHit.t < closestT) { closestT = rightHit.t; finalHit = rightHit; hitType = 2; }
 
-    // Occlude against terrain
-    if (!(bakeC.a == 0.0 && bakeC.r == 0.0)) {
-        vec2  landXZ  = bakeC.rg;
-        float landY   = decodeHeight(landXZ);
-        vec3  landPos = vec3(landXZ.x, landY, landXZ.y);
-        float landDist = length(landPos - u_cameraPos);
-        if (closestT > landDist) discard;
-    }
-
     // Time of day factors
     float sunElevationDeg = asin(clamp(u_sunDir.y, -1.0, 1.0)) * 180.0 / 3.1415926535;
     float sunVisibility   = smoothstep(-12.0, 6.0, sunElevationDeg);

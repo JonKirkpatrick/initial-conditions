@@ -1,77 +1,37 @@
 #version 460 core
 
-uniform vec2 viewportSize;
-uniform float m_hexSize;
-uniform sampler2D bakeTex;
-uniform vec3 cameraPos;
-uniform float camHeight;
-uniform float farPlane;
-uniform sampler2D heightMap;
-uniform float u_heightMax;
-uniform mat3 worldToCamMatrix;
-uniform vec2 topdownWorldMin;
-uniform vec2 topdownWorldSize;
+uniform vec3    u_cameraPos;
+uniform float   u_cameraHeight;
+uniform float   u_farPlane;
+uniform float   u_heightMax;
+uniform mat3    u_worldToCamMatrix;
 
-uniform vec3 sunDir;
-uniform vec4 sunColor;
-uniform float ambientStrength;
-uniform vec3 gridColor;
+uniform vec3    u_sunDir;
+uniform vec4    u_sunColor;
+uniform float   u_ambientStrength;
 
-uniform bool  headlampOn;
-uniform float headlampIntensity;
-uniform vec3  headlampColor;
-uniform float headlampRange;
+uniform bool    u_headlampOn;
+uniform float   u_headlampIntensity;
+uniform vec3    u_headlampColour;
+uniform float   u_headlampRange;
 
-uniform bool  cursorMode;
-uniform vec2  hoveredHex;
-uniform float u_reliefExaggeration;
+uniform bool    u_cursorMode;
+uniform float   u_hexSize;
+uniform vec2    u_hoveredHex;
+uniform vec3    u_gridColour;
 
-uniform int u_shadowOrbCount;
-uniform vec3 u_shadowOrbPos[64];
-uniform float u_shadowOrbRadius[64];
-uniform float u_shadowDarkness;
+uniform float   u_reliefExaggeration;
+
+in vec2 v_worldXZ;
+in vec2 v_normalXZ;
+in float v_worldY;
 
 out vec4 fragColor;
 
-// ================== XZ DECODE ==================
-vec2 decodeXZ(vec4 c) {
-    return c.xy;
-}
+// ================== NORMAL from vertex shader ==================
 
-// ================== HEIGHT from topdown texture (Bilinear) ==================
-float rawHeightAt(ivec2 p) {
-    vec4 c = texelFetch(heightMap, p, 0);
-    vec3 bytes = floor(c.rgb * 255.0 + 0.5);
-    float scaled = dot(bytes, vec3(65536.0, 256.0, 1.0));
-    return scaled * (u_heightMax / 16777215.0);
-}
-
-float decodeHeight(vec2 xz) {
-    vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
-    uv.y = 1.0 - uv.y;
-    
-    // Convert to texel space
-    vec2 texSize = vec2(textureSize(heightMap, 0));
-    vec2 px = uv * (texSize - 1.0);
-    
-    ivec2 p0 = ivec2(floor(px));
-    vec2 f = fract(px); 
-    
-    float h00 = rawHeightAt(p0);
-    float h10 = rawHeightAt(p0 + ivec2(1, 0));
-    float h01 = rawHeightAt(p0 + ivec2(0, 1));
-    float h11 = rawHeightAt(p0 + ivec2(1, 1));
-    
-    // Bilinear interpolation
-    float h0 = mix(h00, h10, f.x);
-    float h1 = mix(h01, h11, f.x);
-    return mix(h0, h1, f.y);
-}
-
-// ================== NORMAL from topdown texture ==================
-
-vec3 computeNormal(vec4 bakeC) {
-    vec2 nxz = bakeC.zw;
+vec3 computeNormal() {
+    vec2 nxz = v_normalXZ;
     float ny = sqrt(max(0.0, 1.0 - dot(nxz, nxz)));
     return normalize(vec3(nxz.x, ny, nxz.y));
 }
@@ -96,8 +56,8 @@ vec3 getDampedNormal(vec3 rawNormal, float distanceToCam) {
 
 // ================== HEX GRID ==================
 vec2 hexAt(vec2 p) {
-    float q = (2.0/3.0 * p.x) / m_hexSize;
-    float r = (p.y / (m_hexSize * 1.7320508)) - q / 2.0;
+    float q = (2.0/3.0 * p.x) / u_hexSize;
+    float r = (p.y / (u_hexSize * 1.7320508)) - q / 2.0;
     float s = -q - r;
     float rq = floor(q + 0.5);
     float rr = floor(r + 0.5);
@@ -111,8 +71,8 @@ vec2 hexAt(vec2 p) {
 }
 
 float hexGrid(vec2 p) {
-    float q = (2.0/3.0 * p.x) / m_hexSize;
-    float r = (p.y / (m_hexSize * 1.7320508)) - q / 2.0;
+    float q = (2.0/3.0 * p.x) / u_hexSize;
+    float r = (p.y / (u_hexSize * 1.7320508)) - q / 2.0;
     float s = -q - r;
     float rq = floor(q + 0.5);
     float rr = floor(r + 0.5);
@@ -123,13 +83,13 @@ float hexGrid(vec2 p) {
     if (dq > dr && dq > ds) rq = -rr - rs;
     else if (dr > ds) rr = -rq - rs;
     vec2 center;
-    center.x = m_hexSize * 1.5 * rq;
-    center.y = m_hexSize * 1.7320508 * (rr + rq / 2.0);
+    center.x = u_hexSize * 1.5 * rq;
+    center.y = u_hexSize * 1.7320508 * (rr + rq / 2.0);
     vec2 delta = abs(p - center);
     float distToEdge = max(delta.y, delta.y * 0.5 + delta.x * 0.866025);
-    float hexBoundary = m_hexSize * 0.866025;
+    float hexBoundary = u_hexSize * 0.866025;
     float distToLine = abs(distToEdge - hexBoundary);
-    float lineWidth = m_hexSize * 0.012;
+    float lineWidth = u_hexSize * 0.012;
     return smoothstep(lineWidth, 0.0, distToLine);
 }
 
@@ -159,7 +119,7 @@ vec3 topoColour(float normHeight, float shade) {
 vec3 getTerrainColor(vec3 normal, float h) {
     float normH = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
     float exaggeratedH = pow(normH, 1.0 / max(u_reliefExaggeration, 0.01));
-    vec3 lightDir = normalize(sunDir);
+    vec3 lightDir = normalize(u_sunDir);
     float shade = clamp(dot(normal, lightDir), 0.0, 1.0);
     return topoColour(exaggeratedH, shade);
 }
@@ -184,28 +144,17 @@ vec3 getDampedTerrainColor(vec3 rawColor, float distanceToCam) {
 
 // ================== MAIN ==================
 void main() {
-    vec2 uv = gl_FragCoord.xy / viewportSize;
-    uv.y = 1.0 - uv.y;
-
-    vec4 bakeC = texture(bakeTex, uv);
-
-    // Alpha == 0 means no terrain was rasterized here (sky)
-    if (bakeC.a == 0.0 && bakeC.r == 0.0) {
-        fragColor = vec4(0.0, 0.0, 0.0, 0.0);
-        return;
-    }
-
     // Recover world XZ directly
-    vec2 xz = decodeXZ(bakeC);
-    float h  = decodeHeight(xz);
+    vec2 xz = v_worldXZ;
+    float h  = v_worldY;
     vec3 worldPos = vec3(xz.x, h, xz.y);
 
     // Distance from camera for atmosphere + grid fade
-    float dist = length(worldPos - cameraPos);
+    float dist = length(worldPos - u_cameraPos);
 
     // ================== NORMAL (WITH HORIZON DAMPING) ==================
     // 1. Compute and damp the surface vectors
-    vec3 rawNormal = computeNormal(bakeC);
+    vec3 rawNormal = computeNormal();
     vec3 exagNormal = normalize(vec3(rawNormal.x * u_reliefExaggeration,
                                      rawNormal.y,
                                      rawNormal.z * u_reliefExaggeration));
@@ -222,43 +171,25 @@ void main() {
 
     // ================== LIGHTING ==================
 
-    vec3 sunDirNorm = normalize(sunDir);
+    vec3 sunDirNorm = normalize(u_sunDir);
     float sunElevationDeg = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;
     float nightFactor = smoothstep(-5.0, -15.0, sunElevationDeg);
     float sunVis      = smoothstep(-4.0,   8.0, sunElevationDeg);
 
-    float orbShadow = 1.0;
-    if (u_shadowOrbCount > 0) {
-        vec3 sunN = normalize(sunDir);
-        for (int i = 0; i < 64; i++) {
-            if (i >= u_shadowOrbCount) break;
-            vec3 toOrb  = u_shadowOrbPos[i] - worldPos;
-            float along = dot(toOrb, sunN);
-            if (along <= 0.0) continue;
-            vec3 perp   = toOrb - along * sunN;
-            float perpDist = length(perp);
-            float r = u_shadowOrbRadius[i];
-            float maxShadowLength = 800.0;
-            float shadowReach = 1.0 - smoothstep(0.0, maxShadowLength, along);
-            float shadow = (1.0 - smoothstep(r * 0.6, r * 1.3, perpDist)) * shadowReach;
-            orbShadow = min(orbShadow, 1.0 - shadow * u_shadowDarkness);
-        }
-    }
-
-    float diff = max(dot(normal, sunDirNorm), 0.0) * sunVis * orbShadow;
-    vec3 ambient = ambientStrength * mix(1.0, 0.07, nightFactor) * terrainBaseColor;
+    float diff = max(dot(normal, sunDirNorm), 0.0) * sunVis;
+    vec3 ambient = u_ambientStrength * mix(1.0, 0.07, nightFactor) * terrainBaseColor;
 
     // ================== HEADLAMP ==================
     vec3 headlampContribution = vec3(0.0);
     float headSpec = 0.0;
-    if (headlampOn) {
-        vec3 toFragment = worldPos - cameraPos;
+    if (u_headlampOn) {
+        vec3 toFragment = worldPos - u_cameraPos;
         float distToCamera = length(toFragment);
 
         if (distToCamera > 0.1) {
             vec3 toFragDir = normalize(toFragment);
-            vec3 camForward = normalize(worldToCamMatrix * vec3(0.0, 0.0, -1.0));
-            vec3 camRight = normalize(worldToCamMatrix * vec3(1.0, 0.0, 0.0));
+            vec3 camForward = normalize(u_worldToCamMatrix * vec3(0.0, 0.0, -1.0));
+            vec3 camRight = normalize(u_worldToCamMatrix * vec3(1.0, 0.0, 0.0));
             float camPitchAmount = abs(asin(clamp(camForward.y, -1.0, 1.0)));
 
             float spotCos = dot(camForward, toFragDir);
@@ -271,15 +202,15 @@ void main() {
 
                 float headDiff = max(dot(normal, lightDir), 0.0);
                 float nearFade = smoothstep(0.0, 1.0, distToCamera);
-                float distFalloff = pow(max(0.0, 1.0 - distToCamera / headlampRange), 1.6);
+                float distFalloff = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
                 headlampContribution = headDiff * spot * distFalloff * nearFade
-                                    * headlampColor * headlampIntensity;
-                vec3 fakeLightPos = cameraPos + camRight * 5.0;
+                                    * u_headlampColour * u_headlampIntensity;
+                vec3 fakeLightPos = u_cameraPos + camRight * 5.0;
                 vec3 fakeLightDir = normalize(worldPos - fakeLightPos);
                 vec3 halfDir = normalize(-fakeLightDir + lightDir);
                 headSpec = pow(max(dot(normal, halfDir), 0.0), 32.0)
                         * spot * distFalloff * 0.3;
-                float ambientLoad = clamp(ambientStrength * sunVis + (1.0 - nightFactor), 0.0, 1.0);
+                float ambientLoad = clamp(u_ambientStrength * sunVis + (1.0 - nightFactor), 0.0, 1.0);
                 float headlampVisibility = 1.0 - ambientLoad;
                 headlampVisibility = clamp(headlampVisibility, 0.3, 1.0);
 
@@ -289,7 +220,7 @@ void main() {
         }
     }
 
-    vec3 diffuse = diff * sunColor.rgb * terrainBaseColor + headlampContribution;
+    vec3 diffuse = diff * u_sunColor.rgb * terrainBaseColor + headlampContribution;
 
     // Moonlight
     vec3 topoLuma = vec3(dot(terrainBaseColor, vec3(0.299, 0.587, 0.114)));
@@ -298,18 +229,18 @@ void main() {
     float moonlightFill = nightFactor * 0.08;
     ambient += moonlightFill * mix(moonTint, nightTopoTint, 0.5) * nightTopoTint;
 
-    vec3 viewDir = normalize(cameraPos - worldPos);
+    vec3 viewDir = normalize(u_cameraPos - worldPos);
     vec3 halfDir = normalize(sunDirNorm + viewDir);
     float spec = pow(max(dot(normal, halfDir), 0.0), 32.0) * sunVis * 0.5;
 
-    vec3 groundColor = ambient + diffuse + spec * sunColor.rgb * 0.8
-                     + headSpec * headlampColor;
+    vec3 groundColor = ambient + diffuse + spec * u_sunColor.rgb * 0.8
+                     + headSpec * u_headlampColour;
 
     // ================== ATMOSPHERE ==================
-    float distNormalized   = clamp(dist / farPlane, 0.0, 1.0);
+    float distNormalized   = clamp(dist / u_farPlane, 0.0, 1.0);
     float atmosphereStrength = pow(distNormalized, 1.7);
     vec3 nightAtm = vec3(0.008, 0.006, 0.025);
-    vec3 atmTint  = mix(sunColor.rgb * vec3(0.7, 0.65, 0.8), vec3(0.50, 0.68, 0.95), 0.6);
+    vec3 atmTint  = mix(u_sunColor.rgb * vec3(0.7, 0.65, 0.8), vec3(0.50, 0.68, 0.95), 0.6);
     float daytimeFactor = clamp(sunDirNorm.y * 1.8, 0.0, 1.0);
     atmTint = mix(vec3(0.28, 0.18, 0.40), atmTint, daytimeFactor);
     atmTint = mix(atmTint, nightAtm, nightFactor * 0.95);
@@ -323,20 +254,20 @@ void main() {
     finalColor *= mix(1.0, nightFloor, nightFactor);
 
     // ================== HEX GRID ==================
-    float gridFade = pow(clamp(1.0 - (dist / farPlane), 0.0, 1.0), 2.0);
-    float visibilityDist = 800.0 + camHeight * 20.0;
+    float gridFade = pow(clamp(1.0 - (dist / u_farPlane), 0.0, 1.0), 2.0);
+    float visibilityDist = 800.0 + u_cameraHeight * 20.0;
     float distanceFade = clamp(1.0 - (dist / visibilityDist), 0.0, 1.0);
     float gridMask = hexGrid(worldPos.xz);
     float finalGridIntensity = gridMask * gridFade * distanceFade * 0.72;
-    finalColor = mix(finalColor, gridColor, finalGridIntensity);
+    finalColor = mix(finalColor, u_gridColour, finalGridIntensity);
 
     // ================== HEX HIGHLIGHT ==================
-    if (cursorMode) {
+    if (u_cursorMode) {
         vec2 cell = hexAt(worldPos.xz);
-        if (cell.x == hoveredHex.x && cell.y == hoveredHex.y) {
+        if (cell.x == u_hoveredHex.x && cell.y == u_hoveredHex.y) {
             float insideCell = 1.0 - gridMask;
-            finalColor = mix(finalColor, gridColor, insideCell * 0.25);
-            finalColor = mix(finalColor, gridColor, gridMask * 0.9);
+            finalColor = mix(finalColor, u_gridColour, insideCell * 0.25);
+            finalColor = mix(finalColor, u_gridColour, gridMask * 0.9);
         }
     }
 

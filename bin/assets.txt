@@ -24,6 +24,6 @@ Shader      Terrain         shaders/terrain.frag
 Shader      TopoMiniMap     shaders/minimap_topo.frag
 Shader      Sky             shaders/sky.frag
 
-GLProgram   Bake            shaders/bake.vert shaders/bake.frag
+GLProgram   Bake            shaders/bake.vert shaders/terrain.frag
 GLProgram   OrbCreature     shaders/orbCreature.vert shaders/orbCreature.frag
 GLProgram   Blit            shaders/blit.vert shaders/blit.frag

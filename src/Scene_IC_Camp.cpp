@@ -88,7 +88,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     float worldMinCoord = -worldSize / 2.0f;
     m_topdownWorldMin = { worldMinCoord, worldMinCoord };
     m_topdownWorldSize = { worldSize, worldSize };
-    m_gridColor = Theme::color("cerulean");
+    m_gridColour = Theme::color("cerulean");
     GLint linked;
     glGetProgramiv(m_bakeProgram, GL_LINK_STATUS, &linked);
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
@@ -102,7 +102,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_entityManager.update();
 
     buildTerrainGrid();
-    // buildVertexCube();
     buildHud();
     updateHUDData();
     updateSiderealTime();
@@ -411,19 +410,16 @@ void Scene_IC_Camp::sGUI()
 void Scene_IC_Camp::sRender() {
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
-    auto worldToCamMatrix = toGlslMat3(Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll));
-
-    runBakePass();
-    renderSky(worldToCamMatrix);
-    runTerrainPass(worldToCamMatrix);
+    auto rawWorldToCamMatrix = Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll);
+    auto worldToCamMatrix = toGlslMat3(rawWorldToCamMatrix);
+    runBakePass(rawWorldToCamMatrix);
     renderOrbCreature();
+    renderSky(worldToCamMatrix);
 
     // Composite to screen
     window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
-    sf::Sprite finalSprite(m_renderTexture.getTexture());
     window.draw(backgroundSprite);
-    window.draw(finalSprite);
     window.setActive(true);
     blitToScreen(m_sphereColorTex);
     m_hud->render(window, false);
@@ -1296,26 +1292,6 @@ void Scene_IC_Camp::updateOrbShaderStorage()
 }
 
 
-void Scene_IC_Camp::debugDumpBakeTexture() {
-    sf::Vector2u windowSize = m_game.window().getSize();
-    std::vector<float> pixels(windowSize.x * windowSize.y * 4);
-    
-    glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
-    
-    // Sample a few pixels from the centre of the texture
-    int cx = windowSize.x / 2;
-    int cy = windowSize.y / 2;
-    int idx = (cy * windowSize.x + cx) * 4;
-    
-    std::cout << "Bake centre pixel: "
-              << pixels[idx+0] << ", "  // should be world X
-              << pixels[idx+1] << ", "  // should be world Z
-              << pixels[idx+2] << ", "  // 0.0
-              << pixels[idx+3] << "\n"; // 1.0 if terrain, 0.0 if sky
-}
-
 void Scene_IC_Camp::debugDumpSphereFBO() {
     sf::Vector2u windowSize = m_game.window().getSize();
     std::vector<unsigned char> pixels(windowSize.x * windowSize.y * 4);
@@ -1334,15 +1310,17 @@ void Scene_IC_Camp::debugDumpSphereFBO() {
         << (int)pixels[idx+3] << "\n"; // should be 255
 }
 
-void Scene_IC_Camp::runBakePass() {
+void Scene_IC_Camp::runBakePass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix) {
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     auto viewMatrix = Camera::getViewMatrix(transform);
     auto projMatrix = Camera::getProjectionMatrix(cameraData);
+    sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
+    sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
 
     sf::Vector2u windowSize = m_game.window().getSize();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_bakeFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
     glViewport(0, 0, windowSize.x, windowSize.y);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1353,17 +1331,38 @@ void Scene_IC_Camp::runBakePass() {
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_bakeProgram, "topoTopdownTex"), 0);
-    glUniform2f(glGetUniformLocation(m_bakeProgram, "topdownWorldMin"),
+    glUniform1i(glGetUniformLocation(m_bakeProgram, "u_topoTopdownTex"), 0);
+    glUniform2f(glGetUniformLocation(m_bakeProgram, "u_topdownWorldMin"),
                 m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_bakeProgram, "topdownWorldSize"),
+    glUniform2f(glGetUniformLocation(m_bakeProgram, "u_topdownWorldSize"),
                 m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(m_bakeProgram, "topdownHeightMax"),
-                m_topdownMaxHeight);
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_heightMax"), m_topdownMaxHeight);
     glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram, "u_View"),
                        1, GL_FALSE, viewMatrix.data());
     glUniformMatrix4fv(glGetUniformLocation(m_bakeProgram, "u_Projection"),
                        1, GL_FALSE, projMatrix.data());
+
+    // Uniforms for the Fragment Portion of the Shader
+    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_cameraPos"), transform.pos.x, transform.pos.y, transform.pos.z);
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_cameraHeight"), getCameraHeightAboveGround(transform.pos));
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_farPlane"), cameraData.farPlane);
+    glUniformMatrix3fv(glGetUniformLocation(m_bakeProgram, "u_worldToCamMatrix"), 1, GL_FALSE, &worldToCamMatrix[0][0]);
+
+    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_sunDir"), m_astroState.sunDirection.x, m_astroState.sunDirection.y, m_astroState.sunDirection.z);
+    glUniform4f(glGetUniformLocation(m_bakeProgram, "u_sunColor"), m_astroState.sunColor.x, m_astroState.sunColor.y, m_astroState.sunColor.z, m_astroState.sunColor.w);
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_ambientStrength"), m_sunIntensity);
+
+    glUniform1i(glGetUniformLocation(m_bakeProgram, "u_headlampOn"), shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_headlampIntensity"), 4.0f);
+    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_headlampColour"), 255.f / 255.f, 244.f / 255.f, 214.f / 255.f);
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_headlampRange"), 15000.0f);
+    
+    glUniform1i(glGetUniformLocation(m_bakeProgram, "u_cursorMode"), static_cast<int>(m_cursorMode));
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_hexSize"), m_hexSize);
+    glUniform2f(glGetUniformLocation(m_bakeProgram, "u_hoveredHex"), hex.x, hex.y);
+    glUniform3f(glGetUniformLocation(m_bakeProgram, "u_gridColour"), m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
+    
+    glUniform1f(glGetUniformLocation(m_bakeProgram, "u_reliefExaggeration"), 1.0f);
 
     glBindVertexArray(m_gridVAO);
     glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
@@ -1455,12 +1454,6 @@ void Scene_IC_Camp::renderOrbCreature()
 
     // ==================== FBO SETUP ====================
     glBindFramebuffer(GL_FRAMEBUFFER, m_sphereFBO);
-    sf::Vector2u windowSize = m_game.window().getSize();
-    glViewport(0, 0, windowSize.x, windowSize.y);
-    glClearColor(0, 0, 0, 0);
-    
-    // Clear both color and depth buffers
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
     
     // CHANGE THIS: Enable depth testing so the GPU rejects further fragments
     glEnable(GL_DEPTH_TEST);
@@ -1606,83 +1599,6 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     m_skyTexture.draw(skyQuad, &m_sky);
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
-}
-
-void Scene_IC_Camp::runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& transform  = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    sf::Vector2u winSize = m_game.window().getSize();
-    sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
-    sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
-    const bool headlampOn = shouldHeadlightsBeOn();
-
-    // 1. Clear target natively.
-    m_renderTexture.clear(sf::Color::Transparent);
-
-    // 2. Safely apply uniforms
-    m_terrainShader.setUniform("viewportSize",     sf::Glsl::Vec2(winSize.x, winSize.y));
-    m_terrainShader.setUniform("m_hexSize",        m_hexSize);
-    m_terrainShader.setUniform("cameraPos",        sf::Glsl::Vec3(transform.pos.x, transform.pos.y, transform.pos.z));
-    m_terrainShader.setUniform("camHeight",        getCameraHeightAboveGround(transform.pos));
-    m_terrainShader.setUniform("heightMap",        m_topdownTexture);
-    m_terrainShader.setUniform("u_heightMax",      m_topdownMaxHeight);
-    m_terrainShader.setUniform("farPlane",         cameraData.farPlane);
-    m_terrainShader.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_terrainShader.setUniform("topdownWorldMin",  sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_terrainShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    m_terrainShader.setUniform("sunDir",           m_astroState.sunDirection);
-    m_terrainShader.setUniform("sunColor",         m_astroState.sunColor);
-    m_terrainShader.setUniform("ambientStrength",  0.3f);
-    m_terrainShader.setUniform("gridColor",        colorToShader(m_gridColor));
-    m_terrainShader.setUniform("headlampOn",       headlampOn);
-    m_terrainShader.setUniform("headlampIntensity",4.f);
-    m_terrainShader.setUniform("headlampColor",    colorToShader(sf::Color(255, 244, 214)));
-    m_terrainShader.setUniform("headlampRange",    15000.0f);
-    m_terrainShader.setUniform("u_heightMax",      m_topdownMaxHeight);
-    m_terrainShader.setUniform("u_reliefExaggeration", 1.0f);
-    m_terrainShader.setUniform("cursorMode",       m_cursorMode);
-    m_terrainShader.setUniform("hoveredHex",       sf::Glsl::Vec2((float)hex.x, (float)hex.y));
-
-    // 3. Create the screen-space quad matching pixel space dimensions
-    sf::VertexArray screenQuad(sf::PrimitiveType::TriangleStrip, 4);
-    screenQuad[0] = sf::Vertex({0.f, 0.f},                 sf::Color::White, {0.f, 1.f});
-    screenQuad[1] = sf::Vertex({0.f, (float)winSize.y},    sf::Color::White, {0.f, 0.f});
-    screenQuad[2] = sf::Vertex({(float)winSize.x, 0.f},    sf::Color::White, {1.f, 1.f});
-    screenQuad[3] = sf::Vertex({(float)winSize.x, (float)winSize.y}, sf::Color::White, {1.f, 0.f});
-
-    // 4. Bind the shader program via SFML
-    sf::Shader::bind(&m_terrainShader);
-    GLuint prog = m_terrainShader.getNativeHandle();
-
-    // 5. Force-bind textures to concrete units right before execution
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_bakeColorTex);
-    glUniform1i(glGetUniformLocation(prog, "bakeTex"), 2);
-
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-    glUniform1i(glGetUniformLocation(prog, "heightMap"), 3);
-
-    // State tweaks for the screen quad:
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND); // Disabled only for the duration of this draw call
-
-    // 6. Draw the screen quad using our shader
-    m_renderTexture.draw(screenQuad, &m_terrainShader);
-
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // 7. CLEANUP STATE RESTORATION
-    glUseProgram(0);
-    glEnable(GL_BLEND); // Re-enable alpha blending globally for subsequent UI / text steps
-    sf::Shader::bind(nullptr);
-    sf::Texture::bind(nullptr);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    m_renderTexture.display();
 }
 
 // =========================================================================

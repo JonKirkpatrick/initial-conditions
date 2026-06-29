@@ -41,7 +41,7 @@ protected:
     PlayerConfig    m_playerConfig;
 
     float           m_hexSize = 100.f;
-    sf::Color       m_gridColor;
+    sf::Color       m_gridColour;
     sf::Vector2f    m_homeLocationXZ{0.f, 0.f};
 
     // =========================================================================
@@ -199,7 +199,6 @@ protected:
     void initializeBakeFBO();
     void initializeSphereFBO();
     void initializeOrbShaderStorage();
-    void debugDumpBakeTexture();
     void debugDumpSphereFBO();
 
     // =========================================================================
@@ -230,8 +229,7 @@ protected:
     // =========================================================================
 
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
-    void runBakePass();
-    void runTerrainPass(const sf::Glsl::Mat3& worldToCamMatrix);
+    void runBakePass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
     void renderOrbCreature();
     void blitToScreen(GLuint tex);
 
