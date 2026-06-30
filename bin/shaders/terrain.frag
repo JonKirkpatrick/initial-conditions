@@ -1,5 +1,9 @@
 #version 460 core
 
+// ==============================================================================
+// == Uniforms ==================================================================
+// ==============================================================================
+
 uniform vec3    u_cameraPos;
 uniform float   u_cameraHeight;
 uniform float   u_farPlane;
@@ -28,7 +32,24 @@ in float v_worldY;
 
 out vec4 fragColor;
 
-// ================== NORMAL from vertex shader ==================
+// ==============================================================================
+// == G-Buffer Structs ==========================================================
+// ==============================================================================
+
+struct GeometrySample {
+    vec3  pos;            // world-space position
+    vec3  normal;         // world-space, after relief exaggeration + horizon damping
+    float dist;            // distance from camera (== "depth" in the orb shader)
+    float normHeight;      // height normalised to [0,1] against u_heightMax (pre-exaggeration curve)
+};
+
+struct MaterialSample {
+    vec3  albedo;          // topo colour, lit by sun elevation/shade and damped toward atmosphere
+};
+
+// ==============================================================================
+// == Normal Helpers =============================================================
+// ==============================================================================
 
 vec3 computeNormal() {
     vec2 nxz = v_normalXZ;
@@ -36,25 +57,15 @@ vec3 computeNormal() {
     return normalize(vec3(nxz.x, ny, nxz.y));
 }
 
-// ================== NORMAL DAMPING (HORIZON SMOOTHER) ==================
-vec3 getDampedNormal(vec3 rawNormal, float distanceToCam) {
-    // Distance boundaries defined in centimeters (1.0 = 1cm)
-    // Detail begins softening smoothly at 0.5 km and hits perfectly upright at 2.0 km
-    float startDampDist = 50000.0; 
-    float maxDampDist   = 200000.0; 
-    
-    // Compute our blending factor [0.0 = full detail, 1.0 = vertical flat]
-    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
-    
-    // Smooth out the blending rate so the transition at 1.5km isn't a harsh line
-    dampFactor = smoothstep(0.0, 1.0, dampFactor);
-    
-    // Blend smoothly from the computed slope vector straight up toward vec3(0.0, 1.0, 0.0)
-    vec3 straightUp = vec3(0.0, 1.0, 0.0);
-    return normalize(mix(rawNormal, straightUp, dampFactor));
-}
+// ==============================================================================
+// == Atmospheric Adjustments ===================================================
+// ==============================================================================
 
-// ================== HEX GRID ==================
+
+// ==============================================================================
+// == Hex Grid ===================================================================
+// ==============================================================================
+
 vec2 hexAt(vec2 p) {
     float q = (2.0/3.0 * p.x) / u_hexSize;
     float r = (p.y / (u_hexSize * 1.7320508)) - q / 2.0;
@@ -93,7 +104,10 @@ float hexGrid(vec2 p) {
     return smoothstep(lineWidth, 0.0, distToLine);
 }
 
-// ================== TOPO COLOUR ==================
+// ==============================================================================
+// == Topo Colour ================================================================
+// ==============================================================================
+
 vec3 topoColour(float normHeight, float shade) {
     vec3 c0 = vec3(0.467, 0.631, 0.388);
     vec3 c1 = vec3(0.647, 0.753, 0.447);
@@ -116,81 +130,92 @@ vec3 topoColour(float normHeight, float shade) {
     return clamp(base * light * tint, 0.0, 1.0);
 }
 
-vec3 getTerrainColor(vec3 normal, float h) {
-    float normH = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
-    float exaggeratedH = pow(normH, 1.0 / max(u_reliefExaggeration, 0.01));
-    vec3 lightDir = normalize(u_sunDir);
-    float shade = clamp(dot(normal, lightDir), 0.0, 1.0);
-    return topoColour(exaggeratedH, shade);
-}
+// ==============================================================================
+// == PHASE 1 — Geometry ========================================================
+// ==============================================================================
 
-// ================== COLOUR DAMPING (HORIZON SMOOTHER) ==================
+GeometrySample resolveGeometry()
+{
+    GeometrySample geo;
 
-vec3 getDampedTerrainColor(vec3 rawColor, float distanceToCam) {
-    // Distance boundaries matched to your normal damping system
-    float startDampDist = 50000.0;  // 0.5 km
-    float maxDampDist   = 200000.0; // 2.0 km
-    
-    float dampFactor = clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0);
-    dampFactor = smoothstep(0.0, 1.0, dampFactor);
-    
-    // Artistic Target Color: A desaturated, slightly atmospheric grey-blue hue.
-    // This forms a perfect bridge color before the final sky fog layer sweeps over it.
-    vec3 atmosphericBase = vec3(0.53, 0.58, 0.64); 
-    
-    // Smoothly wash away the local elevation tints and lighting artifacts
-    return mix(rawColor, atmosphericBase, dampFactor);
-}
-
-// ================== MAIN ==================
-void main() {
-    // Recover world XZ directly
     vec2 xz = v_worldXZ;
-    float h  = v_worldY;
-    vec3 worldPos = vec3(xz.x, h, xz.y);
+    float h = v_worldY;
+    geo.pos = vec3(xz.x, h, xz.y);
+    geo.dist = length(geo.pos - u_cameraPos);
 
-    // Distance from camera for atmosphere + grid fade
-    float dist = length(worldPos - u_cameraPos);
-
-    // ================== NORMAL (WITH HORIZON DAMPING) ==================
-    // 1. Compute and damp the surface vectors
     vec3 rawNormal = computeNormal();
     vec3 exagNormal = normalize(vec3(rawNormal.x * u_reliefExaggeration,
                                      rawNormal.y,
                                      rawNormal.z * u_reliefExaggeration));
-    
-    // Damp normals toward vec3(0,1,0) to suppress specular/diffuse flickering
-    vec3 normal = getDampedNormal(exagNormal, dist);
 
-    // 2. Compute the sharp local terrain color using our damped normal
-    vec3 rawTerrainColor = getTerrainColor(normal, h);
+    geo.normal = exagNormal;
+    geo.normHeight = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
 
-    // 3. Damp the terrain color toward the atmospheric grey-blue
-    // This eliminates color banding jitter caused by the underlying height-map inaccuracies
-    vec3 terrainBaseColor = getDampedTerrainColor(rawTerrainColor, dist);
+    return geo;
+}
 
-    // ================== LIGHTING ==================
+// ==============================================================================
+// == PHASE 2 — Material ========================================================
+// ==============================================================================
 
+MaterialSample resolveMaterial(GeometrySample geo)
+{
+    MaterialSample mat;
+
+    float exaggeratedH = pow(geo.normHeight, 1.0 / max(u_reliefExaggeration, 0.01));
+    vec3  lightDir = normalize(u_sunDir);
+    float shade = clamp(dot(geo.normal, lightDir), 0.0, 1.0);
+
+    vec3 rawTerrainColour = topoColour(exaggeratedH, shade);
+
+    // ================== HEX GRID ==================
+    float gridFade = pow(clamp(1.0 - (geo.dist / u_farPlane), 0.0, 1.0), 2.0);
+    float visibilityDist = 800.0 + u_cameraHeight * 20.0;
+    float distanceFade = clamp(1.0 - (geo.dist / visibilityDist), 0.0, 1.0);
+    float gridMask = hexGrid(geo.pos.xz);
+    float finalGridIntensity = gridMask * gridFade * distanceFade * 0.72;
+    vec3 finalColor = mix(rawTerrainColour, u_gridColour, finalGridIntensity);
+
+    // ================== HEX HIGHLIGHT ==================
+    if (u_cursorMode) {
+        vec2 cell = hexAt(geo.pos.xz);
+        if (cell.x == u_hoveredHex.x && cell.y == u_hoveredHex.y) {
+            float insideCell = 1.0 - gridMask;
+            finalColor = mix(finalColor, u_gridColour, insideCell * 0.25);
+            finalColor = mix(finalColor, u_gridColour, gridMask * 0.9);
+        }
+    }
+
+    mat.albedo = finalColor;
+
+    return mat;
+}
+
+// ==============================================================================
+// == PHASE 3 — Lighting ========================================================
+// ==============================================================================
+
+vec3 resolveLight(GeometrySample geo, MaterialSample mat)
+{
     vec3 sunDirNorm = normalize(u_sunDir);
     float sunElevationDeg = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;
     float nightFactor = smoothstep(-5.0, -15.0, sunElevationDeg);
     float sunVis      = smoothstep(-4.0,   8.0, sunElevationDeg);
 
-    float diff = max(dot(normal, sunDirNorm), 0.0) * sunVis;
-    vec3 ambient = u_ambientStrength * mix(1.0, 0.07, nightFactor) * terrainBaseColor;
+    float diff = max(dot(geo.normal, sunDirNorm), 0.0) * sunVis;
+    vec3 ambient = u_ambientStrength * mix(1.0, 0.07, nightFactor) * mat.albedo;
 
-    // ================== HEADLAMP ==================
+    // ---- Headlamp ----
     vec3 headlampContribution = vec3(0.0);
     float headSpec = 0.0;
     if (u_headlampOn) {
-        vec3 toFragment = worldPos - u_cameraPos;
+        vec3 toFragment = geo.pos - u_cameraPos;
         float distToCamera = length(toFragment);
 
         if (distToCamera > 0.1) {
             vec3 toFragDir = normalize(toFragment);
             vec3 camForward = normalize(u_worldToCamMatrix * vec3(0.0, 0.0, -1.0));
             vec3 camRight = normalize(u_worldToCamMatrix * vec3(1.0, 0.0, 0.0));
-            float camPitchAmount = abs(asin(clamp(camForward.y, -1.0, 1.0)));
 
             float spotCos = dot(camForward, toFragDir);
             float spotTight = pow(max(spotCos, 0.0), 48.0);
@@ -200,19 +225,20 @@ void main() {
             if (spot > 0.001) {
                 vec3 lightDir = -toFragDir;
 
-                float headDiff = max(dot(normal, lightDir), 0.0);
+                float headDiff = max(dot(geo.normal, lightDir), 0.0);
                 float nearFade = smoothstep(0.0, 1.0, distToCamera);
                 float distFalloff = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
                 headlampContribution = headDiff * spot * distFalloff * nearFade
                                     * u_headlampColour * u_headlampIntensity;
+
                 vec3 fakeLightPos = u_cameraPos + camRight * 5.0;
-                vec3 fakeLightDir = normalize(worldPos - fakeLightPos);
+                vec3 fakeLightDir = normalize(geo.pos - fakeLightPos);
                 vec3 halfDir = normalize(-fakeLightDir + lightDir);
-                headSpec = pow(max(dot(normal, halfDir), 0.0), 32.0)
+                headSpec = pow(max(dot(geo.normal, halfDir), 0.0), 32.0)
                         * spot * distFalloff * 0.3;
+
                 float ambientLoad = clamp(u_ambientStrength * sunVis + (1.0 - nightFactor), 0.0, 1.0);
-                float headlampVisibility = 1.0 - ambientLoad;
-                headlampVisibility = clamp(headlampVisibility, 0.3, 1.0);
+                float headlampVisibility = clamp(1.0 - ambientLoad, 0.3, 1.0);
 
                 headlampContribution *= headlampVisibility;
                 headSpec *= headlampVisibility;
@@ -220,56 +246,33 @@ void main() {
         }
     }
 
-    vec3 diffuse = diff * u_sunColor.rgb * terrainBaseColor + headlampContribution;
+    vec3 diffuse = diff * u_sunColor.rgb * mat.albedo + headlampContribution;
 
-    // Moonlight
-    vec3 topoLuma = vec3(dot(terrainBaseColor, vec3(0.299, 0.587, 0.114)));
-    vec3 nightTopoTint = mix(topoLuma, terrainBaseColor, 0.35);
+    // ---- Moonlight ----
+    vec3 topoLuma = vec3(dot(mat.albedo, vec3(0.299, 0.587, 0.114)));
+    vec3 nightTopoTint = mix(topoLuma, mat.albedo, 0.35);
     vec3 moonTint = vec3(0.55, 0.68, 0.90);
     float moonlightFill = nightFactor * 0.08;
     ambient += moonlightFill * mix(moonTint, nightTopoTint, 0.5) * nightTopoTint;
 
-    vec3 viewDir = normalize(u_cameraPos - worldPos);
+    // ---- Sun specular ----
+    vec3 viewDir = normalize(u_cameraPos - geo.pos);
     vec3 halfDir = normalize(sunDirNorm + viewDir);
-    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0) * sunVis * 0.5;
+    float spec = pow(max(dot(geo.normal, halfDir), 0.0), 32.0) * sunVis * 0.5;
 
-    vec3 groundColor = ambient + diffuse + spec * u_sunColor.rgb * 0.8
-                     + headSpec * u_headlampColour;
+    return ambient + diffuse + spec * u_sunColor.rgb * 0.8
+         + headSpec * u_headlampColour;
+}
 
-    // ================== ATMOSPHERE ==================
-    float distNormalized   = clamp(dist / u_farPlane, 0.0, 1.0);
-    float atmosphereStrength = pow(distNormalized, 1.7);
-    vec3 nightAtm = vec3(0.008, 0.006, 0.025);
-    vec3 atmTint  = mix(u_sunColor.rgb * vec3(0.7, 0.65, 0.8), vec3(0.50, 0.68, 0.95), 0.6);
-    float daytimeFactor = clamp(sunDirNorm.y * 1.8, 0.0, 1.0);
-    atmTint = mix(vec3(0.28, 0.18, 0.40), atmTint, daytimeFactor);
-    atmTint = mix(atmTint, nightAtm, nightFactor * 0.95);
-    vec3 finalColor = mix(groundColor,
-                          mix(groundColor, atmTint, 0.72),
-                          atmosphereStrength * 0.85);
-    float desat = atmosphereStrength * mix(0.38, 0.75, nightFactor);
-    finalColor = mix(finalColor, vec3(dot(finalColor, vec3(0.299, 0.587, 0.114))), desat);
-    float normH = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
-    float nightFloor = mix(0.32, 0.48, normH * normH);
-    finalColor *= mix(1.0, nightFloor, nightFactor);
+// ==============================================================================
+// == Main ======================================================================
+// ==============================================================================
 
-    // ================== HEX GRID ==================
-    float gridFade = pow(clamp(1.0 - (dist / u_farPlane), 0.0, 1.0), 2.0);
-    float visibilityDist = 800.0 + u_cameraHeight * 20.0;
-    float distanceFade = clamp(1.0 - (dist / visibilityDist), 0.0, 1.0);
-    float gridMask = hexGrid(worldPos.xz);
-    float finalGridIntensity = gridMask * gridFade * distanceFade * 0.72;
-    finalColor = mix(finalColor, u_gridColour, finalGridIntensity);
+void main() {
+    // Three-phase evaluation
+    GeometrySample geo = resolveGeometry();
+    MaterialSample mat = resolveMaterial(geo);
+    vec3 groundColor   = resolveLight(geo, mat);
 
-    // ================== HEX HIGHLIGHT ==================
-    if (u_cursorMode) {
-        vec2 cell = hexAt(worldPos.xz);
-        if (cell.x == u_hoveredHex.x && cell.y == u_hoveredHex.y) {
-            float insideCell = 1.0 - gridMask;
-            finalColor = mix(finalColor, u_gridColour, insideCell * 0.25);
-            finalColor = mix(finalColor, u_gridColour, gridMask * 0.9);
-        }
-    }
-
-    fragColor = vec4(finalColor, 1.0);
+    fragColor = vec4(groundColor, 1.0);
 }

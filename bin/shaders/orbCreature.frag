@@ -79,8 +79,6 @@ struct OrbInstance {
     vec3  irisColour;
     float irisRadius;
     vec3  scleraColour;
-    vec3  tapetumColour;
-    float tapetumPresence;
 };
 
 OrbInstance unpackOrb(int instanceID)
@@ -121,8 +119,6 @@ OrbInstance unpackOrb(int instanceID)
     o.irisColour      = sp.irisColourAndRadius.xyz;
     o.irisRadius      = sp.irisColourAndRadius.w;
     o.scleraColour    = sp.scleraColour.xyz;
-    o.tapetumColour   = sp.tapetumColourAndPresence.xyz;
-    o.tapetumPresence = sp.tapetumColourAndPresence.w;
 
     return o;
 }
@@ -145,6 +141,13 @@ struct MaterialSample {
     float headSpecPower;
     float headSpecMask;
     float eyelidCoverage;
+
+    // Lighting-phase hints — deliberately NOT resolved colours.
+    // Retroreflection depends on view/light alignment, so it belongs in
+    // resolveLight(), which can index the Species SSBO directly via
+    // speciesIdx rather than having tapetum colour ferried through here.
+    float pupilMask;   // 1.0 inside the pupil disc, 0.0 elsewhere
+    float speciesIdx;  // pass-through so lighting can re-index SpeciesBuffer
 };
 
 // ==============================================================================
@@ -222,20 +225,6 @@ vec3 normalFromNormalMap(vec2 uv, float speciesIdx)
     tangentNormal.xy    = packedNormal * 2.0 - 1.0;
     tangentNormal.z     = sqrt(max(0.0, 1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
     return tangentNormal;
-}
-
-// ==============================================================================
-// == Atmospheric Adjustments ===================================================
-// ==============================================================================
-
-vec3 getDampedColour(vec3 rawColour, float distanceToCam)
-{
-    float startDampDist   = 50000.0;
-    float maxDampDist     = 200000.0;
-    float dampFactor      = smoothstep(0.0, 1.0,
-                            clamp((distanceToCam - startDampDist) / (maxDampDist - startDampDist), 0.0, 1.0));
-    vec3  atmosphericBase = vec3(0.53, 0.58, 0.64);
-    return mix(rawColour, atmosphericBase, dampFactor);
 }
 
 // ==============================================================================
@@ -376,10 +365,12 @@ GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int
 // == PHASE 2 — Material ========================================================
 // ==============================================================================
 
-MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, float lampIntensityMask)
+MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb)
 {
     MaterialSample mat;
     mat.eyelidCoverage = 0.0;
+    mat.pupilMask       = 0.0;
+    mat.speciesIdx      = orb.speciesRaw;
 
     vec3 albedo = orb.scleraColour;
 
@@ -414,13 +405,11 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
         float irisRadius   = orb.irisRadius;
 
         if (eyeLocalZ > (1.0 - pupilRadius)) {
-            albedo = vec3(0.0);
-
-            if (orb.tapetumPresence > 0.5) {
-                float alignment      = max(dot(-normalize(ray.dir), orb.gazeDir), 0.0);
-                float retroReflection = pow(alignment, 16.0) * lampIntensityMask;
-                albedo              += orb.tapetumColour * retroReflection * 15.0;
-            }
+            // Pure material colour — black pupil. Any retroreflective glow
+            // is a function of light/view alignment, so it's added later
+            // in resolveLight(), keyed off mat.pupilMask + mat.speciesIdx.
+            albedo        = vec3(0.0);
+            mat.pupilMask = 1.0;
         }
         else if (eyeLocalZ > (1.0 - irisRadius)) {
             albedo = orb.irisColour;
@@ -452,7 +441,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb, Ray ray, flo
         mat.headSpecMask  = mix(0.35,  0.04, eyelidMask);
     }
 
-    mat.albedo = getDampedColour(albedo, geo.depth);
+    mat.albedo = albedo;
     return mat;
 }
 
@@ -464,14 +453,27 @@ vec3 resolveLight(
     GeometrySample geo,
     MaterialSample mat,
     OrbInstance    orb,
-    float          sunVisibility,
-    float          ambient,
-    float          lampIntensityMask,
-    vec3           lightDir,
-    float          spot,
-    float          distToCamera)
+    Ray            ray)
 {
-    // Analytical self-shadowing
+    // --- Time-of-day ---------------------------------------------------
+    float sunElevationDeg = asin(clamp(u_sunDir.y, -1.0, 1.0)) * 180.0 / 3.1415926535;
+    float sunVisibility   = smoothstep(-12.0, 6.0, sunElevationDeg);
+    float ambient         = mix(0.012, 0.33, sunVisibility);
+
+    // --- Headlamp geometry ----------------------------------------------
+    vec3  toFragment   = geo.pos - u_cameraPos;
+    float distToCamera = length(toFragment);
+    vec3  toFragDir    = normalize(toFragment);
+    vec3  lightDir     = -toFragDir;
+
+    vec3  raySpaceForward = vec3(u_cameraForward.x, u_cameraForward.y, -u_cameraForward.z);
+    float spotCos          = dot(raySpaceForward, toFragDir);
+    float spot              = pow(max(spotCos, 0.0), 48.0) + pow(max(spotCos, 0.0), 6.0) * 0.08;
+    float distFalloff       = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
+    float nearFade          = smoothstep(0.0, 1.0, distToCamera);
+    float lampIntensityMask = spot * distFalloff * nearFade * u_headlampIntensity * u_headlampEnabled;
+
+    // --- Analytical self-shadowing ---------------------------------------
     float sunShadow      = 1.0;
     vec3  shadowOrigin   = geo.pos + geo.normal * (orb.radius * 0.01);
     float maxShadowDist  = orb.radius * 3.0;
@@ -512,10 +514,26 @@ vec3 resolveLight(
                               + vec3(headlampSpec) * lampColour;
     }
 
+    // Retroreflective tapetum glow. This is purely a light/view-alignment
+    // effect — it doesn't exist without the headlamp — so it lives here
+    // rather than in the material pass. Indexes SpeciesBuffer directly via
+    // mat.speciesIdx instead of having tapetum colour passed in.
+    vec3 retroContribution = vec3(0.0);
+    if (mat.pupilMask > 0.5) {
+        SpeciesData sp = species[int(mat.speciesIdx)];
+        if (sp.tapetumColourAndPresence.w > 0.5) {
+            float alignment        = max(dot(viewDir, orb.gazeDir), 0.0);
+            float retroReflection  = pow(alignment, 16.0) * lampIntensityMask;
+            retroContribution      = sp.tapetumColourAndPresence.xyz * retroReflection * 15.0
+                                    * (1.0 - mat.eyelidCoverage);
+        }
+    }
+
     vec3 sunSpecColour = u_sunColour.xyz * sunSpec;
     return mat.albedo * (ambient + (1.0 - ambient) * diffuse)
          + sunSpecColour
-         + headlampContribution;
+         + headlampContribution
+         + retroContribution;
 }
 
 // ==============================================================================
@@ -546,32 +564,9 @@ void main()
     if (leftHit.hit  && leftHit.t  < closestT) { closestT = leftHit.t;  finalHit = leftHit;  hitType = 1; }
     if (rightHit.hit && rightHit.t < closestT) { closestT = rightHit.t; finalHit = rightHit; hitType = 2; }
 
-    // Time of day factors
-    float sunElevationDeg = asin(clamp(u_sunDir.y, -1.0, 1.0)) * 180.0 / 3.1415926535;
-    float sunVisibility   = smoothstep(-12.0, 6.0, sunElevationDeg);
-    float nightFactor     = smoothstep(-5.0, -15.0, sunElevationDeg);
-    float ambient         = mix(0.012, 0.33, sunVisibility);
-
-    // Headlamp
-    vec3  toFragment    = finalHit.pos - u_cameraPos;
-    float distToCamera  = length(toFragment);
-    vec3  toFragDir     = normalize(toFragment);
-
-    vec3  raySpaceForward  = vec3(u_cameraForward.x, u_cameraForward.y, -u_cameraForward.z);
-    float spotCos          = dot(raySpaceForward, toFragDir);
-    float spot             = pow(max(spotCos, 0.0), 48.0) + pow(max(spotCos, 0.0), 6.0) * 0.08;
-    float distFalloff      = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
-    float nearFade         = smoothstep(0.0, 1.0, distToCamera);
-    float lampIntensityMask = spot * distFalloff * nearFade * u_headlampIntensity * u_headlampEnabled;
-    vec3  lightDir         = -toFragDir;
-
-    // Three-phase evaluation
     GeometrySample geo = resolveGeometry(ray, orb, finalHit, hitType);
-    MaterialSample mat = resolveMaterial(geo, orb, ray, lampIntensityMask);
-    vec3 finalColour    = resolveLight(geo, mat, orb,
-                                      sunVisibility, ambient,
-                                      lampIntensityMask, lightDir,
-                                      spot, distToCamera);
+    MaterialSample mat = resolveMaterial(geo, orb);
+    vec3 finalColour    = resolveLight(geo, mat, orb, ray);
 
     fragColour = vec4(finalColour, 1.0);
 }
