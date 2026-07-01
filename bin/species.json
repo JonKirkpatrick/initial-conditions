@@ -2,8 +2,8 @@
   {
     "name": "Wolf",
     "textures": {
-      "diffuse": "images/species_textures/wolf_texture.png",
-      "normal":  "images/species_textures/wolf_normal.png"
+      "diffuse": "images/species_textures/test_texture.png",
+      "normal":  "images/species_textures/test_normal.png"
     },
     "eye": {
       "iris":    { "r": 0.486, "g": 0.549, "b": 0.588, "radius": 0.50 },
