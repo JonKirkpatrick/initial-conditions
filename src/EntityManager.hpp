@@ -10,32 +10,44 @@
 #include <algorithm>
 #include <limits>
 
+class EntityManager;
+
 using EntityVec = std::vector<SoAEntityHandle>;
 using EntityMap = std::map<std::string, EntityVec>;
+using SpawnCallback = std::function<void(SoAEntityHandle, EntityManager&)>;
+
+struct SpawnRequest {
+    std::string tag;
+    SpawnCallback initializer;
+};
 
 class EntityManager
 {
     // Packed active entity lists. Both containers stay dense via swap-remove.
-    EntityVec   m_activeEntities;
-    EntityMap   m_entitiesByTag;
+    EntityVec                                   m_activeEntities;
+    EntityMap                                   m_entitiesByTag;
 
     // Dense-slot lookup tables for O(1) swap-remove from packed vectors.
-    std::array<uint32_t, soa::MAX_ENTITIES> m_entityToDenseSlot;
-    std::array<uint32_t, soa::MAX_ENTITIES> m_tagToDenseSlot;
-    std::vector<std::string> m_entityTags; // entity index -> tag
+    std::array<uint32_t, soa::MAX_ENTITIES>     m_entityToDenseSlot;
+    std::array<uint32_t, soa::MAX_ENTITIES>     m_tagToDenseSlot;
+    std::vector<std::string>                    m_entityTags; // entity index -> tag
 
     // SoA integration
     SoAEntityPool           m_soaPool;
 
     // SoA component storages (fixed-size per-entity arrays)
-    soa::ComponentArray<CTransform3D> m_compTransform;
-    soa::ComponentArray<CPhysics> m_compPhysics;
-    soa::ComponentArray<CBob> m_compBob;
-    soa::ComponentArray<CPlayer> m_compPlayer;
-    soa::ComponentArray<CCamera> m_compCamera;
-    soa::ComponentArray<CInput> m_compInput;
-    soa::ComponentArray<COrb> m_compOrb;
-    soa::ComponentArray<CEyes> m_compEyes;
+    soa::ComponentArray<CTransform3D>           m_compTransform;
+    soa::ComponentArray<CPhysics>               m_compPhysics;
+    soa::ComponentArray<CBob>                   m_compBob;
+    soa::ComponentArray<CPlayer>                m_compPlayer;
+    soa::ComponentArray<CCamera>                m_compCamera;
+    soa::ComponentArray<CInput>                 m_compInput;
+    soa::ComponentArray<COrb>                   m_compOrb;
+    soa::ComponentArray<CEyes>                  m_compEyes;
+
+    // The Command Buffers
+    std::vector<SpawnRequest>                   m_spawnQueue;
+    std::vector<SoAEntityHandle>                m_destroyQueue;
 
     static constexpr uint32_t INVALID_INDEX = std::numeric_limits<uint32_t>::max();
 
@@ -97,9 +109,30 @@ public:
         m_entityTags.resize(soa::MAX_ENTITIES);
     }
 
+    void queueSpawn(const std::string& tag, SpawnCallback initializer) {
+        m_spawnQueue.push_back({ tag, std::move(initializer) });
+    }
+
+    void queueDestroy(SoAEntityHandle h) {
+        m_destroyQueue.push_back(h);
+    }
+
     void update()
     {
-        // Dense entity lists are updated immediately; nothing to do here.
+        // Process destroy queue
+        for (const auto& h : m_destroyQueue)
+        {
+            destroyEntity(h);
+        }
+        m_destroyQueue.clear();
+
+        for (const auto& request : m_spawnQueue) {
+            SoAEntityHandle h = addEntity(request.tag);
+            if (request.initializer) {
+                request.initializer(h, *this);
+            }
+        }
+        m_spawnQueue.clear();
     }
 
     // Create a new entity, return its SoA handle and register tag

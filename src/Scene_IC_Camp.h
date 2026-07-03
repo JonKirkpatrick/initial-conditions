@@ -40,7 +40,7 @@ protected:
     CameraConfig        m_cameraConfig;
     PlayerConfig        m_playerConfig;
 
-    float               m_hexSize = 100.f;
+    float               m_hexSize = 1.f;
     sf::Color           m_gridColour;
     sf::Vector2f        m_homeLocationXZ{0.f, 0.f};
 

@@ -21,7 +21,7 @@ namespace Topography {
     };
 
     constexpr int GRID_RESOLUTION = 1500;
-    constexpr float BASE_SIZE = 93800.0f * 5.0f;
+    constexpr float BASE_SIZE = 938.0f * 5.0f;
 
     // ============================================================================
     // Terrain Query Functions

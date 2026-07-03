@@ -170,7 +170,7 @@ MaterialSample resolveMaterial(GeometrySample geo)
 
     // ================== HEX GRID ==================
     float gridFade = pow(clamp(1.0 - (geo.dist / u_farPlane), 0.0, 1.0), 2.0);
-    float visibilityDist = 800.0 + u_cameraHeight * 20.0;
+    float visibilityDist = 8.0 + u_cameraHeight * 20.0;
     float distanceFade = clamp(1.0 - (geo.dist / visibilityDist), 0.0, 1.0);
     float gridMask = hexGrid(geo.pos.xz);
     float finalGridIntensity = gridMask * gridFade * distanceFade * 0.72;

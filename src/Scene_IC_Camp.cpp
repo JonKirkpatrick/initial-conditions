@@ -69,7 +69,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     : Scene(game)
     , m_levelPath(levelPath)
 {
-    m_topdownMaxHeight = 100000.f;
+    m_topdownMaxHeight = 1000.f;
     sf::ContextSettings settings;
     settings.antiAliasingLevel = 8;
     sf::Vector2u windowSize = game.window().getSize();
@@ -89,7 +89,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnPlayer();
     spawnCamera();
     updateCamera(0.001f);
-    spawnDebugOrbs(15000);
+    spawnDebugOrbs(32000);
 
     m_entityManager.update();
 
@@ -583,12 +583,12 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     {
         float heightDiff = t.pos.y - terrainHeight;
 
-        if (heightDiff < -20.0f)                    // penetrated ground
+        if (heightDiff < -0.2f)                    // penetrated ground
         {
             t.pos.y = terrainHeight;
             t.velocity.y = 0.0f;
         }
-        else if (heightDiff > 60.0f)                // lost contact
+        else if (heightDiff > 0.6f)                // lost contact
         {
             phys.onGround = false;
         }
@@ -601,7 +601,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     else
     {
         // Landing detection
-        if (t.velocity.y <= 0.0f && t.pos.y <= terrainHeight + 12.0f)
+        if (t.velocity.y <= 0.0f && t.pos.y <= terrainHeight + 0.12f)
         {
             t.pos.y = terrainHeight;
             t.velocity.y = 0.0f;
@@ -658,7 +658,7 @@ void Scene_IC_Camp::resolveEntityPosition(SoAEntityHandle e, float dt)
     {
         auto& p = m_entityManager.getPhysics(e);
 
-        const float groundSkin = 10.f;
+        const float groundSkin = 0.1f;
 
         if (t.pos.y < groundY)
         {
@@ -820,9 +820,6 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
 void Scene_IC_Camp::spawnPlayer()
 {
     m_player = m_entityManager.addEntity("player");
-    m_playerConfig.HEIGHT_OFFSET *= 100.f; // convert from metres to cm
-    m_playerConfig.EYE_OFFSET *= 100.f;    // convert from metres to cm
-    m_playerConfig.MOVE_SPEED *= 100.f;    // convert from m/s to cm/s
     m_playerConfig.ROTATION_SPEED = Astro::toRad(m_playerConfig.ROTATION_SPEED);
     sf::Vector2f playerPosition = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
     sf::Vector3f spawnPos(playerPosition.x, heightAt(playerPosition.x, playerPosition.y), playerPosition.y);
@@ -830,7 +827,7 @@ void Scene_IC_Camp::spawnPlayer()
     m_entityManager.addTransform(m_player, CTransform3D(spawnPos));
     m_entityManager.addInput(m_player, CInput());
     m_entityManager.addPhysics(m_player, CPhysics());
-    m_entityManager.addBob(m_player, CBob(1.0f, 6.0f, 5.5f));   // rate, vertical mag, lateral mag
+    m_entityManager.addBob(m_player, CBob(1.0f, 0.06f, 0.055f));   // rate, vertical mag, lateral mag
     auto& phys = m_entityManager.getPhysics(m_player);
     phys.onGround = true;
 }
@@ -839,8 +836,6 @@ void Scene_IC_Camp::spawnCamera()
 {
     m_camera = m_entityManager.addEntity("camera");
     m_cameraConfig.FOVY = Astro::toRad(m_cameraConfig.FOVY);
-    m_cameraConfig.NEAR_PLANE *= 100.f; // convert from metres to cm
-    m_cameraConfig.FAR_PLANE  *= 100.f; // convert from metres to cm
     m_entityManager.addCamera(m_camera, CCamera(
         m_cameraConfig.FOVY,
         float(m_cameraConfig.VIEWPORT_WIDTH)/m_cameraConfig.VIEWPORT_HEIGHT,
@@ -856,19 +851,25 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
                                    const CEyes& eyes,
                                    float yaw, int species)
 {
-    auto orb = m_entityManager.addEntity("orb");
+    // 1. Calculate the spatial data right now (no change here)
     const sf::Vector2f groundXZ = hexToWorld(hexQ, hexR);
     const float        groundY  = heightAt(groundXZ.x, groundXZ.y);
     const float        hoverY   = groundY + radius;
 
     CTransform3D t(sf::Vector3f(groundXZ.x, hoverY, groundXZ.y));
-    t.yaw = yaw; // facing direction, pitch/roll stay 0
+    t.yaw = yaw;
 
-    m_entityManager.addTransform(orb, t);
-    m_entityManager.addOrb(orb, COrb(radius));
-    m_entityManager.addBob(orb, CBob(bobRate, bobMagnitude, 0.0f));
-    m_entityManager.addEyes(orb, eyes);
-    m_entityManager.getOrb(orb).speciesIdx = species;
+    // 2. Queue the spawn and pass a lambda to handle the lazy initialization
+    // We capture the values by value [=] so they survive until the queue is flushed
+    m_entityManager.queueSpawn("orb", [=](SoAEntityHandle orb, EntityManager& em) 
+    {
+        // This code executes safely during the main thread sync phase!
+        em.addTransform(orb, t);
+        em.addOrb(orb, COrb(radius));
+        em.addBob(orb, CBob(bobRate, bobMagnitude, 0.0f));
+        em.addEyes(orb, eyes);
+        em.getOrb(orb).speciesIdx = species;
+    });
 }
 
 void Scene_IC_Camp::spawnDebugOrbs(int count)
@@ -879,9 +880,9 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     // Extents are -100 to 100 tiles. 
     std::uniform_int_distribution<int> hexDist(-1000, 1000);
     
-    std::uniform_real_distribution<float> radiusDist(20.0f, 150.0f); // Expanded size range
+    std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f); // Expanded size range
     std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
-    std::uniform_real_distribution<float> bobMagDist(5.0f, 50.0f);
+    std::uniform_real_distribution<float> bobMagDist(0.05f, 0.5f);
     std::uniform_real_distribution<float> gazeDist(-1.0f, 1.0f);
     std::uniform_real_distribution<float> dilationDist(0.5f, 1.0f);
     std::uniform_real_distribution<float> closureDist(0.0f, 0.0f);
@@ -1096,8 +1097,8 @@ void Scene_IC_Camp::updateCamera(float dt)
     float baseFrequency = 1.0f;
 
     float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
-    float lateralAmplitude = 5.5f + (3.8f - 5.5f) * t;
-    float verticalAmplitude = 6.2f + (4.8f - 6.2f) * t;
+    float lateralAmplitude = 0.055f + (0.038f - 0.055f) * t;
+    float verticalAmplitude = 0.062f + (0.048f - 0.062f) * t;
 
     if (playerPhysics.isCrouching)
     {
