@@ -412,7 +412,7 @@ void Scene_IC_Camp::sRender() {
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
-    blitToScreen(m_sphereColorTex);
+    blitToScreen(m_mainColorTex);
     m_hud->render(window, false);
 }
 
@@ -877,9 +877,8 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     std::mt19937 rng(1337); // Seeded for consistency
     
     // Extents are -100 to 100 tiles. 
-    std::uniform_int_distribution<int> hexDist(-100, 100);
+    std::uniform_int_distribution<int> hexDist(-1000, 1000);
     
-    // Tailored Ranges for your parameters
     std::uniform_real_distribution<float> radiusDist(20.0f, 150.0f); // Expanded size range
     std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
     std::uniform_real_distribution<float> bobMagDist(5.0f, 50.0f);
@@ -1176,8 +1175,8 @@ void Scene_IC_Camp::initializeSkyCubemap()
 void Scene_IC_Camp::initializeMainFBO() {
     sf::Vector2u windowSize = m_game.window().getSize();
 
-    glGenTextures(1, &m_sphereColorTex);
-    glBindTexture(GL_TEXTURE_2D, m_sphereColorTex);
+    glGenTextures(1, &m_mainColorTex);
+    glBindTexture(GL_TEXTURE_2D, m_mainColorTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
         windowSize.x, windowSize.y,
         0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -1186,21 +1185,21 @@ void Scene_IC_Camp::initializeMainFBO() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glGenRenderbuffers(1, &m_sphereDepthRBO);
-    glBindRenderbuffer(GL_RENDERBUFFER, m_sphereDepthRBO);
+    glGenRenderbuffers(1, &m_mainDepthRBO);
+    glBindRenderbuffer(GL_RENDERBUFFER, m_mainDepthRBO);
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
         windowSize.x, windowSize.y);
 
     glGenFramebuffers(1, &m_mainFBO);
     glBindFramebuffer(GL_FRAMEBUFFER, m_mainFBO);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, m_sphereColorTex, 0);
+        GL_TEXTURE_2D, m_mainColorTex, 0);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-        GL_RENDERBUFFER, m_sphereDepthRBO);
+        GL_RENDERBUFFER, m_mainDepthRBO);
 
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE)
-        std::cerr << "Sphere FBO incomplete: 0x" << std::hex << status << std::endl;
+        std::cerr << "Main FBO incomplete: 0x" << std::hex << status << std::endl;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -1461,7 +1460,6 @@ void Scene_IC_Camp::blitToScreen(GLuint tex)
     glBindTexture(GL_TEXTURE_2D, tex);
     glUniform1i(glGetUniformLocation(m_blitProgram, "u_tex"), 0);
 
-    // Fullscreen quad — built once, reused
     if (m_blitVAO == 0) {
         static const float quadVerts[] = {
             -1.f, -1.f,
@@ -1484,7 +1482,7 @@ void Scene_IC_Camp::blitToScreen(GLuint tex)
     glBindVertexArray(m_blitVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
-    // Cleanup
+    // ==================== CLEANUP ====================
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
@@ -1517,7 +1515,7 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
 }
 
 // =========================================================================
-// Orb & Shadow Pipelines
+// Orb Updates
 // =========================================================================
 
 void Scene_IC_Camp::updateOrbBobbing(SoAEntityHandle e, float dt)
@@ -1555,7 +1553,6 @@ sf::Vector2i Scene_IC_Camp::worldToHex(float x, float z) const {
     float q = (2.f/3.f * x) / m_hexSize;
     float r = (z / (m_hexSize * std::sqrt(3.f))) - q / 2.f;
     
-    // Round to nearest hex using cube coordinate rounding
     float s = -q - r;
     int rq = int(std::round(q));
     int rr = int(std::round(r));
@@ -1575,7 +1572,6 @@ sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
     return sf::Vector2f(x, z);
 }
 
-// Interesting.  This is ripe for replacement now that we have a new system.
 sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
     if (!m_cursorMode) {
         return { 0.f, 0.f, 0.f };
