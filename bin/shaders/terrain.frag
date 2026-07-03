@@ -170,7 +170,7 @@ MaterialSample resolveMaterial(GeometrySample geo)
 
     // ================== HEX GRID ==================
     float gridFade = pow(clamp(1.0 - (geo.dist / u_farPlane), 0.0, 1.0), 2.0);
-    float visibilityDist = 8.0 + u_cameraHeight * 20.0;
+    float visibilityDist = 20.0 + u_cameraHeight * 2.0;
     float distanceFade = clamp(1.0 - (geo.dist / visibilityDist), 0.0, 1.0);
     float gridMask = hexGrid(geo.pos.xz);
     float finalGridIntensity = gridMask * gridFade * distanceFade * 0.72;
@@ -214,8 +214,8 @@ vec3 resolveLight(GeometrySample geo, MaterialSample mat)
 
         if (distToCamera > 0.1) {
             vec3 toFragDir = normalize(toFragment);
-            vec3 camForward = normalize(u_worldToCamMatrix * vec3(0.0, 0.0, -1.0));
-            vec3 camRight = normalize(u_worldToCamMatrix * vec3(1.0, 0.0, 0.0));
+            vec3 camForward = normalize(transpose(u_worldToCamMatrix) * vec3(0.0, 0.0, -1.0));
+            vec3 camRight = normalize(transpose(u_worldToCamMatrix) * vec3(1.0, 0.0, 0.0));
 
             float spotCos = dot(camForward, toFragDir);
             float spotTight = pow(max(spotCos, 0.0), 48.0);

@@ -26,8 +26,8 @@ struct CTransform3D
 
 struct CPhysics
 {
-    float gravity         = 981.0f;
-    float jumpSpeed       = 420.0f;
+    float gravity         = 9.81f;
+    float jumpSpeed       = 4.20f;
     
     float groundFriction  = 12.0f;
     float airFriction     = 3.0f;

@@ -1291,7 +1291,7 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     glUniform1i(glGetUniformLocation(m_terrainProgram, "u_headlampOn"), shouldHeadlightsBeOn() ? 1.0f : 0.0f);
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_headlampIntensity"), 4.0f);
     glUniform3f(glGetUniformLocation(m_terrainProgram, "u_headlampColour"), 255.f / 255.f, 244.f / 255.f, 214.f / 255.f);
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_headlampRange"), 15000.0f);
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_headlampRange"), 200.0f);
     
     glUniform1i(glGetUniformLocation(m_terrainProgram, "u_cursorMode"), static_cast<int>(m_cursorMode));
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_hexSize"), m_hexSize);
@@ -1426,7 +1426,7 @@ void Scene_IC_Camp::renderOrbCreature()
     glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunDir"), 1, &sunDir[0]);
     glUniform4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunColor"), 1, &sunColor[0]);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampIntensity"), 1.0f);
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampRange"),     8500.0f);
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampRange"),     200.0f);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampConeCos"),   1.0f);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampEnabled"),
         shouldHeadlightsBeOn() ? 1.0f : 0.0f);
