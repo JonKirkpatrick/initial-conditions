@@ -103,6 +103,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     initializeSkyCubemap();
     initializeMainFBO();
     initializeOrbShaderStorage();
+    initGBuffer(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT);
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -245,11 +246,11 @@ void Scene_IC_Camp::onEnter() {
 }
 
 void Scene_IC_Camp::onExit() {
-    // TODO: Called when exiting the scene
+    destroyGBuffer();
 }
 
 void Scene_IC_Camp::onEnd() {
-    // TODO: Called when ending the scene
+    destroyGBuffer();
 }
 
 HUD* Scene_IC_Camp::getHUD() const
@@ -1203,6 +1204,79 @@ void Scene_IC_Camp::initializeMainFBO() {
         std::cerr << "Main FBO incomplete: 0x" << std::hex << status << std::endl;
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Scene_IC_Camp::initGBuffer(unsigned int width, unsigned int height) {
+    m_gBufferWidth = width;
+    m_gBufferHeight = height;
+
+    // 1. Create FBO
+    glGenFramebuffers(1, &m_gBufferFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_gBufferFBO);
+
+    // Helper lambda to create generic color textures
+    auto createColorTex = [&](GLuint& tex, GLenum internalFormat, GLenum attachment) {
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, GL_RGBA, 
+                    (internalFormat == GL_RGBA16F ? GL_FLOAT : GL_UNSIGNED_BYTE), nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, attachment, GL_TEXTURE_2D, tex, 0);
+    };
+
+    // 2. Provision layout attachments
+    createColorTex(m_gAlbedoTex,  GL_RGBA8,   GL_COLOR_ATTACHMENT0); // GB0
+    createColorTex(m_gNormalTex,  GL_RGBA16F, GL_COLOR_ATTACHMENT1); // GB1
+    createColorTex(m_gIndicesTex, GL_RGBA8,   GL_COLOR_ATTACHMENT2); // GB2
+    createColorTex(m_gRetroTex,   GL_RGBA8,   GL_COLOR_ATTACHMENT3); // GB3
+
+    // 3. Depth Texture (D32F)
+    glGenTextures(1, &m_gDepthTex);
+    glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_gDepthTex, 0);
+
+    // 4. Declare array of color buffers to draw to
+    GLenum drawBuffers[] = { 
+        GL_COLOR_ATTACHMENT0, 
+        GL_COLOR_ATTACHMENT1, 
+        GL_COLOR_ATTACHMENT2, 
+        GL_COLOR_ATTACHMENT3 
+    };
+    glDrawBuffers(4, drawBuffers);
+
+    // 5. Verify status
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "G-Buffer FBO incomplete! Status: 0x" << std::hex 
+                << glCheckFramebufferStatus(GL_FRAMEBUFFER) << std::endl;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Scene_IC_Camp::destroyGBuffer() {
+    if (m_gBufferFBO) {
+        glDeleteFramebuffers(1, &m_gBufferFBO);
+        glDeleteTextures(1, &m_gAlbedoTex);
+        glDeleteTextures(1, &m_gNormalTex);
+        glDeleteTextures(1, &m_gIndicesTex);
+        glDeleteTextures(1, &m_gRetroTex);
+        glDeleteTextures(1, &m_gDepthTex);
+
+        m_gBufferFBO   = 0;
+        m_gAlbedoTex   = 0;
+        m_gNormalTex   = 0;
+        m_gIndicesTex  = 0;
+        m_gRetroTex    = 0;
+        m_gDepthTex    = 0;
+    }
 }
 
 std::vector<OrbData> Scene_IC_Camp::buildOrbData() const

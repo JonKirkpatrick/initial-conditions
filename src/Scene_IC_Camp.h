@@ -99,6 +99,17 @@ protected:
     GLuint              m_cubeEBO               = 0;
     GLuint              m_OrbCreatureProgram    = Assets::Instance().getGLProgram("OrbCreature");
 
+    // New G-Buffer for deferred lighting
+    GLuint              m_gBufferFBO            = 0;
+    GLuint              m_gAlbedoTex            = 0;
+    GLuint              m_gNormalTex            = 0;
+    GLuint              m_gIndicesTex           = 0;
+    GLuint              m_gRetroTex             = 0;
+    GLuint              m_gDepthTex             = 0;
+
+    unsigned int        m_gBufferWidth          = 0;
+    unsigned int        m_gBufferHeight         = 0;
+
     // =========================================================================
     // Rendering — Blit
     // =========================================================================
@@ -189,6 +200,8 @@ protected:
     void initializeSkyCubemap();
     void initializeMainFBO();
     void initializeOrbShaderStorage();
+    void initGBuffer(unsigned int width, unsigned int height);
+    void destroyGBuffer();
 
     // =========================================================================
     // Per-Frame Updates
