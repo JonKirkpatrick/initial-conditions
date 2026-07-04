@@ -23,7 +23,7 @@ void Scene_Menu::init()
     registerAction(sf::Keyboard::Scancode::D,       InputAction::Play);
     registerAction(sf::Keyboard::Scancode::Escape,  InputAction::Quit);
            
-    m_title = "INITIAL CONDITIONS";
+    m_title = "NOM-NOM-CO";
     m_menuStrings.push_back("New Game");
     m_menuStrings.push_back("Load Game");
     m_menuStrings.push_back("Options");

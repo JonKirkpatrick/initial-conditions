@@ -205,6 +205,50 @@ void Assets::loadFromFile(const std::string& path)
     }
 }
 
+void Assets::loadFromMaterialJSON(const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file.is_open())
+    {
+        std::cerr << "Failed to open material file: " << path << std::endl;
+        return;
+    }
+
+    nlohmann::json j;
+    try { file >> j; }
+    catch (const nlohmann::json::parse_error& e)
+    {
+        std::cerr << "Material JSON parse error: " << e.what() << std::endl;
+        return;
+    }
+
+    std::vector<MaterialData> materials;
+    materials.reserve(j.size());
+
+    for (const auto& entry : j)
+    {
+        const std::string name = entry.at("name");
+        const auto& tint = entry.at("albedoTint");
+
+        MaterialData m;
+        m.albedoTint          = { tint["r"], tint["g"], tint["b"], tint["a"] };
+        m.roughness           = entry.at("roughness");
+        m.metallic            = entry.at("metallic");
+        m.emissiveIntensity   = entry.value("emissiveIntensity", 0.0f);
+        m.specularReflectance = entry.value("specularReflectance", 0.04f);
+
+        if (entry.contains("uvScale"))
+            m.uvScale = { entry["uvScale"]["x"], entry["uvScale"]["y"] };
+        if (entry.contains("uvOffset"))
+            m.uvOffset = { entry["uvOffset"]["x"], entry["uvOffset"]["y"] };
+
+        materials.push_back(m);
+        std::cout << "Loaded material: " << name << " (index " << materials.size() - 1 << ")" << std::endl;
+    }
+
+    m_materialSSBO.upload(materials);
+}
+
 void Assets::loadFromSpeciesJSON(const std::string& path)
 {
     std::ifstream file(path);

@@ -6,6 +6,7 @@
 #include <SFML/OpenGL.hpp>
 #include "AudioManager.h"
 #include "SpeciesSSBO.h"
+#include "MaterialSSBO.h"
            
 #include <map>
 #include <cassert>
@@ -45,6 +46,7 @@ class Assets
     std::map<std::string, GLuint>                       m_glProgramMap;
     std::vector<SpeciesTexturePaths>                    m_speciesTexturePaths;
     SpeciesSSBO                                         m_speciesSSBO;
+    MaterialSSBO                                        m_materialSSBO;
     GLuint                                              m_speciesDiffuseArray = 0;
     GLuint                                              m_speciesNormalArray = 0;
     std::map<std::string, int>                          m_speciesIdMap;
@@ -81,6 +83,7 @@ public:
 
     void loadFromFile(const std::string& path);
     void loadFromSpeciesJSON(const std::string& path);
+    void loadFromMaterialJSON(const std::string& path);
     void finalizeSpeciesBuffer();
 
     const sf::Texture& getTexture(const std::string& textureName) const;
@@ -97,5 +100,8 @@ public:
     int getSpeciesId(const std::string& speciesName) const;
     const SpeciesSSBO& getSpeciesSSBO() const {
         return m_speciesSSBO;
+    };
+    const MaterialSSBO& getMaterialSSBO() const {
+        return m_materialSSBO;
     };
 };

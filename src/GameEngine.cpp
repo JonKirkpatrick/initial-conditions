@@ -44,6 +44,7 @@ void GameEngine::init(const std::string & path)
     std::cout << glGetString(GL_VERSION) << std::endl;
 
     Assets::Instance().loadFromFile(path);
+    Assets::Instance().loadFromMaterialJSON("materials.json");
     Assets::Instance().loadFromSpeciesJSON("species.json");
     Assets::Instance().finalizeSpeciesBuffer();
 
