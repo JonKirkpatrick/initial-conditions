@@ -24,70 +24,57 @@ void main() {
     vec3 sunDirNorm = normalize(sunDir);
     float sunDot = max(dot(rayDir, sunDirNorm), 0.0);
     float height = rayDir.y;
-    float sunElevation = asin(sunDirNorm.y) * 180.0 / 3.14159265;
+    float sunElevation = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;
 
     // ================== BLEND FACTORS ==================
-    // dayFactor:      0=not day,      1=full day      (transitions over 5-10 degrees)
-    // twilightFactor: 0=not twilight, 1=full twilight (peaks around 0 degrees)
-    // nightFactor:    0=not night,    1=full night    (transitions over -5 to -10 degrees)
-    float dayFactor      = smoothstep(0.0, 10.0, sunElevation);
-    float nightFactor    = smoothstep(-5.0, -12.0, sunElevation);  // note: inverted range
-    float twilightFactor = 1.0 - dayFactor - nightFactor;          // peaks in the middle
+    float dayFactor      = smoothstep(-2.0, 12.0, sunElevation);
+    float nightFactor    = smoothstep(-8.0, -18.0, sunElevation);
+    float twilightFactor = 1.0 - dayFactor - nightFactor;
     twilightFactor       = clamp(twilightFactor, 0.0, 1.0);
 
-    // ================== SKY STATES ==================
-    vec3 dayZenith      = vec3(0.25, 0.45, 0.95);
-    vec3 dayHorizon     = vec3(0.70, 0.80, 0.95);
-    vec3 twilightZenith  = vec3(0.45, 0.25, 0.65);
-    vec3 twilightHorizon = vec3(0.95, 0.55, 0.35);
-    vec3 nightColor     = vec3(0.02, 0.01, 0.08);
+    // ================== SKY COLORS ==================
+    vec3 dayZenith      = vec3(0.18, 0.42, 0.92);
+    vec3 dayHorizon     = vec3(0.68, 0.78, 0.95);
 
-    // Compute each state independently
-    float tDay      = pow((height + 1.0) * 0.5, 1.4);
-    float tTwilight = pow((height + 1.0) * 0.5, 1.6);
+    vec3 twilightZenith  = vec3(0.38, 0.22, 0.55);
+    vec3 twilightHorizon = vec3(0.92, 0.48, 0.32);
 
-    vec3 daySky      = mix(dayHorizon, dayZenith, tDay);
-    vec3 twilightSky = mix(twilightHorizon, twilightZenith, tTwilight);
-    vec3 nightSky    = nightColor;
+    vec3 nightZenith    = vec3(0.008, 0.006, 0.035);
+    vec3 nightHorizon   = vec3(0.025, 0.018, 0.055);
 
-    // Blend all three together
-    vec3 skyColor = daySky      * dayFactor
-                  + twilightSky * twilightFactor
-                  + nightSky    * nightFactor;
+    float t = pow((height + 1.0) * 0.5, 1.35);   // smoother curve
 
-    // ================== GOLDEN HOUR GLOW ==================
-    // Fades in with twilight, fades out with day/night
-    float golden = pow(sunDot, 8.0) * 0.8 * twilightFactor;
-    skyColor += golden * vec3(1.0, 0.7, 0.4);
+    vec3 daySky      = mix(dayHorizon, dayZenith, t);
+    vec3 twilightSky = mix(twilightHorizon, twilightZenith, t);
+    vec3 nightSky    = mix(nightHorizon, nightZenith, t);
 
-    // ================== SUN / ATMOSPHERE ==================
-    float sunGlow = pow(sunDot, 24.0) * 3.5;
-    vec3 sunLight = sunColor.rgb * sunColor.a;
-    skyColor += sunGlow * sunLight * 0.9;
+    vec3 skyColor = daySky * dayFactor + twilightSky * twilightFactor + nightSky * nightFactor;
 
-    // Sun disc fades in smoothly as sun clears horizon
-    float discFactor = smoothstep(-2.0, 2.0, sunElevation);
-    float sunDisc = pow(sunDot, 180.0);
-    skyColor += sunDisc * vec3(1.0, 0.95, 0.82) * 2.0 * discFactor;
+    // ================== SUN GLOW & DISC ==================
+    float sunGlow = pow(sunDot, 18.0) * 4.5;
+    skyColor += sunGlow * sunColor.rgb * sunColor.a;
 
-    // ================== CUBEMAP STARS / DEEP SKY ==================
+    float discFactor = smoothstep(-3.0, 4.0, sunElevation);
+    float sunDisc = pow(sunDot, 160.0);
+    skyColor += sunDisc * vec3(1.05, 0.98, 0.85) * 3.0 * discFactor;
+
+    // ================== GOLDEN HOUR / TWILIGHT GLOW ==================
+    float golden = pow(sunDot, 6.0) * 1.8 * twilightFactor;
+    skyColor += golden * vec3(1.0, 0.65, 0.35);
+
+    // ================== STARS / CUBEMAP ==================
     if (useSkyCubemap) {
-        float cubemapFactor = 1.0 - smoothstep(-10.0, -2.0, sunElevation);
+        float cubemapFactor = 1.0 - smoothstep(-12.0, -3.0, sunElevation);
         
-        // 1. Grab raw data and apply exposure
-        vec3 starDir =  starRotationMatrix * rayDir;
-        vec3 exposedColor = textureCube(skyCubemap, starDir).rgb * skyExposure;
+        vec3 starDir = starRotationMatrix * rayDir;
+        vec3 stars = textureCube(skyCubemap, starDir).rgb * skyExposure;
 
-        // 2. Atmospheric Extinction (Dim stars near the horizon)
-        float airMass = 1.0 / max(rayDir.y, 0.01); 
-        float extinction = exp(-0.15 * airMass); 
-        exposedColor *= mix(1.0, extinction, cubemapFactor);
+        // Horizon extinction
+        float extinction = exp(-0.22 * (1.0 - height));
+        stars *= mix(1.0, extinction, cubemapFactor);
 
-        // 3. Tone Mapping (Keep your 16-bit star profiles crisp and sharp)
-        vec3 toneMappedColor = exposedColor / (exposedColor + vec3(1.0));
-
-        // 4. Blend natively
-        skyColor = mix(skyColor, toneMappedColor, cubemapFactor);
+        vec3 toneMapped = stars / (stars + vec3(1.0));
+        skyColor = mix(skyColor, toneMapped, cubemapFactor * 0.95);
     }
 
     // ================== MOON ==================
@@ -199,8 +186,8 @@ void main() {
     }
 
     // ================== HORIZON HAZE ==================
-    float haze = pow(1.0 - clamp(height, 0.0, 1.0), 8.0) * 0.08;
-    skyColor += haze * vec3(0.72, 0.66, 0.58) * 0.25;
+    float haze = pow(1.0 - clamp(height, -0.1, 1.0), 7.0) * 0.12;
+    skyColor += haze * vec3(0.75, 0.68, 0.60) * (dayFactor * 0.6 + twilightFactor * 0.9);
 
     gl_FragColor = vec4(skyColor, 1.0);
 }

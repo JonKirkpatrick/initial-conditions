@@ -1602,7 +1602,7 @@ void Scene_IC_Camp::deferredLighting()
     glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_invViewProj"), 1, GL_FALSE, &invVP[0][0]);
 
     // Headlamp Configuration (matches your orb configuration schema)
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampIntensity"), 1.0f);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampIntensity"), 2.0f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampRange"),     200.0f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampConeCos"),   0.95f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampEnabled"),   shouldHeadlightsBeOn() ? 1.0f : 0.0f);
