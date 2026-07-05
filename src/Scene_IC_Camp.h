@@ -119,6 +119,14 @@ protected:
     GLuint              m_blitVBO               = 0;
 
     // =========================================================================
+    // Rendering — Deferred Lighting
+    // =========================================================================
+
+    GLuint              m_lightingProgram           = Assets::Instance().getGLProgram("Lighting");
+    GLuint              m_lightingVAO               = 0;
+    GLuint              m_lightingVBO               = 0;
+
+    // =========================================================================
     // Rendering — Sky Cubemap
     // =========================================================================
 
@@ -200,7 +208,7 @@ protected:
     void initializeSkyCubemap();
     void initializeMainFBO();
     void initializeOrbShaderStorage();
-    void initGBuffer(unsigned int width, unsigned int height);
+    void initializeGBuffer(unsigned int width, unsigned int height);
     void destroyGBuffer();
 
     // =========================================================================
@@ -234,6 +242,7 @@ protected:
     void runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
     void renderOrbCreature();
     void blitToScreen(GLuint tex);
+    void deferredLighting();
 
     // =========================================================================
     // Shader Uniform Upload

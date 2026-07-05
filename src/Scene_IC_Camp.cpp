@@ -85,6 +85,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_gridColour = Theme::color("cerulean");
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
+    initializeGBuffer(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT);
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
@@ -101,9 +102,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     updateStarRotation();
     updateMoonPosition();
     initializeSkyCubemap();
-    initializeMainFBO();
+    // initializeMainFBO();
     initializeOrbShaderStorage();
-    initGBuffer(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT);
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -404,8 +404,20 @@ void Scene_IC_Camp::sRender() {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto rawWorldToCamMatrix = Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll);
     auto worldToCamMatrix = toGlslMat3(rawWorldToCamMatrix);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_gBufferFBO);
+    glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
+    glClearColor(0.f, 0.f, 0.f, 0.f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LEQUAL); 
+    glDisable(GL_BLEND);
+
     runTerrainPass(rawWorldToCamMatrix);
     renderOrbCreature();
+
     renderSky(worldToCamMatrix);
 
     // Composite to screen
@@ -413,7 +425,7 @@ void Scene_IC_Camp::sRender() {
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
-    blitToScreen(m_mainColorTex);
+    deferredLighting();
     m_hud->render(window, false);
 }
 
@@ -1206,7 +1218,7 @@ void Scene_IC_Camp::initializeMainFBO() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::initGBuffer(unsigned int width, unsigned int height) {
+void Scene_IC_Camp::initializeGBuffer(unsigned int width, unsigned int height) {
     m_gBufferWidth = width;
     m_gBufferHeight = height;
 
@@ -1328,13 +1340,6 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
 
     sf::Vector2u windowSize = m_game.window().getSize();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_mainFBO);
-    glViewport(0, 0, windowSize.x, windowSize.y);
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-
     glUseProgram(m_terrainProgram);
 
     glActiveTexture(GL_TEXTURE0);
@@ -1382,9 +1387,6 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     glBindTexture(GL_TEXTURE_2D, 0);
 
     glUseProgram(0);
-    glEnable(GL_BLEND);
-    glDisable(GL_DEPTH_TEST);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     sf::Shader::bind(nullptr);
     sf::Texture::bind(nullptr);
 }
@@ -1462,13 +1464,6 @@ void Scene_IC_Camp::renderOrbCreature()
     glm::vec4 sunColor = toGLMVec4(m_astroState.sunColor);
     auto      vp       = Camera::getVPMatrix(camTransform, camData);
 
-    // ==================== FBO SETUP ====================
-    glBindFramebuffer(GL_FRAMEBUFFER, m_mainFBO);
-    
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL); 
-    glDisable(GL_BLEND);
-
     // ==================== LAZY INIT ====================
     if (m_cubeVAO == 0)
         buildVertexCube();
@@ -1514,10 +1509,120 @@ void Scene_IC_Camp::renderOrbCreature()
     // ==================== CLEANUP ====================
     glBindVertexArray(0);
     glUseProgram(0);
-    glEnable(GL_BLEND);
-    glDisable(GL_DEPTH_TEST);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+}
+
+void Scene_IC_Camp::deferredLighting()
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    sf::Vector2u windowSize = m_game.window().getSize();
+    glViewport(0, 0, windowSize.x, windowSize.y);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(m_lightingProgram);
+
+    if (m_lightingVAO == 0) {
+        static const float quadVerts[] = {
+            -1.f, -1.f,  1.f, -1.f,  1.f,  1.f,
+            -1.f, -1.f,  1.f,  1.f, -1.f,  1.f,
+        };
+        glGenVertexArrays(1, &m_lightingVAO);
+        glGenBuffers(1, &m_lightingVBO);
+        glBindVertexArray(m_lightingVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, m_lightingVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVerts), quadVerts, GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+    }
+
+    // =========================================================================
+    // Bind G-Buffer Textures to Texture Units
+    // =========================================================================
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_gAlbedoTex);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gAlbedo"), 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gNormal"), 1);
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, m_gIndicesTex);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gIndices"), 2);
+
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, m_gRetroTex);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gRetro"), 3);
+
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gDepth"), 4);
+
+    // =========================================================================
+    // Bind SSBOs
+    // =========================================================================
+    Assets::Instance().getSpeciesSSBO().bind(1);
+    Assets::Instance().getMaterialSSBO().bind(2);
+
+    // =========================================================================
+    // Fetch Camera, Spatial, and Astro Math Vectors
+    // =========================================================================
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& camData      = m_entityManager.getCamera(m_camera);
+
+    glm::vec3 camPos   = toGLMVec3(camTransform.pos);
+    glm::vec3 camFwd   = toGLMVec3(Camera::getForward(camTransform));
+    // camFwd.z = -camFwd.z; // Adjust for OpenGL's coordinate system
+    glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);
+    glm::vec4 sunColor = toGLMVec4(m_astroState.sunColor);
+
+    auto vp = Camera::getVPMatrix(camTransform, camData);
+
+    glm::mat4 glmVP(
+        vp[0],  vp[1],  vp[2],  vp[3],
+        vp[4],  vp[5],  vp[6],  vp[7],
+        vp[8],  vp[9],  vp[10], vp[11],
+        vp[12], vp[13], vp[14], vp[15]
+    );
+
+    glm::mat4 invVP = glm::inverse(glmVP);
+
+    // =========================================================================
+    // Forward Uniform State to Deferred Lighting Program
+    // =========================================================================
+    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_cameraPos"),     1, &camPos[0]);
+    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_cameraForward"), 1, &camFwd[0]);
+    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_sunDir"),        1, &sunDir[0]);
+    glUniform4fv(glGetUniformLocation(m_lightingProgram, "u_sunColor"),      1, &sunColor[0]);
+    
+    glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_invViewProj"), 1, GL_FALSE, &invVP[0][0]);
+
+    // Headlamp Configuration (matches your orb configuration schema)
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampIntensity"), 1.0f);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampRange"),     200.0f);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampConeCos"),   0.95f);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampEnabled"),   shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+
+    // =========================================================================
+    // Draw
+    // =========================================================================
+    glBindVertexArray(m_lightingVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // ==================== CLEANUP ====================
+    glBindVertexArray(0);
+    glUseProgram(0);
+    
+    for (int i = 0; i < 5; ++i) {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    
+    glActiveTexture(GL_TEXTURE0); 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 

@@ -47,15 +47,10 @@ uniform vec3      u_cameraRight;
 uniform vec3      u_cameraUp;
 uniform vec3      u_cameraForward;
 
-// Light uniforms
-uniform vec3      u_sunDir;
-uniform vec4      u_sunColour;
-uniform float     u_headlampIntensity;
-uniform float     u_headlampRange;
-uniform float     u_headlampCone;       // cos(angle) of headlamp cone for cutoff
-uniform float     u_headlampEnabled;
-
-out vec4 fragColour;
+layout (location = 0) out vec4 outAlbedo;
+layout (location = 1) out vec4 outNormal;
+layout (location = 2) out vec4 outIndices;
+layout (location = 3) out vec4 outRetro;
 
 // ==============================================================================
 // == OrbInstance — unpacked, derived per-instance data =========================
@@ -89,14 +84,14 @@ OrbInstance unpackOrb(int instanceID)
     OrbData raw = orbs[instanceID];
     OrbInstance o;
 
-    o.centre          = raw.centreAndSpeciesIdx.xyz;
-    o.speciesRaw      = raw.centreAndSpeciesIdx.w;
-    o.forward         = raw.forwardAndRadius.xyz;
-    o.radius          = raw.forwardAndRadius.w;
-    o.dilation        = raw.gazeDirDilationAndEyelidClosure.z;
-    o.right           = raw.rightPadded.xyz;
-    o.eyelidClosure   = raw.gazeDirDilationAndEyelidClosure.w;
-    o.up              = raw.upPadded.xyz;
+    o.centre            = raw.centreAndSpeciesIdx.xyz;
+    o.speciesRaw        = raw.centreAndSpeciesIdx.w;
+    o.forward           = raw.forwardAndRadius.xyz;
+    o.radius            = raw.forwardAndRadius.w;
+    o.dilation          = raw.gazeDirDilationAndEyelidClosure.z;
+    o.right             = raw.rightPadded.xyz;
+    o.eyelidClosure     = raw.gazeDirDilationAndEyelidClosure.w;
+    o.up                = raw.upPadded.xyz;
 
     // Decode gaze direction from compact 2D representation
     float maxGazeSpread = 0.57735027;
@@ -231,6 +226,16 @@ vec3 normalFromNormalMap(vec2 uv, float speciesIdx)
 }
 
 // ==============================================================================
+// == Buffer Packing Helpers ====================================================
+// ==============================================================================
+
+vec2 packOctahedral(vec3 v) {
+    v /= (abs(v.x) + abs(v.y) + abs(v.z));
+    vec2 signV = vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
+    return v.z >= 0.0 ? v.xy : (1.0 - abs(v.yx)) * signV;
+}
+
+// ==============================================================================
 // == PHASE 1 — Geometry ========================================================
 // ==============================================================================
 
@@ -264,6 +269,7 @@ GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int
         vec3 B = cross(N, T);
 
         activeNormal = normalize(tangentNormal.x * T + tangentNormal.y * B + tangentNormal.z * N);
+        outIndices.x = 0.0;
     }
     else
     {
@@ -279,11 +285,13 @@ GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int
         float lipWidth        = 0.03;
         float eyelidMask      = smoothstep(eyelidThreshold, eyelidThreshold - lipWidth, -eyeLocalY);
         float lipFactor       = 4.0 * eyelidMask * (1.0 - eyelidMask);
+        outIndices.x = 1.0/255;
 
         if (lipFactor > 0.0) {
             vec3 lidTiltDir      = orb.up * sign(-eyeLocalY - eyelidThreshold);
             vec3 thicknessNormal = normalize(eyeLocalNorm * 0.3 + lidTiltDir * 0.7);
             activeNormal         = normalize(mix(activeNormal, thicknessNormal, lipFactor * 0.8));
+            outIndices.x = 0.0;
         }
     }
 
@@ -350,7 +358,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb)
     MaterialSample mat;
     mat.eyelidCoverage = 0.0;
     mat.pupilMask       = 0.0;
-    mat.speciesIdx      = orb.speciesRaw;
+    mat.speciesIdx      = orb.speciesRaw / 255.0;
 
     vec3 albedo = orb.scleraColour;
 
@@ -426,82 +434,6 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb)
 }
 
 // ==============================================================================
-// == PHASE 3 — Lighting ========================================================
-// ==============================================================================
-
-vec3 resolveLight(
-    GeometrySample geo,
-    MaterialSample mat,
-    OrbInstance    orb,
-    Ray            ray)
-{
-    // --- Time-of-day ---------------------------------------------------
-    float sunElevationDeg = asin(clamp(u_sunDir.y, -1.0, 1.0)) * 180.0 / 3.1415926535;
-    float sunVisibility   = smoothstep(-12.0, 6.0, sunElevationDeg);
-    float ambient         = mix(0.012, 0.33, sunVisibility);
-
-    // --- Headlamp geometry ----------------------------------------------
-    vec3  toFragment   = geo.pos - u_cameraPos;
-    float distToCamera = length(toFragment);
-    vec3  toFragDir    = normalize(toFragment);
-    vec3  lightDir     = -toFragDir;
-
-    vec3  raySpaceForward = vec3(u_cameraForward.x, u_cameraForward.y, -u_cameraForward.z);
-    float spotCos          = dot(raySpaceForward, toFragDir);
-    float spot              = pow(max(spotCos, 0.0), 48.0) + pow(max(spotCos, 0.0), 6.0) * 0.08;
-    float distFalloff       = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
-    float nearFade          = smoothstep(0.0, 1.0, distToCamera);
-    float lampIntensityMask = spot * distFalloff * nearFade * u_headlampIntensity * u_headlampEnabled;
-
-    vec3 viewDir = normalize(u_cameraPos - geo.pos);
-
-    // Sun diffuse
-    float diffuse = max(dot(geo.normal, u_sunDir), 0.0) * sunVisibility;
-
-    // Sun specular (Blinn-Phong)
-    vec3  sunHalf = normalize(u_sunDir + viewDir);
-    float sunSpec = pow(max(dot(geo.normal, sunHalf), 0.0), mat.specPower)
-                  * mat.specMask * sunVisibility;
-
-    // Headlamp diffuse
-    float headDiff        = max(dot(geo.normal, lightDir), 0.0);
-    float headlampDiffuse = headDiff * lampIntensityMask;
-
-    // Headlamp specular
-    vec3  headHalf     = normalize(lightDir + viewDir);
-    float headlampSpec = pow(max(dot(geo.normal, headHalf), 0.0), mat.headSpecPower)
-                       * mat.headSpecMask * lampIntensityMask;
-
-    vec3 headlampContribution = vec3(0.0);
-    if (distToCamera > 0.1 && spot > 0.001) {
-        vec3 lampColour       = vec3(1.0, 0.95, 0.85);
-        headlampContribution  = mat.albedo * headlampDiffuse * lampColour
-                              + vec3(headlampSpec) * lampColour;
-    }
-
-    // Retroreflective tapetum glow. This is purely a light/view-alignment
-    // effect — it doesn't exist without the headlamp — so it lives here
-    // rather than in the material pass. Indexes SpeciesBuffer directly via
-    // mat.speciesIdx instead of having tapetum colour passed in.
-    vec3 retroContribution = vec3(0.0);
-    if (mat.pupilMask > 0.5) {
-        SpeciesData sp = species[int(mat.speciesIdx)];
-        if (sp.tapetumColourAndPresence.w > 0.5) {
-            float alignment        = max(dot(viewDir, orb.gazeDir), 0.0);
-            float retroReflection  = pow(alignment, 16.0) * lampIntensityMask;
-            retroContribution      = sp.tapetumColourAndPresence.xyz * retroReflection * 15.0
-                                    * (1.0 - mat.eyelidCoverage);
-        }
-    }
-
-    vec3 sunSpecColour = u_sunColour.xyz * sunSpec;
-    return mat.albedo * (ambient + (1.0 - ambient) * diffuse)
-         + sunSpecColour
-         + headlampContribution
-         + retroContribution;
-}
-
-// ==============================================================================
 // == Main ======================================================================
 // ==============================================================================
 
@@ -537,7 +469,18 @@ void main()
     float ndcZ          = clipPos.z / clipPos.w;
     gl_FragDepth        = ndcZ * 0.5 + 0.5;
 
-    vec3 finalColour    = resolveLight(geo, mat, orb, ray);
+    outAlbedo           = vec4(mat.albedo, 1.0);
+    outNormal           = vec4(geo.normal, 1.0);
+    outIndices.y        = float(mat.speciesIdx);
+    outIndices.zw       = vec2(1.0, 1.0);
 
-    fragColour          = vec4(finalColour, 1.0);
+    float actualPupilMask = 0.0;
+    if (geo.hitType == 1 || geo.hitType == 2) { // It's an eye
+        if (mat.pupilMask > 0.5 && mat.eyelidCoverage < 1.0) {
+            actualPupilMask = 1.0;
+        }
+    }
+
+    vec2 encodedGaze = packOctahedral(orb.gazeDir) * 0.5 + 0.5;
+    outRetro = vec4(encodedGaze, actualPupilMask, 1.0);
 }

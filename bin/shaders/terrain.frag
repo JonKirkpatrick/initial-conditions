@@ -10,15 +10,6 @@ uniform float   u_farPlane;
 uniform float   u_heightMax;
 uniform mat3    u_worldToCamMatrix;
 
-uniform vec3    u_sunDir;
-uniform vec4    u_sunColor;
-uniform float   u_ambientStrength;
-
-uniform bool    u_headlampOn;
-uniform float   u_headlampIntensity;
-uniform vec3    u_headlampColour;
-uniform float   u_headlampRange;
-
 uniform bool    u_cursorMode;
 uniform float   u_hexSize;
 uniform vec2    u_hoveredHex;
@@ -30,7 +21,10 @@ in vec2 v_worldXZ;
 in vec2 v_normalXZ;
 in float v_worldY;
 
-out vec4 fragColor;
+layout (location = 0) out vec4 outAlbedo;
+layout (location = 1) out vec4 outNormal;
+layout (location = 2) out vec4 outIndices;
+layout (location = 3) out vec4 outRetro;
 
 // ==============================================================================
 // == G-Buffer Structs ==========================================================
@@ -56,11 +50,6 @@ vec3 computeNormal() {
     float ny = sqrt(max(0.0, 1.0 - dot(nxz, nxz)));
     return normalize(vec3(nxz.x, ny, nxz.y));
 }
-
-// ==============================================================================
-// == Atmospheric Adjustments ===================================================
-// ==============================================================================
-
 
 // ==============================================================================
 // == Hex Grid ===================================================================
@@ -163,10 +152,8 @@ MaterialSample resolveMaterial(GeometrySample geo)
     MaterialSample mat;
 
     float exaggeratedH = pow(geo.normHeight, 1.0 / max(u_reliefExaggeration, 0.01));
-    vec3  lightDir = normalize(u_sunDir);
-    float shade = clamp(dot(geo.normal, lightDir), 0.0, 1.0);
-
-    vec3 rawTerrainColour = topoColour(exaggeratedH, shade);
+    
+    vec3 rawTerrainColour = topoColour(exaggeratedH, 1.0); 
 
     // ================== HEX GRID ==================
     float gridFade = pow(clamp(1.0 - (geo.dist / u_farPlane), 0.0, 1.0), 2.0);
@@ -186,93 +173,21 @@ MaterialSample resolveMaterial(GeometrySample geo)
         }
     }
 
-    mat.albedo = finalColor;
+    mat.albedo = finalColor; 
 
     return mat;
 }
-
-// ==============================================================================
-// == PHASE 3 — Lighting ========================================================
-// ==============================================================================
-
-vec3 resolveLight(GeometrySample geo, MaterialSample mat)
-{
-    vec3 sunDirNorm = normalize(u_sunDir);
-    float sunElevationDeg = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;
-    float nightFactor = smoothstep(-5.0, -15.0, sunElevationDeg);
-    float sunVis      = smoothstep(-4.0,   8.0, sunElevationDeg);
-
-    float diff = max(dot(geo.normal, sunDirNorm), 0.0) * sunVis;
-    vec3 ambient = u_ambientStrength * mix(1.0, 0.07, nightFactor) * mat.albedo;
-
-    // ---- Headlamp ----
-    vec3 headlampContribution = vec3(0.0);
-    float headSpec = 0.0;
-    if (u_headlampOn) {
-        vec3 toFragment = geo.pos - u_cameraPos;
-        float distToCamera = length(toFragment);
-
-        if (distToCamera > 0.1) {
-            vec3 toFragDir = normalize(toFragment);
-            vec3 camForward = normalize(transpose(u_worldToCamMatrix) * vec3(0.0, 0.0, -1.0));
-            vec3 camRight = normalize(transpose(u_worldToCamMatrix) * vec3(1.0, 0.0, 0.0));
-
-            float spotCos = dot(camForward, toFragDir);
-            float spotTight = pow(max(spotCos, 0.0), 48.0);
-            float spotSpill = pow(max(spotCos, 0.0), 6.0) * 0.08;
-            float spot = spotTight + spotSpill;
-
-            if (spot > 0.001) {
-                vec3 lightDir = -toFragDir;
-
-                float headDiff = max(dot(geo.normal, lightDir), 0.0);
-                float nearFade = smoothstep(0.0, 1.0, distToCamera);
-                float distFalloff = pow(max(0.0, 1.0 - distToCamera / u_headlampRange), 1.6);
-                headlampContribution = headDiff * spot * distFalloff * nearFade
-                                    * u_headlampColour * u_headlampIntensity;
-
-                vec3 fakeLightPos = u_cameraPos + camRight * 5.0;
-                vec3 fakeLightDir = normalize(geo.pos - fakeLightPos);
-                vec3 halfDir = normalize(-fakeLightDir + lightDir);
-                headSpec = pow(max(dot(geo.normal, halfDir), 0.0), 32.0)
-                        * spot * distFalloff * 0.3;
-
-                float ambientLoad = clamp(u_ambientStrength * sunVis + (1.0 - nightFactor), 0.0, 1.0);
-                float headlampVisibility = clamp(1.0 - ambientLoad, 0.3, 1.0);
-
-                headlampContribution *= headlampVisibility;
-                headSpec *= headlampVisibility;
-            }
-        }
-    }
-
-    vec3 diffuse = diff * u_sunColor.rgb * mat.albedo + headlampContribution;
-
-    // ---- Moonlight ----
-    vec3 topoLuma = vec3(dot(mat.albedo, vec3(0.299, 0.587, 0.114)));
-    vec3 nightTopoTint = mix(topoLuma, mat.albedo, 0.35);
-    vec3 moonTint = vec3(0.55, 0.68, 0.90);
-    float moonlightFill = nightFactor * 0.08;
-    ambient += moonlightFill * mix(moonTint, nightTopoTint, 0.5) * nightTopoTint;
-
-    // ---- Sun specular ----
-    vec3 viewDir = normalize(u_cameraPos - geo.pos);
-    vec3 halfDir = normalize(sunDirNorm + viewDir);
-    float spec = pow(max(dot(geo.normal, halfDir), 0.0), 32.0) * sunVis * 0.5;
-
-    return ambient + diffuse + spec * u_sunColor.rgb * 0.8
-         + headSpec * u_headlampColour;
-}
-
 // ==============================================================================
 // == Main ======================================================================
 // ==============================================================================
 
 void main() {
-    // Three-phase evaluation
-    GeometrySample geo = resolveGeometry();
-    MaterialSample mat = resolveMaterial(geo);
-    vec3 groundColor   = resolveLight(geo, mat);
+    // Two-phase evaluation
+    GeometrySample geo  = resolveGeometry();
+    MaterialSample mat  = resolveMaterial(geo);
 
-    fragColor = vec4(groundColor, 1.0);
+    outAlbedo           = vec4(mat.albedo, 1.0);
+    outNormal           = vec4(geo.normal, 1.0);
+    outIndices          = vec4(2.0 / 255.0, 1.0, 1.0, 1.0);
+    outRetro            = vec4(0.0);
 }
