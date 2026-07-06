@@ -58,6 +58,10 @@ uniform float u_headlampRange;
 uniform float u_headlampConeCos;
 uniform float u_headlampEnabled;
 
+// Shadow Uniforms
+uniform sampler2D u_shadowMap;
+uniform mat4      u_lightViewProj;
+
 vec3 reconstructWorldPos(vec2 uv, float rawDepth) {
     vec4 ndc = vec4(
         uv.x * 2.0 - 1.0,
@@ -69,6 +73,24 @@ vec3 reconstructWorldPos(vec2 uv, float rawDepth) {
     vec4 worldPosPadded = u_invViewProj * ndc;
     
     return worldPosPadded.xyz / worldPosPadded.w;
+}
+
+float computeShadow(vec3 worldPos) {
+    vec4 lightClip = u_lightViewProj * vec4(worldPos, 1.0);
+    vec3 lightNdc = lightClip.xyz / lightClip.w; // w==1 for ortho, but keep this for later cascade work
+    vec3 shadowUV = lightNdc * 0.5 + 0.5;
+
+    // shadowUV.y = 1 - shadowUV.y;
+
+    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
+        shadowUV.y < 0.0 || shadowUV.y > 1.0 ||
+        shadowUV.z < 0.0 || shadowUV.z > 1.0) {
+        return 1.0; // outside the light frustum: fully lit
+    }
+
+    float bias = 0.0015; // start here; tune once geometry is confirmed correct
+    float shadowMapDepth = texture(u_shadowMap, shadowUV.xy).r;
+    return (shadowUV.z - bias > shadowMapDepth) ? 0.0 : 1.0;
 }
 
 void main()
@@ -104,11 +126,13 @@ void main()
     vec3 ambientLight  = vec3(0.06) * albedo * mat.albedoTint.rgb;
     vec3 diffuseLight  = vec3(0.0);
     vec3 specularLight = vec3(0.0);
+    float shadowContribution = computeShadow(worldPos);
 
     // 1. ==================== SUN DIRECTIONAL LIGHT ====================
     vec3 sunDirection  = normalize(u_sunDir);
     float sunLambert   = max(dot(normal, sunDirection), 0.0);
     diffuseLight      += u_sunColor.rgb * sunLambert * albedo * mat.albedoTint.rgb;
+    diffuseLight      *= shadowContribution;
 
     // 2. ==================== PLAYER HEADLAMP LIGHT ====================
     float lampIntensityMask = 0.0;

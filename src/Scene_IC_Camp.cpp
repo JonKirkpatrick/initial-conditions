@@ -92,7 +92,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnPlayer();
     spawnCamera();
     updateCamera(0.001f);
-    spawnDebugOrbs(32000);
+    spawnDebugOrbs(2000);
 
     m_entityManager.update();
 
@@ -104,7 +104,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     updateStarRotation();
     updateMoonPosition();
     initializeSkyCubemap();
-    // initializeMainFBO();
+    initializeShadowMap(m_shadowMapSize);
     initializeOrbShaderStorage();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
@@ -282,6 +282,7 @@ void Scene_IC_Camp::sGUI()
             ImGui::Checkbox("Draw Grid", &m_drawGrid);
             ImGui::Checkbox("Draw Textures", &m_drawTextures);
             ImGui::Checkbox("Draw Debug", &m_drawCollision);
+            ImGui::Checkbox("Draw Shadows", &m_debugShowShadowMap);
             sf::Vector2i mousePos = sf::Mouse::getPosition(m_game.window());
             sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
 
@@ -407,6 +408,7 @@ void Scene_IC_Camp::sRender() {
     auto rawWorldToCamMatrix = Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll);
     auto worldToCamMatrix = toGlslMat3(rawWorldToCamMatrix);
 
+
     glBindFramebuffer(GL_FRAMEBUFFER, m_gBufferFBO);
     glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
     glClearColor(0.f, 0.f, 0.f, 0.f);
@@ -414,20 +416,25 @@ void Scene_IC_Camp::sRender() {
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
-    glDepthFunc(GL_LEQUAL); 
+    glDepthFunc(GL_LEQUAL);
     glDisable(GL_BLEND);
 
     runTerrainPass(rawWorldToCamMatrix);
     renderOrbCreature();
-
     renderSky(worldToCamMatrix);
+    runShadowPass();   // <-- new: populates m_shadowDepthTex + m_lightViewProj
 
-    // Composite to screen
     window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
-    deferredLighting();
+
+    if (m_debugShowShadowMap) {
+        blitToScreen(m_shadowDepthTex);   // <-- sub-step 1a: eyeball the raw depth
+    } else {
+        deferredLighting();
+    }
+
     m_hud->render(window, false);
 }
 
@@ -1220,6 +1227,118 @@ void Scene_IC_Camp::initializeMainFBO() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void Scene_IC_Camp::initializeShadowMap(unsigned int size) {
+    m_shadowMapSize = size;
+
+    glGenTextures(1, &m_shadowDepthTex);
+    glBindTexture(GL_TEXTURE_2D, m_shadowDepthTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size, size,
+                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    // Anything sampled outside the frustum reads as "far" (1.0) => unshadowed.
+    float borderColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+    glGenFramebuffers(1, &m_shadowFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                            GL_TEXTURE_2D, m_shadowDepthTex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "Shadow FBO incomplete! Status: 0x" << std::hex << status << std::endl;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Scene_IC_Camp::destroyShadowMap() {
+    if (m_shadowFBO) {
+        glDeleteFramebuffers(1, &m_shadowFBO);
+        glDeleteTextures(1, &m_shadowDepthTex);
+        m_shadowFBO = 0;
+        m_shadowDepthTex = 0;
+    }
+}
+
+glm::mat4 Scene_IC_Camp::computeLightViewProj() const {
+    glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection)); // points TOWARD the sun
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    glm::vec3 center = toGLMVec3(camTransform.pos); // Phase 1: box follows the camera, not frustum-fit
+
+    // Guard against sunDir being (near-)parallel to world up, which would
+    // degenerate glm::lookAt's up vector.
+    glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
+                                                      : glm::vec3(0.f, 1.f, 0.f);
+
+    glm::vec3 lightPos = center + sunDir * (m_shadowFarPlane * 0.5f);
+    glm::mat4 lightView = glm::lookAt(lightPos, center, worldUp);
+
+    float he = m_shadowBoxHalfExtent;
+    glm::mat4 lightProj = glm::ortho(-he, he, -he, he, m_shadowNearPlane, m_shadowFarPlane);
+
+    return lightProj * lightView;
+}
+
+void Scene_IC_Camp::runShadowPass() {
+    m_lightViewProj = computeLightViewProj();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFBO);
+    glViewport(0, 0, m_shadowMapSize, m_shadowMapSize);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+
+    // Optional but recommended: cull front faces here to reduce acne
+    // (peter-panning appears at grazing angles instead; tune in Phase 7).
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+
+    glUseProgram(m_shadowProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+    glUniform1i(glGetUniformLocation(m_shadowProgram, "u_topoTopdownTex"), 0);
+    glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldMin"),
+                m_topdownWorldMin.x, m_topdownWorldMin.y);
+    glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldSize"),
+                m_topdownWorldSize.x, m_topdownWorldSize.y);
+    glUniform1f(glGetUniformLocation(m_shadowProgram, "u_heightMax"), m_topdownMaxHeight);
+    glUniformMatrix4fv(glGetUniformLocation(m_shadowProgram, "u_lightViewProj"),
+                       1, GL_FALSE, &m_lightViewProj[0][0]);
+
+    glBindVertexArray(m_gridVAO);
+    glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+
+    // =================================================================
+    // PASS 1B: RENDER ORBS INTO THE SAME SHADOW DEPTH BUFFER
+    // =================================================================
+    glDisable(GL_CULL_FACE);
+    glUseProgram(m_orbShadowProgram);
+
+    glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
+
+    glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
+                    1, GL_FALSE, &m_lightViewProj[0][0]);
+    glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"), 
+                1, glm::value_ptr(sunDir));
+
+    m_orbSSBO.bind(0); 
+
+    // Draw using your existing instanced cube configuration
+    glBindVertexArray(m_cubeVAO);
+    glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 void Scene_IC_Camp::initializeGBuffer(unsigned int width, unsigned int height) {
     m_gBufferWidth = width;
     m_gBufferHeight = height;
@@ -1561,6 +1680,12 @@ void Scene_IC_Camp::deferredLighting()
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gDepth"), 4);
 
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, m_shadowDepthTex);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_shadowMap"), 5);
+    glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_lightViewProj"),
+                        1, GL_FALSE, &m_lightViewProj[0][0]);
+
     // =========================================================================
     // Bind SSBOs
     // =========================================================================
@@ -1580,12 +1705,7 @@ void Scene_IC_Camp::deferredLighting()
 
     auto vp = Camera::getVPMatrix(camTransform, camData);
 
-    glm::mat4 glmVP(
-        vp[0],  vp[1],  vp[2],  vp[3],
-        vp[4],  vp[5],  vp[6],  vp[7],
-        vp[8],  vp[9],  vp[10], vp[11],
-        vp[12], vp[13], vp[14], vp[15]
-    );
+    glm::mat4 glmVP = glm::make_mat4(vp.data());
 
     glm::mat4 invVP = glm::inverse(glmVP);
 
@@ -1615,7 +1735,7 @@ void Scene_IC_Camp::deferredLighting()
     glBindVertexArray(0);
     glUseProgram(0);
     
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
         glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, 0);
     }

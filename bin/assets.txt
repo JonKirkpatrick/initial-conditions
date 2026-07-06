@@ -25,3 +25,5 @@ GLProgram   Terrain         shaders/terrain.vert shaders/terrain.frag
 GLProgram   OrbCreature     shaders/orbCreature.vert shaders/orbCreature.frag
 GLProgram   Blit            shaders/blit.vert shaders/blit.frag
 GLProgram   Lighting        shaders/lighting.vert shaders/lighting.frag
+GLProgram   ShadowDepth     shaders/shadowDepth.vert shaders/shadowDepth.frag
+GLProgram   OrbShadow       shaders/orbShadow.vert shaders/orbShadow.frag

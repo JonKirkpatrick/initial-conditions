@@ -127,6 +127,28 @@ protected:
     GLuint              m_lightingVBO               = 0;
 
     // =========================================================================
+    // Rendering — Shadow Map (CSM Phase 1: single fixed-size, camera-centered box)
+    // =========================================================================
+
+    GLuint              m_shadowFBO             = 0;
+    GLuint              m_shadowDepthTex        = 0;
+    unsigned int        m_shadowMapSize         = 2048;
+
+    // How far the light-space ortho box extends from its center, in world units.
+    // Phase 1 only: this box is just recentered on the camera each frame,
+    // not fit to the camera frustum (that's Phase 2).
+    float               m_shadowBoxHalfExtent   = 150.0f;
+    float               m_shadowNearPlane       = 1.0f;
+    float               m_shadowFarPlane        = 500.0f;
+
+    GLuint              m_shadowProgram         = Assets::Instance().getGLProgram("ShadowDepth");
+    GLuint              m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
+    glm::mat4           m_lightViewProj         = glm::mat4(1.0f);
+
+    // Debug: skip lighting entirely and blit the raw shadow depth to the screen
+    bool                m_debugShowShadowMap    = false;
+
+    // =========================================================================
     // Rendering — Sky Cubemap
     // =========================================================================
 
@@ -210,6 +232,8 @@ protected:
     void initializeOrbShaderStorage();
     void initializeGBuffer(unsigned int width, unsigned int height);
     void destroyGBuffer();
+    void initializeShadowMap(unsigned int size);
+    void destroyShadowMap();
 
     // =========================================================================
     // Per-Frame Updates
@@ -224,6 +248,7 @@ protected:
     void updateMoonPosition();
     void updateBob(SoAEntityHandle e, float dt, float horizSpeed);
     void updateOrbBobbing(SoAEntityHandle e, float dt);
+    glm::mat4 computeLightViewProj() const;
 
     // =========================================================================
     // Movement and Physics
@@ -238,6 +263,7 @@ protected:
     // Render Passes
     // =========================================================================
 
+    void runShadowPass();
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
     void runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
     void renderOrbCreature();

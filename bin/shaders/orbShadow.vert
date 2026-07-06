@@ -14,23 +14,21 @@ layout(std430, binding = 0) readonly buffer OrbBuffer {
 
 layout(location = 0) in vec3 a_cubePos;
 
-uniform mat4 u_shadowMatrix; // Active cascade View-Projection
+uniform mat4 u_lightViewProj;
 
 flat out int v_instanceID;
-out vec3 v_proxyWorldPos;
+out vec3 v_worldPos;
 
 void main()
 {
-    OrbData orb    = orbs[gl_InstanceID];
-    vec3 centre    = orb.centreAndSpeciesIdx.xyz;
-    float radius   = orb.forwardAndRadius.w;
+    OrbData orb  = orbs[gl_InstanceID];
+    vec3 centre  = orb.centreAndSpeciesIdx.xyz;
+    float radius = orb.forwardAndRadius.w;
 
-    // Use your exact proxy bounding box expansion (radius * 1.05 + centre)
-    vec3 worldPos  = a_cubePos * radius * 1.05 + centre;
+    // Scale unit cube to comfortably enclose the orb volume
+    vec3 worldPos = a_cubePos * radius * 1.15 + centre;
 
-    v_instanceID    = gl_InstanceID;
-    v_proxyWorldPos = worldPos; // Pass this world coordinate down for our ray setup!
-    
-    // Project into current cascade light-space
-    gl_Position    = u_shadowMatrix * vec4(worldPos, 1.0);
+    v_worldPos   = worldPos;
+    v_instanceID = gl_InstanceID;
+    gl_Position  = u_lightViewProj * vec4(worldPos, 1.0);
 }
