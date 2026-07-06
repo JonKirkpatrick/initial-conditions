@@ -92,7 +92,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnPlayer();
     spawnCamera();
     updateCamera(0.001f);
-    spawnDebugOrbs(2000);
+    spawnDebugOrbs(32000);
 
     m_entityManager.update();
 
