@@ -117,7 +117,6 @@ void main()
         vec3 lightToFrag   = worldPos - u_cameraPos;
         float distToFrag   = length(lightToFrag);
         vec3 toFragDir     = normalize(lightToFrag);
-        toFragDir.z = -toFragDir.z;
 
         // Standard distance attenuation
         float distFalloff  = pow(max(0.0, 1.0 - distToFrag / u_headlampRange), 1.6);

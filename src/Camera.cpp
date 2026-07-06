@@ -12,25 +12,27 @@ namespace Camera {
         );
     }
 
-    sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float roll) {
+sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float roll) {
         float cp = std::cos(pitch), sp = std::sin(pitch);
         float cy = std::cos(yaw),   sy = std::sin(yaw);
         float cr = std::cos(roll),  sr = std::sin(roll);
 
-        // Yaw (Y)
-        float x1 = cy * v.x + sy * v.z;
-        float z1 = -sy * v.x + cy * v.z;
+        // 1. Undo YAW first (Right-to-left matrix order means this hits the world vector first)
+        float x1 = cy * v.x - sy * v.z;
         float y1 = v.y;
+        float z1 = sy * v.x + cy * v.z;
 
-        // Pitch (X)
-        float y2 = cp * y1 - sp * z1;
-        float z2 = sp * y1 + cp * z1;
+        // 2. Undo PITCH second
         float x2 = x1;
+        float y2 = cp * y1 + sp * z1;
+        float z2 = -sp * y1 + cp * z1;
 
-        // Roll (Z)
-        float x3 = cr * x2 - sr * y2;
-        float y3 = sr * x2 + cr * y2;
-        return sf::Vector3f(x3, y3, z2);
+        // 3. Undo ROLL last
+        float x3 = cr * x2 + sr * y2;
+        float y3 = -sr * x2 + cr * y2;
+        float z3 = z2;
+
+        return sf::Vector3f(x3, y3, z3);
     }
 
     sf::Vector3f cameraToWorld(const sf::Vector3f& v, float pitch, float yaw, float roll) {
@@ -38,20 +40,20 @@ namespace Camera {
         float cy = std::cos(yaw),   sy = std::sin(yaw);
         float cr = std::cos(roll),  sr = std::sin(roll);
         
-        // Undo roll first
-        float x1 = cr * v.x + sr * v.y;
-        float y1 = -sr * v.x + cr * v.y;
+        // 1. Forward pass applies ROLL first
+        float x1 = cr * v.x - sr * v.y;
+        float y1 = sr * v.x + cr * v.y;
         float z1 = v.z;
         
-        // Undo pitch
-        float y2 = cp * y1 + sp * z1;
-        float z2 = -sp * y1 + cp * z1;
+        // 2. Forward pass applies PITCH second
         float x2 = x1;
+        float y2 = cp * y1 - sp * z1;
+        float z2 = sp * y1 + cp * z1;
         
-        // Undo yaw last
-        float x3 = cy * x2 - sy * z2;
-        float z3 = sy * x2 + cy * z2;
+        // 3. Forward pass applies YAW last
+        float x3 = cy * x2 + sy * z2;
         float y3 = y2;
+        float z3 = -sy * x2 + cy * z2;
         
         return sf::Vector3f(x3, y3, z3);
     }
@@ -59,26 +61,44 @@ namespace Camera {
     bool worldToScreen(const CTransform3D& t, const CCamera& c, const sf::Vector3f& world, sf::Vector2f& screenOut) {
         sf::Vector3f rel = world - t.pos;
         sf::Vector3f cam = worldToCamera(rel, t.pitch, t.yaw, t.roll);
+        
+        // In right-handed camera space, objects in front of the lens have a NEGATIVE Z.
+        // If cam.z is greater than -nearPlane (e.g., -0.05), it's either too close or behind the camera.
         if (cam.z > -c.nearPlane) return false;
 
         float f = 1.0f / std::tan(c.fovY * 0.5f);
-        float x_ndc = (cam.x * f / c.aspectRatio) / -cam.z;
-        float y_ndc = (cam.y * f) / -cam.z;
+        
+        // Perspective division: dividing by the positive distance forward (-cam.z)
+        float w_divisor = -cam.z; 
+        float x_ndc = (cam.x * f / c.aspectRatio) / w_divisor;
+        float y_ndc = (cam.y * f) / w_divisor;
+        
+        // Convert from NDC [-1, 1] to screen coordinate pixels
         screenOut.x = (x_ndc * 0.5f + 0.5f) * static_cast<float>(c.viewportSize.x);
         screenOut.y = (1.0f - (y_ndc * 0.5f + 0.5f)) * static_cast<float>(c.viewportSize.y);
         return true;
     }
 
     sf::Vector3f screenToWorld(const CTransform3D& t, const CCamera& c, sf::Vector2f screen) {
+        // 1. Convert screen pixels back into Normalized Device Coordinates [-1, 1]
         float x_ndc = (screen.x / static_cast<float>(c.viewportSize.x)) * 2.f - 1.f;
         float y_ndc = 1.f - (screen.y / static_cast<float>(c.viewportSize.y)) * 2.f;
+        
         float f = std::tan(c.fovY * 0.5f);
-        sf::Vector3f rayDir(x_ndc * f * c.aspectRatio, y_ndc * f, -1.f);
-        rayDir = cameraToWorld(rayDir, t.pitch, t.yaw, t.roll);
-        if (std::abs(rayDir.y) < 1e-6f) return t.pos;
-        float tt = -t.pos.y / rayDir.y;
-        if (tt < 0.f) return t.pos;
-        return t.pos + rayDir * tt;
+        
+        // 2. Formulate the ray direction pointing down the negative Z axis in local space
+        sf::Vector3f rayDirLocal(x_ndc * f * c.aspectRatio, y_ndc * f, -1.f);
+        
+        // 3. Transform the local ray direction into absolute world space vectors
+        sf::Vector3f rayDirWorld = cameraToWorld(rayDirLocal, t.pitch, t.yaw, t.roll);
+        
+        // 4. Trace down to intersect with the flat landscape floor (Y = 0)
+        if (std::abs(rayDirWorld.y) < 1e-6f) return t.pos;
+        
+        float tt = -t.pos.y / rayDirWorld.y;
+        if (tt < 0.f) return t.pos; // Intersection is behind the camera eye
+        
+        return t.pos + rayDirWorld * tt;
     }
 
     sf::Vector3f getForwardXZ(const CTransform3D& t) {
@@ -90,21 +110,33 @@ namespace Camera {
     sf::Vector3f getForward(const CTransform3D& t) {
         float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
         float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
-        return sf::Vector3f(sy * cp, -sp, cy * cp);
+        
+        // Natively points to negative Z when angles are zero
+        return sf::Vector3f(-sy * cp, sp, -cy * cp);
     }
 
     sf::Vector3f getRight(const CTransform3D& t) {
-        // Right is the camera's X axis in world space
-        // Derived by transforming world X through the inverse camera rotation
-        float cy = std::cos(t.yaw), sy = std::sin(t.yaw);
-        float cr = std::cos(t.roll), sr = std::sin(t.roll);
-        return normalize(sf::Vector3f(cy * cr, sr, -sy * cr));
+        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
+        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
+        float cr = std::cos(t.roll),  sr = std::sin(t.roll);
+
+        // Account for Yaw, Pitch, and Roll to keep the horizontal axis rigid
+        float x = cy * cr + sy * sp * sr;
+        float y = cp * sr;
+        float z = -sy * cr + cy * sp * sr;
+        return sf::Vector3f(x, y, z);
     }
 
     sf::Vector3f getUp(const CTransform3D& t) {
-        // Up is the cross product of right and forward
-        // ensuring an orthonormal basis
-        return normalize(cross(getRight(t), getForward(t)));
+        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
+        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
+        float cr = std::cos(t.roll),  sr = std::sin(t.roll);
+
+        // Natively points to positive Y when angles are zero
+        float x = -cy * sr + sy * sp * cr;
+        float y = cp * cr;
+        float z = sy * sr + cy * sp * cr;
+        return sf::Vector3f(x, y, z);
     }
 
     sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll) {
@@ -164,27 +196,30 @@ namespace Camera {
         float f     = 1.0f / std::tan(c.fovY * 0.5f);
         float zNear = c.nearPlane;
         float zFar  = c.farPlane;
+        
+        // Zero-to-one standard right-handed mapping
         float zRange = zNear - zFar; 
 
         // Standalone Perspective Projection matrix (4x4 column-major)
-        // Retains your engine's custom Y-axis inversion (-f)
         return {
-            f / c.aspectRatio, 0.f,  0.f,                          0.f,
-            0.f,               f,   0.f,                          0.f,
-            0.f,               0.f,  (zFar + zNear) / zRange,     -1.f,   
-            0.f,               0.f,  (2.f * zFar * zNear) / zRange, 0.f
+            // Column 0
+            f / c.aspectRatio, 0.f,  0.f,  0.f,
+            
+            // Column 1
+            0.f,               f,  0.f,  0.f,
+            
+            // Column 2
+            0.f,               0.f,  zFar / zRange,  -1.f, // Natively flips negative view Z to positive clip W
+            
+            // Column 3
+            0.f,               0.f,  (zNear * zFar) / zRange, 0.f
         };
     }
 
     std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c)
     {
-        // Get rotation: world -> camera (columns = transformed basis vectors)
+        // 1. Get rotation: world -> camera (columns = transformed basis vectors)
         auto rot = getWorldToCamMatrix(t.pitch, t.yaw, t.roll);
-
-        // rot[col][row] layout from getWorldToCamMatrix:
-        // rot[0][0..2] = bx (image of world X)
-        // rot[1][0..2] = by
-        // rot[2][0..2] = bz
 
         // Translation in camera space: t_cam = - (R * world_pos)
         double tx = -(double(rot[0][0]) * t.pos.x + double(rot[1][0]) * t.pos.y + double(rot[2][0]) * t.pos.z);
@@ -203,20 +238,24 @@ namespace Camera {
             float(tx),        float(ty),        float(tz),        1.f
         };
 
-        // Projection matrix (standard OpenGL-style perspective, column-major)
+        // 2. Updated Projection matrix block to utilize the corrected [0, 1] depth logic
         float f     = 1.0f / std::tan(c.fovY * 0.5f);
         float zNear = c.nearPlane;
         float zFar  = c.farPlane;
-        float zRange = zNear - zFar;   // negative if zFar > zNear (usual)
+        float zRange = zNear - zFar;
 
         std::array<float, 16> P = {
-            f / c.aspectRatio, 0.f,  0.f,                          0.f,
-            0.f,               f,    0.f,                          0.f,
-            0.f,               0.f,  (zFar + zNear) / zRange,     -1.f,   // note the -1 for OpenGL convention
-            0.f,               0.f,  (2.f * zFar * zNear) / zRange, 0.f
+            // Column 0
+            f / c.aspectRatio, 0.f,  0.f,  0.f,
+            // Column 1
+            0.f,               f,  0.f,  0.f,
+            // Column 2
+            0.f,               0.f,  zFar / zRange,  -1.f, // Correct mapping for native right-handed depth
+            // Column 3
+            0.f,               0.f,  (zNear * zFar) / zRange, 0.f
         };
 
-        // P * V
+        // 3. P * V Multiplication (remains structurally pristine)
         std::array<float, 16> VP = {};
         for (int col = 0; col < 4; ++col) {
             for (int row = 0; row < 4; ++row) {

@@ -7,11 +7,11 @@ uniform vec2        u_topdownWorldMin;
 uniform vec2        u_topdownWorldSize;
 uniform float       u_heightMax;
 
-uniform mat4 u_View;
-uniform mat4 u_Projection;
+// Pass the unified, native view-projection matrix to match your C++ loop format perfectly
+uniform mat4 u_viewProj; 
 
 out vec2 v_worldXZ;
-out vec2 v_normalXZ;   // pack just XZ, reconstruct Y in terrain.frag
+out vec2 v_normalXZ;   
 out float v_worldY;
 
 float decodeHeightVertex(vec2 uv) {
@@ -35,9 +35,15 @@ void main() {
     float hU = decodeHeightVertex(a_uv + vec2(0.0,  texelSize.y));
 
     vec2 worldTexelSize = u_topdownWorldSize * texelSize;
+    
+    // Standard Right-Handed Surface Gradient Normal
     vec3 n = normalize(vec3(hL - hR, 2.0 * worldTexelSize.x, hD - hU));
-    v_normalXZ = n.xz;  // Y is always positive, reconstruct in frag
+    
+    // Save the raw X and Z derivative components clearly
+    v_normalXZ = vec2(n.x, n.z);  
 
     v_worldXZ = vec2(worldX, worldZ);
-    gl_Position = u_Projection * (u_View * vec4(worldX, h, worldZ, 1.0));
+    
+    // Single unified transformation protects matrix hierarchy from cross-multiplying out of order
+    gl_Position = u_viewProj * vec4(worldX, h, worldZ, 1.0);
 }

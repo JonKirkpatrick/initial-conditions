@@ -159,18 +159,20 @@ struct Ray {
 
 Ray reconstructRay(vec2 fragCoord)
 {
+    // 1. Convert to pristine [-1, 1] Normalized Device Coordinates
     vec2  ndc         = (fragCoord / u_viewportSize) * 2.0 - 1.0;
     float aspectRatio = u_viewportSize.x / u_viewportSize.y;
     float halfTanFov  = tan(u_fovY * 0.5);
 
-    vec3 dir = normalize(
-        u_cameraForward
-        + ndc.x * aspectRatio * halfTanFov * u_cameraRight
-        + ndc.y * halfTanFov  * u_cameraUp
+    // 2. Standard Right-Handed Frustum ray building:
+    //    Right vector scales with X, Up vector scales with Y.
+    vec3 viewDir = normalize(
+        u_cameraForward 
+        + (ndc.x * aspectRatio * halfTanFov * u_cameraRight) 
+        + (ndc.y * halfTanFov  * u_cameraUp)
     );
-    dir.z = -dir.z;
 
-    return Ray(u_cameraPos, dir);
+    return Ray(u_cameraPos, viewDir);
 }
 
 // ==============================================================================
@@ -439,10 +441,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb)
 
 void main()
 {
-    // SFML Y-flip
-    vec2 fragSFML    = vec2(gl_FragCoord.x, u_viewportSize.y - gl_FragCoord.y);
-
-    Ray         ray = reconstructRay(fragSFML);
+    Ray         ray = reconstructRay(gl_FragCoord.xy);
     OrbInstance orb = unpackOrb(v_instanceID);
 
     // Intersect ray with body and both eyes

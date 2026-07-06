@@ -6,6 +6,8 @@
 #include <SFML/OpenGL.hpp>
 #include <SFML/Graphics/CoordinateType.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <cmath>
 #include "imgui.h"
 #include "imgui-SFML.h"
@@ -531,8 +533,8 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 
     moveSpeed *= slopeFactor;
     // === Rotation ===
-    t.yaw += input.mouseDelta.x * 0.002f;
-    t.pitch += input.mouseDelta.y * 0.002f;
+    t.yaw -= input.mouseDelta.x * 0.002f;
+    t.pitch -= input.mouseDelta.y * 0.002f;
     input.mouseDelta = {0.f, 0.f};
 
     if (input.strafe)
@@ -1303,7 +1305,7 @@ std::vector<OrbData> Scene_IC_Camp::buildOrbData() const
         auto& eyes = m_entityManager.getEyes(orb);
         auto f = Camera::getForward(t);
         auto r = Camera::getRight(t);
-        auto u = -Camera::getUp(t);
+        auto u = Camera::getUp(t);
 
         OrbData data;
         data.centreAndSpeciesIdx                = { t.pos.x, t.pos.y, t.pos.z, static_cast<float>(c.speciesIdx) };
@@ -1333,8 +1335,7 @@ void Scene_IC_Camp::updateOrbShaderStorage()
 void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix) {
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
-    auto viewMatrix = Camera::getViewMatrix(transform);
-    auto projMatrix = Camera::getProjectionMatrix(cameraData);
+    auto vpMatrix   = Camera::getVPMatrix(transform, cameraData);
     sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
     sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
 
@@ -1352,10 +1353,8 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     glUniform2f(glGetUniformLocation(m_terrainProgram, "u_topdownWorldSize"),
                 m_topdownWorldSize.x, m_topdownWorldSize.y);
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_heightMax"), m_topdownMaxHeight);
-    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_View"),
-                       1, GL_FALSE, viewMatrix.data());
-    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_Projection"),
-                       1, GL_FALSE, projMatrix.data());
+    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_viewProj"),
+                       1, GL_FALSE, vpMatrix.data());
 
     // Uniforms for the Fragment Portion of the Shader
     glUniform3f(glGetUniformLocation(m_terrainProgram, "u_cameraPos"), transform.pos.x, transform.pos.y, transform.pos.z);
@@ -1485,15 +1484,15 @@ void Scene_IC_Camp::renderOrbCreature()
         static_cast<float>(camData.viewportSize.x),
         static_cast<float>(camData.viewportSize.y));
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_fovY"),          camData.fovY);
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraPos"),     1, &camPos[0]);
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraForward"), 1, &camFwd[0]);
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraRight"),   1, &camRight[0]);
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraUp"),      1, &camUp[0]);
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraPos"),     1, glm::value_ptr(camPos));
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraForward"), 1, glm::value_ptr(camFwd));
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraRight"),   1, glm::value_ptr(camRight));
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraUp"),      1, glm::value_ptr(camUp));
     glUniformMatrix4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_viewProj"),
         1, GL_FALSE, vp.data());
 
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunDir"), 1, &sunDir[0]);
-    glUniform4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunColor"), 1, &sunColor[0]);
+    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunDir"), 1, glm::value_ptr(sunDir));
+    glUniform4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunColor"), 1, glm::value_ptr(sunColor));
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampIntensity"), 1.0f);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampRange"),     200.0f);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampConeCos"),   1.0f);
@@ -1576,7 +1575,6 @@ void Scene_IC_Camp::deferredLighting()
 
     glm::vec3 camPos   = toGLMVec3(camTransform.pos);
     glm::vec3 camFwd   = toGLMVec3(Camera::getForward(camTransform));
-    // camFwd.z = -camFwd.z; // Adjust for OpenGL's coordinate system
     glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);
     glm::vec4 sunColor = toGLMVec4(m_astroState.sunColor);
 
