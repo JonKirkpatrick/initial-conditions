@@ -148,7 +148,8 @@ protected:
     glm::mat4           m_lightViewProj         = glm::mat4(1.0f);
 
     // Debug: skip lighting entirely and blit the raw shadow depth to the screen
-    bool                m_debugShowShadowMap    = false;
+    bool                m_debugShowShadowMap     = false;
+    bool                m_debugDisableTexelSnap  = false;
 
     // =========================================================================
     // Rendering — Sky Cubemap

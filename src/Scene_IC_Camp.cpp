@@ -283,6 +283,7 @@ void Scene_IC_Camp::sGUI()
             ImGui::Checkbox("Draw Textures", &m_drawTextures);
             ImGui::Checkbox("Draw Debug", &m_drawCollision);
             ImGui::Checkbox("Draw Shadows", &m_debugShowShadowMap);
+            ImGui::Checkbox("Disable Texel Snap", &m_debugDisableTexelSnap);
             sf::Vector2i mousePos = sf::Mouse::getPosition(m_game.window());
             sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
 
@@ -1266,28 +1267,20 @@ void Scene_IC_Camp::destroyShadowMap() {
 }
 
 glm::mat4 Scene_IC_Camp::computeLightViewProj() const {
-    glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection)); // points TOWARD the sun
+    glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection));
     glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
                                                       : glm::vec3(0.f, 1.f, 0.f);
 
-    // --- Step 1: build a light VIEW matrix from orientation only ---
-    // Position doesn't matter yet — we just need the light's basis to
-    // transform frustum corners into light space. Looking from the origin
-    // is fine for this purpose.
     glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), -sunDir, worldUp);
 
-    // --- Step 2: get the camera's frustum corners in world space ---
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& camData      = m_entityManager.getCamera(m_camera);
 
-    // Clamp the far plane used for shadow purposes — no need to cover the
-    // camera's true draw distance if that's much larger than where shadows
-    // are actually visible/meaningful.
     CCamera shadowCamData = camData;
     shadowCamData.farPlane = std::min(camData.farPlane, m_shadowMaxDistance);
 
     auto vp = Camera::getVPMatrix(camTransform, shadowCamData);
-    glm::mat4 camVP = glm::make_mat4(vp.data());
+    glm::mat4 camVP    = glm::make_mat4(vp.data());
     glm::mat4 camInvVP = glm::inverse(camVP);
 
     static const glm::vec3 ndcCorners[8] = {
@@ -1296,60 +1289,47 @@ glm::mat4 Scene_IC_Camp::computeLightViewProj() const {
     };
 
     glm::vec3 worldCorners[8];
+    glm::vec3 centroid(0.0f);
     for (int i = 0; i < 8; ++i) {
         glm::vec4 p = camInvVP * glm::vec4(ndcCorners[i], 1.0f);
         worldCorners[i] = glm::vec3(p) / p.w;
+        centroid += worldCorners[i];
     }
+    centroid /= 8.0f;
 
-    // --- Step 3: transform corners into light space, find their AABB ---
-    glm::vec3 lightMin( std::numeric_limits<float>::max());
-    glm::vec3 lightMax(-std::numeric_limits<float>::max());
-
+    // Phase 3: bounding SPHERE radius, not a light-space AABB. This is constant
+    // as the camera rotates (depends only on FOV/near/far, not orientation),
+    // which is what makes the snapping below actually hold still.
+    float radius = 0.0f;
     for (int i = 0; i < 8; ++i) {
-        glm::vec3 lp = glm::vec3(lightView * glm::vec4(worldCorners[i], 1.0f));
-        lightMin = glm::min(lightMin, lp);
-        lightMax = glm::max(lightMax, lp);
+        radius = std::max(radius, glm::length(worldCorners[i] - centroid));
+    }
+    radius += m_shadowFrustumPadding;
+
+    // Where the box should sit, in light space, before snapping.
+    glm::vec3 centroidLS = glm::vec3(lightView * glm::vec4(centroid, 1.0f));
+
+    // Phase 3: snap X/Y (the axes perpendicular to the light direction) to
+    // texel-sized increments. Because `radius` is fixed frame-to-frame,
+    // worldUnitsPerTexel is too — that's the whole trick.
+    float worldUnitsPerTexel = (radius * 2.0f) / float(m_shadowMapSize);
+    if (!m_debugDisableTexelSnap) {
+        centroidLS.x = std::floor(centroidLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
+        centroidLS.y = std::floor(centroidLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
     }
 
-    // Pad the horizontal/vertical extents a bit so casters just outside the
-    // camera frustum (but still visible in the shadow direction) aren't clipped.
-    lightMin.x -= m_shadowFrustumPadding;
-    lightMax.x += m_shadowFrustumPadding;
-    lightMin.y -= m_shadowFrustumPadding;
-    lightMax.y += m_shadowFrustumPadding;
-
-    // In this engine's view-space convention, +Z is toward the light; lightMax is the near plane. 
-
-    // --- Step 4: extend the near side generously ---
-    // Casters can sit well outside the camera frustum (behind/beside it, or
-    // above it) and still need to throw a shadow into the visible box.
-    // Pulling the near plane back is cheap insurance against missing casters;
-    // it costs you nothing but a bit of depth-precision headroom.
+    // Z: same convention you discovered in Phase 2 — in this engine's view space,
+    // +Z is toward the light, so push the eye out that direction from the centroid.
     float nearExtension = m_shadowFrustumPadding * 20.0f;
-    lightMax.z += nearExtension;
+    centroidLS.z += radius + nearExtension;
 
-    // --- Step 5: build the actual view/proj now that we know the extents ---
-    // Recenter the eye at the AABB center, at the near-z we just computed,
-    // so the ortho matrix's near/far are simple, small, precision-friendly numbers.
-    glm::vec3 lightSpaceCenter(
-        (lightMin.x + lightMax.x) * 0.5f,
-        (lightMin.y + lightMax.y) * 0.5f,
-        lightMax.z
-    );
-
-    // Transform that center back into world space to get the eye position.
     glm::mat4 lightViewInv = glm::inverse(lightView);
-    glm::vec3 eyeWorldPos = glm::vec3(lightViewInv * glm::vec4(lightSpaceCenter, 1.0f));
+    glm::vec3 eyeWorldPos  = glm::vec3(lightViewInv * glm::vec4(centroidLS, 1.0f));
 
-    glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos + sunDir * -1.0f, worldUp);
-    // Note: finalLightView's origin is now at lightSpaceCenter, so re-express
-    // the ortho bounds relative to that origin rather than the original AABB.
-    float halfWidth  = (lightMax.x - lightMin.x) * 0.5f;
-    float halfHeight = (lightMax.y - lightMin.y) * 0.5f;
-    float farDist    = (lightMax.z - lightMin.z);
-    glm::mat4 lightProj = glm::ortho(-halfWidth, halfWidth,
-                                      -halfHeight, halfHeight,
-                                      0.0f, farDist);
+    glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos - sunDir, worldUp);
+
+    float farDist = radius * 2.0f + nearExtension;
+    glm::mat4 lightProj = glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist);
 
     return lightProj * finalLightView;
 }
