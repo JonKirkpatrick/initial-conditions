@@ -284,6 +284,7 @@ void Scene_IC_Camp::sGUI()
             ImGui::Checkbox("Draw Debug", &m_drawCollision);
             ImGui::Checkbox("Draw Shadows", &m_debugShowShadowMap);
             ImGui::Checkbox("Disable Texel Snap", &m_debugDisableTexelSnap);
+            ImGui::Checkbox("Show Cascade Colors", &m_debugShowCascadeColors);
             sf::Vector2i mousePos = sf::Mouse::getPosition(m_game.window());
             sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
 
@@ -423,7 +424,7 @@ void Scene_IC_Camp::sRender() {
     runTerrainPass(rawWorldToCamMatrix);
     renderOrbCreature();
     renderSky(worldToCamMatrix);
-    runShadowPass();   // <-- new: populates m_shadowDepthTex + m_lightViewProj
+    runShadowPass();
 
     window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
@@ -431,7 +432,7 @@ void Scene_IC_Camp::sRender() {
     window.setActive(true);
 
     if (m_debugShowShadowMap) {
-        blitToScreen(m_shadowDepthTex);   // <-- sub-step 1a: eyeball the raw depth
+        
     } else {
         deferredLighting();
     }
@@ -1231,55 +1232,58 @@ void Scene_IC_Camp::initializeMainFBO() {
 void Scene_IC_Camp::initializeShadowMap(unsigned int size) {
     m_shadowMapSize = size;
 
-    glGenTextures(1, &m_shadowDepthTex);
-    glBindTexture(GL_TEXTURE_2D, m_shadowDepthTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size, size,
-                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    // Anything sampled outside the frustum reads as "far" (1.0) => unshadowed.
+    glGenTextures(1, &m_shadowDepthTexArray);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F,
+                 size, size, NUM_CASCADES, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     float borderColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+    glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, borderColor);
 
     glGenFramebuffers(1, &m_shadowFBO);
     glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                            GL_TEXTURE_2D, m_shadowDepthTex, 0);
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
-
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (status != GL_FRAMEBUFFER_COMPLETE)
-        std::cerr << "Shadow FBO incomplete! Status: 0x" << std::hex << status << std::endl;
-
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void Scene_IC_Camp::destroyShadowMap() {
     if (m_shadowFBO) {
         glDeleteFramebuffers(1, &m_shadowFBO);
-        glDeleteTextures(1, &m_shadowDepthTex);
+        glDeleteTextures(1, &m_shadowDepthTexArray);
         m_shadowFBO = 0;
-        m_shadowDepthTex = 0;
+        m_shadowDepthTexArray = 0;
     }
 }
 
-glm::mat4 Scene_IC_Camp::computeLightViewProj() const {
+void Scene_IC_Camp::computeCascadeSplits(float camNear, float camFar) {
+    for (int i = 0; i < NUM_CASCADES; ++i) {
+        float p = float(i + 1) / float(NUM_CASCADES);
+        float logSplit    = camNear * std::pow(camFar / camNear, p);
+        float uniformSplit = camNear + (camFar - camNear) * p;
+        m_cascadeSplits[i] = m_cascadeSplitLambda * logSplit
+                           + (1.0f - m_cascadeSplitLambda) * uniformSplit;
+    }
+}
+
+glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float splitFar) const {
     glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection));
     glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
                                                       : glm::vec3(0.f, 1.f, 0.f);
-
     glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), -sunDir, worldUp);
 
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& camData      = m_entityManager.getCamera(m_camera);
 
-    CCamera shadowCamData = camData;
-    shadowCamData.farPlane = std::min(camData.farPlane, m_shadowMaxDistance);
+    // Build a sub-frustum covering only [splitNear, splitFar] of the camera's view.
+    CCamera subFrustumCamData = camData;
+    subFrustumCamData.nearPlane = splitNear;
+    subFrustumCamData.farPlane  = splitFar;
 
-    auto vp = Camera::getVPMatrix(camTransform, shadowCamData);
+    auto vp = Camera::getVPMatrix(camTransform, subFrustumCamData);
     glm::mat4 camVP    = glm::make_mat4(vp.data());
     glm::mat4 camInvVP = glm::inverse(camVP);
 
@@ -1297,94 +1301,82 @@ glm::mat4 Scene_IC_Camp::computeLightViewProj() const {
     }
     centroid /= 8.0f;
 
-    // Phase 3: bounding SPHERE radius, not a light-space AABB. This is constant
-    // as the camera rotates (depends only on FOV/near/far, not orientation),
-    // which is what makes the snapping below actually hold still.
     float radius = 0.0f;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 8; ++i)
         radius = std::max(radius, glm::length(worldCorners[i] - centroid));
-    }
     radius += m_shadowFrustumPadding;
 
-    // Where the box should sit, in light space, before snapping.
     glm::vec3 centroidLS = glm::vec3(lightView * glm::vec4(centroid, 1.0f));
 
-    // Phase 3: snap X/Y (the axes perpendicular to the light direction) to
-    // texel-sized increments. Because `radius` is fixed frame-to-frame,
-    // worldUnitsPerTexel is too — that's the whole trick.
     float worldUnitsPerTexel = (radius * 2.0f) / float(m_shadowMapSize);
-    if (!m_debugDisableTexelSnap) {
-        centroidLS.x = std::floor(centroidLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
-        centroidLS.y = std::floor(centroidLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
-    }
+    centroidLS.x = std::floor(centroidLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
+    centroidLS.y = std::floor(centroidLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
 
-    // Z: same convention you discovered in Phase 2 — in this engine's view space,
-    // +Z is toward the light, so push the eye out that direction from the centroid.
     float nearExtension = m_shadowFrustumPadding * 20.0f;
     centroidLS.z += radius + nearExtension;
 
     glm::mat4 lightViewInv = glm::inverse(lightView);
     glm::vec3 eyeWorldPos  = glm::vec3(lightViewInv * glm::vec4(centroidLS, 1.0f));
-
     glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos - sunDir, worldUp);
 
     float farDist = radius * 2.0f + nearExtension;
-    glm::mat4 lightProj = glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist);
-
-    return lightProj * finalLightView;
+    return glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist) * finalLightView;
 }
 
 void Scene_IC_Camp::runShadowPass() {
-    m_lightViewProj = computeLightViewProj();
+    auto& camData = m_entityManager.getCamera(m_camera);
+    float clampedFar = std::min(camData.farPlane, m_shadowMaxDistance);
+    computeCascadeSplits(camData.nearPlane, clampedFar);
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFBO);
     glViewport(0, 0, m_shadowMapSize, m_shadowMapSize);
-    glClear(GL_DEPTH_BUFFER_BIT);
-
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 
-    // Optional but recommended: cull front faces here to reduce acne
-    // (peter-panning appears at grazing angles instead; tune in Phase 7).
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_FRONT);
+    float splitNear = camData.nearPlane;
 
-    glUseProgram(m_shadowProgram);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-    glUniform1i(glGetUniformLocation(m_shadowProgram, "u_topoTopdownTex"), 0);
-    glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldMin"),
-                m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldSize"),
-                m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(m_shadowProgram, "u_heightMax"), m_topdownMaxHeight);
-    glUniformMatrix4fv(glGetUniformLocation(m_shadowProgram, "u_lightViewProj"),
-                       1, GL_FALSE, &m_lightViewProj[0][0]);
+    for (int cascade = 0; cascade < NUM_CASCADES; ++cascade) {
+        float splitFar = m_cascadeSplits[cascade];
+        m_lightViewProjCascades[cascade] = computeLightViewProjForRange(splitNear, splitFar);
+        splitNear = splitFar; // next cascade picks up where this one left off
 
-    glBindVertexArray(m_gridVAO);
-    glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                   m_shadowDepthTexArray, 0, cascade);
+        glClear(GL_DEPTH_BUFFER_BIT);
 
-    // =================================================================
-    // PASS 1B: RENDER ORBS INTO THE SAME SHADOW DEPTH BUFFER
-    // =================================================================
-    glDisable(GL_CULL_FACE);
-    glUseProgram(m_orbShadowProgram);
+        // --- terrain ---
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        glUseProgram(m_shadowProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+        glUniform1i(glGetUniformLocation(m_shadowProgram, "u_topoTopdownTex"), 0);
+        glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldMin"),
+                    m_topdownWorldMin.x, m_topdownWorldMin.y);
+        glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldSize"),
+                    m_topdownWorldSize.x, m_topdownWorldSize.y);
+        glUniform1f(glGetUniformLocation(m_shadowProgram, "u_heightMax"), m_topdownMaxHeight);
+        glUniformMatrix4fv(glGetUniformLocation(m_shadowProgram, "u_lightViewProj"),
+                           1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
+        glBindVertexArray(m_gridVAO);
+        glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
 
-    glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
+        // --- orbs ---
+        glDisable(GL_CULL_FACE);
+        glUseProgram(m_orbShadowProgram);
+        glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
+        glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
+                           1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
+        glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"),
+                    1, glm::value_ptr(sunDir));
+        m_orbSSBO.bind(0);
+        glBindVertexArray(m_cubeVAO);
+        glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
+        glBindVertexArray(0);
+    }
 
-    glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
-                    1, GL_FALSE, &m_lightViewProj[0][0]);
-    glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"), 
-                1, glm::value_ptr(sunDir));
-
-    m_orbSSBO.bind(0); 
-
-    // Draw using your existing instanced cube configuration
-    glBindVertexArray(m_cubeVAO);
-    glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
-    glBindVertexArray(0);
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -1731,10 +1723,12 @@ void Scene_IC_Camp::deferredLighting()
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gDepth"), 4);
 
     glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, m_shadowDepthTex);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_shadowMap"), 5);
     glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_lightViewProj"),
-                        1, GL_FALSE, &m_lightViewProj[0][0]);
+                        NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
+    glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_cascadeSplitDepths"), NUM_CASCADES, m_cascadeSplits);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_debugShowCascadeColors"), m_debugShowCascadeColors ? 1 : 0);
 
     // =========================================================================
     // Bind SSBOs

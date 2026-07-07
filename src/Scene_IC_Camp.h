@@ -130,26 +130,26 @@ protected:
     // Rendering — Shadow Map (CSM Phase 1: single fixed-size, camera-centered box)
     // =========================================================================
 
-    GLuint              m_shadowFBO             = 0;
-    GLuint              m_shadowDepthTex        = 0;
-    unsigned int        m_shadowMapSize         = 2048;
+    GLuint                  m_shadowFBO             = 0;
+    GLuint                  m_shadowDepthTexArray   = 0;
+    unsigned int            m_shadowMapSize         = 2048;
+    static constexpr int    NUM_CASCADES            = 4;
 
-    // How far the light-space ortho box extends from its center, in world units.
-    // Phase 1 only: this box is just recentered on the camera each frame,
-    // not fit to the camera frustum (that's Phase 2).
-    float               m_shadowBoxHalfExtent   = 150.0f;
-    float               m_shadowNearPlane       = 1.0f;
-    float               m_shadowFarPlane        = 500.0f;
-    float               m_shadowFrustumPadding  = 5.0f;
-    float               m_shadowMaxDistance     = 300.0f;
+    float                   m_cascadeSplits[NUM_CASCADES] = {};
+    glm::mat4               m_lightViewProjCascades[NUM_CASCADES] = {};
+    float                   m_cascadeSplitLambda    = 0.5f;
+    float                   m_shadowBoxHalfExtent   = 150.0f;
+    float                   m_shadowNearPlane       = 1.0f;
+    float                   m_shadowFarPlane        = 500.0f;
+    float                   m_shadowFrustumPadding  = 5.0f;
+    float                   m_shadowMaxDistance     = 300.0f;
 
-    GLuint              m_shadowProgram         = Assets::Instance().getGLProgram("ShadowDepth");
-    GLuint              m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
-    glm::mat4           m_lightViewProj         = glm::mat4(1.0f);
+    GLuint                  m_shadowProgram         = Assets::Instance().getGLProgram("ShadowDepth");
+    GLuint                  m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
 
-    // Debug: skip lighting entirely and blit the raw shadow depth to the screen
-    bool                m_debugShowShadowMap     = false;
-    bool                m_debugDisableTexelSnap  = false;
+    bool                    m_debugShowShadowMap     = false;
+    bool                    m_debugDisableTexelSnap  = false;
+    bool                    m_debugShowCascadeColors = false;
 
     // =========================================================================
     // Rendering — Sky Cubemap
@@ -251,7 +251,8 @@ protected:
     void updateMoonPosition();
     void updateBob(SoAEntityHandle e, float dt, float horizSpeed);
     void updateOrbBobbing(SoAEntityHandle e, float dt);
-    glm::mat4 computeLightViewProj() const;
+    glm::mat4 computeLightViewProjForRange(float splitNear, float splitFar) const;
+    void computeCascadeSplits(float camNear, float camFar);
 
     // =========================================================================
     // Movement and Physics

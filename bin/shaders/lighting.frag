@@ -59,8 +59,21 @@ uniform float u_headlampConeCos;
 uniform float u_headlampEnabled;
 
 // Shadow Uniforms
-uniform sampler2D u_shadowMap;
-uniform mat4      u_lightViewProj;
+uniform sampler2DArray u_shadowMap;
+uniform mat4      u_lightViewProj[4];
+uniform float     u_cascadeSplitDepths[4];
+uniform bool      u_debugShowCascadeColors;
+
+const vec3 cascadeDebugColors[4] = vec3[](
+    vec3(1.0, 0.3, 0.3), vec3(0.3, 1.0, 0.3), vec3(0.3, 0.3, 1.0), vec3(1.0, 1.0, 0.3)
+);
+
+int selectCascade(vec3 worldPos) {
+    float viewDepth = dot(worldPos - u_cameraPos, u_cameraForward);
+    for (int i = 0; i < 4; ++i)
+        if (viewDepth < u_cascadeSplitDepths[i]) return i;
+    return 3;
+}
 
 vec3 reconstructWorldPos(vec2 uv, float rawDepth) {
     vec4 ndc = vec4(
@@ -75,21 +88,19 @@ vec3 reconstructWorldPos(vec2 uv, float rawDepth) {
     return worldPosPadded.xyz / worldPosPadded.w;
 }
 
-float computeShadow(vec3 worldPos) {
-    vec4 lightClip = u_lightViewProj * vec4(worldPos, 1.0);
-    vec3 lightNdc = lightClip.xyz / lightClip.w; // w==1 for ortho, but keep this for later cascade work
-    vec3 shadowUV = lightNdc * 0.5 + 0.5;
-
-    // shadowUV.y = 1 - shadowUV.y;
+float computeShadow(vec3 worldPos, int cascade) {
+    vec4 lightClip = u_lightViewProj[cascade] * vec4(worldPos, 1.0);
+    vec3 lightNdc  = lightClip.xyz / lightClip.w;
+    vec3 shadowUV  = lightNdc * 0.5 + 0.5;
 
     if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
         shadowUV.y < 0.0 || shadowUV.y > 1.0 ||
         shadowUV.z < 0.0 || shadowUV.z > 1.0) {
-        return 1.0; // outside the light frustum: fully lit
+        return 1.0;
     }
 
-    float bias = 0.0015; // start here; tune once geometry is confirmed correct
-    float shadowMapDepth = texture(u_shadowMap, shadowUV.xy).r;
+    float bias = 0.0015;
+    float shadowMapDepth = texture(u_shadowMap, vec3(shadowUV.xy, float(cascade))).r;
     return (shadowUV.z - bias > shadowMapDepth) ? 0.0 : 1.0;
 }
 
@@ -126,7 +137,13 @@ void main()
     vec3 ambientLight  = vec3(0.06) * albedo * mat.albedoTint.rgb;
     vec3 diffuseLight  = vec3(0.0);
     vec3 specularLight = vec3(0.0);
-    float shadowContribution = computeShadow(worldPos);
+    int cascade = selectCascade(worldPos);
+    float shadowContribution = computeShadow(worldPos, cascade);
+
+    if (u_debugShowCascadeColors) {
+        FragColor = vec4(cascadeDebugColors[cascade] * (0.4 + 0.6 * shadowContribution), 1.0);
+        return;
+    }
 
     // 1. ==================== SUN DIRECTIONAL LIGHT ====================
     vec3 sunDirection  = normalize(u_sunDir);
