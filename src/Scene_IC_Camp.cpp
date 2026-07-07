@@ -1267,21 +1267,91 @@ void Scene_IC_Camp::destroyShadowMap() {
 
 glm::mat4 Scene_IC_Camp::computeLightViewProj() const {
     glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection)); // points TOWARD the sun
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    glm::vec3 center = toGLMVec3(camTransform.pos); // Phase 1: box follows the camera, not frustum-fit
-
-    // Guard against sunDir being (near-)parallel to world up, which would
-    // degenerate glm::lookAt's up vector.
     glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
                                                       : glm::vec3(0.f, 1.f, 0.f);
 
-    glm::vec3 lightPos = center + sunDir * (m_shadowFarPlane * 0.5f);
-    glm::mat4 lightView = glm::lookAt(lightPos, center, worldUp);
+    // --- Step 1: build a light VIEW matrix from orientation only ---
+    // Position doesn't matter yet — we just need the light's basis to
+    // transform frustum corners into light space. Looking from the origin
+    // is fine for this purpose.
+    glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), -sunDir, worldUp);
 
-    float he = m_shadowBoxHalfExtent;
-    glm::mat4 lightProj = glm::ortho(-he, he, -he, he, m_shadowNearPlane, m_shadowFarPlane);
+    // --- Step 2: get the camera's frustum corners in world space ---
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& camData      = m_entityManager.getCamera(m_camera);
 
-    return lightProj * lightView;
+    // Clamp the far plane used for shadow purposes — no need to cover the
+    // camera's true draw distance if that's much larger than where shadows
+    // are actually visible/meaningful.
+    CCamera shadowCamData = camData;
+    shadowCamData.farPlane = std::min(camData.farPlane, m_shadowMaxDistance);
+
+    auto vp = Camera::getVPMatrix(camTransform, shadowCamData);
+    glm::mat4 camVP = glm::make_mat4(vp.data());
+    glm::mat4 camInvVP = glm::inverse(camVP);
+
+    static const glm::vec3 ndcCorners[8] = {
+        {-1,-1,-1}, { 1,-1,-1}, { 1, 1,-1}, {-1, 1,-1},
+        {-1,-1, 1}, { 1,-1, 1}, { 1, 1, 1}, {-1, 1, 1},
+    };
+
+    glm::vec3 worldCorners[8];
+    for (int i = 0; i < 8; ++i) {
+        glm::vec4 p = camInvVP * glm::vec4(ndcCorners[i], 1.0f);
+        worldCorners[i] = glm::vec3(p) / p.w;
+    }
+
+    // --- Step 3: transform corners into light space, find their AABB ---
+    glm::vec3 lightMin( std::numeric_limits<float>::max());
+    glm::vec3 lightMax(-std::numeric_limits<float>::max());
+
+    for (int i = 0; i < 8; ++i) {
+        glm::vec3 lp = glm::vec3(lightView * glm::vec4(worldCorners[i], 1.0f));
+        lightMin = glm::min(lightMin, lp);
+        lightMax = glm::max(lightMax, lp);
+    }
+
+    // Pad the horizontal/vertical extents a bit so casters just outside the
+    // camera frustum (but still visible in the shadow direction) aren't clipped.
+    lightMin.x -= m_shadowFrustumPadding;
+    lightMax.x += m_shadowFrustumPadding;
+    lightMin.y -= m_shadowFrustumPadding;
+    lightMax.y += m_shadowFrustumPadding;
+
+    // In this engine's view-space convention, +Z is toward the light; lightMax is the near plane. 
+
+    // --- Step 4: extend the near side generously ---
+    // Casters can sit well outside the camera frustum (behind/beside it, or
+    // above it) and still need to throw a shadow into the visible box.
+    // Pulling the near plane back is cheap insurance against missing casters;
+    // it costs you nothing but a bit of depth-precision headroom.
+    float nearExtension = m_shadowFrustumPadding * 20.0f;
+    lightMax.z += nearExtension;
+
+    // --- Step 5: build the actual view/proj now that we know the extents ---
+    // Recenter the eye at the AABB center, at the near-z we just computed,
+    // so the ortho matrix's near/far are simple, small, precision-friendly numbers.
+    glm::vec3 lightSpaceCenter(
+        (lightMin.x + lightMax.x) * 0.5f,
+        (lightMin.y + lightMax.y) * 0.5f,
+        lightMax.z
+    );
+
+    // Transform that center back into world space to get the eye position.
+    glm::mat4 lightViewInv = glm::inverse(lightView);
+    glm::vec3 eyeWorldPos = glm::vec3(lightViewInv * glm::vec4(lightSpaceCenter, 1.0f));
+
+    glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos + sunDir * -1.0f, worldUp);
+    // Note: finalLightView's origin is now at lightSpaceCenter, so re-express
+    // the ortho bounds relative to that origin rather than the original AABB.
+    float halfWidth  = (lightMax.x - lightMin.x) * 0.5f;
+    float halfHeight = (lightMax.y - lightMin.y) * 0.5f;
+    float farDist    = (lightMax.z - lightMin.z);
+    glm::mat4 lightProj = glm::ortho(-halfWidth, halfWidth,
+                                      -halfHeight, halfHeight,
+                                      0.0f, farDist);
+
+    return lightProj * finalLightView;
 }
 
 void Scene_IC_Camp::runShadowPass() {

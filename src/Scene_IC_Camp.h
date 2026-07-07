@@ -140,6 +140,8 @@ protected:
     float               m_shadowBoxHalfExtent   = 150.0f;
     float               m_shadowNearPlane       = 1.0f;
     float               m_shadowFarPlane        = 500.0f;
+    float               m_shadowFrustumPadding  = 5.0f;
+    float               m_shadowMaxDistance     = 300.0f;
 
     GLuint              m_shadowProgram         = Assets::Instance().getGLProgram("ShadowDepth");
     GLuint              m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
