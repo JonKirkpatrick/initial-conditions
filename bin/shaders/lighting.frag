@@ -50,6 +50,12 @@ uniform mat4 u_invViewProj;
 uniform vec3 u_cameraPos;
 uniform vec3 u_cameraForward;
 
+// Terrain Reconstruction
+uniform sampler2D u_topoTopdownTex;
+uniform vec2      u_topdownWorldMin;
+uniform vec2      u_topdownWorldSize;
+uniform float     u_heightMax;
+
 // Lighting Uniforms
 uniform vec3 u_sunDir;
 uniform vec4 u_sunColor;
@@ -59,9 +65,11 @@ uniform float u_headlampConeCos;
 uniform float u_headlampEnabled;
 
 // Shadow Uniforms
-uniform sampler2DArray u_shadowMap;
+uniform sampler2DArrayShadow u_shadowMap;
 uniform mat4      u_lightViewProj[4];
 uniform float     u_cascadeSplitDepths[4];
+uniform float     u_lightDepthRange[4];
+uniform float     u_texelWorldSize[4];
 uniform bool      u_debugShowCascadeColors;
 
 const vec3 cascadeDebugColors[4] = vec3[](
@@ -88,8 +96,45 @@ vec3 reconstructWorldPos(vec2 uv, float rawDepth) {
     return worldPosPadded.xyz / worldPosPadded.w;
 }
 
-float computeShadow(vec3 worldPos, int cascade) {
-    vec4 lightClip = u_lightViewProj[cascade] * vec4(worldPos, 1.0);
+float decodeHeightFrag(vec2 worldXZ) {
+    vec2 uv = (worldXZ - u_topdownWorldMin) / u_topdownWorldSize;
+
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+        return -1e6; // outside the terrain's domain: treat as "nothing there to occlude"
+
+    vec2 s = vec2(uv.x, 1.0 - uv.y);
+    vec4 c = texture(u_topoTopdownTex, s);
+    vec3 bytes = floor(c.rgb * 255.0 + 0.5);
+    return dot(bytes, vec3(65536.0, 256.0, 1.0)) * (u_heightMax / 16777215.0);
+}
+
+float computeHeightmapShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {
+    if (sunDir.y <= -0.2) return 0.0;
+
+    float NdotL = max(dot(normal, sunDir), 0.0);
+    float biasTexels = mix(2.5, 1.25, NdotL);
+    float worldBias  = biasTexels * u_texelWorldSize[cascade];
+
+    const int   STEPS    = 48;
+    const float MAX_DIST = 2500.0;
+    float stepSize = MAX_DIST / float(STEPS);
+    float t = worldBias + stepSize * 0.5;
+
+    for (int i = 0; i < STEPS; ++i) {
+        vec3 samplePos = worldPos + sunDir * t;
+        if (decodeHeightFrag(samplePos.xz) > samplePos.y) return 0.0;
+        t += stepSize;
+    }
+    return 1.0;
+}
+
+float computeShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {
+    float NdotL = max(dot(normal, sunDir), 0.0);
+
+    float normalOffsetTexels = mix(1.5, 0.5, NdotL);
+    vec3 offsetPos = worldPos + normal * (normalOffsetTexels * u_texelWorldSize[cascade]);
+
+    vec4 lightClip = u_lightViewProj[cascade] * vec4(offsetPos, 1.0);
     vec3 lightNdc  = lightClip.xyz / lightClip.w;
     vec3 shadowUV  = lightNdc * 0.5 + 0.5;
 
@@ -99,9 +144,20 @@ float computeShadow(vec3 worldPos, int cascade) {
         return 1.0;
     }
 
-    float bias = 0.0015;
-    float shadowMapDepth = texture(u_shadowMap, vec3(shadowUV.xy, float(cascade))).r;
-    return (shadowUV.z - bias > shadowMapDepth) ? 0.0 : 1.0;
+    float bias = 0.0002;
+
+    float texelSize = 1.0 / float(textureSize(u_shadowMap, 0).x);
+    float sum = 0.0;
+    int K = max(1, 3 - cascade);
+    int taps = 0;
+    for (int x = -K; x <= K; ++x) {
+        for (int y = -K; y <= K; ++y) {
+            vec2 offset = vec2(x, y) * texelSize;
+            sum += texture(u_shadowMap, vec4(shadowUV.xy + offset, float(cascade), shadowUV.z - bias));
+            taps++;
+        }
+    }
+    return sum / float(taps);
 }
 
 void main()
@@ -114,7 +170,7 @@ void main()
 
     // Sample texture data
     vec4 albedoSample  = texture(u_gAlbedo, v_uv);
-    vec3 normalSample  = texture(u_gNormal, v_uv).xyz; // Raw world normal
+    vec3 normalSample  = texture(u_gNormal, v_uv).xyz;
     vec4 indicesSample = texture(u_gIndices, v_uv);
     vec4 retroSample   = texture(u_gRetro, v_uv);
 
@@ -138,16 +194,27 @@ void main()
     vec3 diffuseLight  = vec3(0.0);
     vec3 specularLight = vec3(0.0);
     int cascade = selectCascade(worldPos);
-    float shadowContribution = computeShadow(worldPos, cascade);
+
+    // 1. ==================== SUN DIRECTIONAL LIGHT ====================
+    vec3 sunDirection  = normalize(u_sunDir);
+    float sunLambert   = max(dot(normal, sunDirection), 0.0);
+
+    float viewDepth = dot(worldPos - u_cameraPos, u_cameraForward);
+    float shadowContribution;
+
+    if (viewDepth < u_cascadeSplitDepths[3]) {
+        int cascade = selectCascade(worldPos);
+        shadowContribution = computeShadow(worldPos, normal, sunDirection, cascade);
+    } else {
+        shadowContribution = computeHeightmapShadow(worldPos, normal, sunDirection, cascade);
+    }
+
+    shadowContribution = mix(0.15, 1.0, shadowContribution);
 
     if (u_debugShowCascadeColors) {
         FragColor = vec4(cascadeDebugColors[cascade] * (0.4 + 0.6 * shadowContribution), 1.0);
         return;
     }
-
-    // 1. ==================== SUN DIRECTIONAL LIGHT ====================
-    vec3 sunDirection  = normalize(u_sunDir);
-    float sunLambert   = max(dot(normal, sunDirection), 0.0);
     diffuseLight      += u_sunColor.rgb * sunLambert * albedo * mat.albedoTint.rgb;
     diffuseLight      *= shadowContribution;
 

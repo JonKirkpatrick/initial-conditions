@@ -132,17 +132,16 @@ protected:
 
     GLuint                  m_shadowFBO             = 0;
     GLuint                  m_shadowDepthTexArray   = 0;
-    unsigned int            m_shadowMapSize         = 2048;
+    unsigned int            m_shadowMapSize         = 4096;
     static constexpr int    NUM_CASCADES            = 4;
 
     float                   m_cascadeSplits[NUM_CASCADES] = {};
     glm::mat4               m_lightViewProjCascades[NUM_CASCADES] = {};
-    float                   m_cascadeSplitLambda    = 0.5f;
-    float                   m_shadowBoxHalfExtent   = 150.0f;
-    float                   m_shadowNearPlane       = 1.0f;
-    float                   m_shadowFarPlane        = 500.0f;
-    float                   m_shadowFrustumPadding  = 5.0f;
-    float                   m_shadowMaxDistance     = 300.0f;
+    float                   m_lightDepthRange[NUM_CASCADES] = {};
+    float                   m_texelWorldSize[NUM_CASCADES] = {};
+    float                   m_cascadeSplitLambda    = 0.5f; // 0 = uniform, 1 = logarithmic
+    float                   m_shadowFrustumPadding  = 100.0f;
+    float                   m_shadowMaxDistance     = 500.0f;
 
     GLuint                  m_shadowProgram         = Assets::Instance().getGLProgram("ShadowDepth");
     GLuint                  m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
@@ -251,7 +250,7 @@ protected:
     void updateMoonPosition();
     void updateBob(SoAEntityHandle e, float dt, float horizSpeed);
     void updateOrbBobbing(SoAEntityHandle e, float dt);
-    glm::mat4 computeLightViewProjForRange(float splitNear, float splitFar) const;
+    glm::mat4 computeLightViewProjForRange(float splitNear, float splitFar, float& lightDepthRange, float& texelWorldSize) const;
     void computeCascadeSplits(float camNear, float camFar);
 
     // =========================================================================

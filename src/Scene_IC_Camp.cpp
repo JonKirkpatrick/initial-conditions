@@ -249,10 +249,12 @@ void Scene_IC_Camp::onEnter() {
 
 void Scene_IC_Camp::onExit() {
     destroyGBuffer();
+    destroyShadowMap();
 }
 
 void Scene_IC_Camp::onEnd() {
     destroyGBuffer();
+    destroyShadowMap();
 }
 
 HUD* Scene_IC_Camp::getHUD() const
@@ -1236,8 +1238,19 @@ void Scene_IC_Camp::initializeShadowMap(unsigned int size) {
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F,
                  size, size, NUM_CASCADES, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // --- 1. CHANGE TO LINEAR FILTERS ---
+    // Hardware PCF requires linear filtering parameters so the GPU knows it 
+    // is allowed to interpolate between neighboring depth comparison results.
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // --- 2. ENABLE SHADOW COMPARISON MODE ---
+    // This tells the texture unit to treat this texture as a shadow map, changing
+    // its behavior from returning raw depth to returning a PCF-blended visibility factor.
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     float borderColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -1269,7 +1282,7 @@ void Scene_IC_Camp::computeCascadeSplits(float camNear, float camFar) {
     }
 }
 
-glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float splitFar) const {
+glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float splitFar, float& lightDepthRange, float& texelWorldSize) const {
     glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection));
     glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
                                                       : glm::vec3(0.f, 1.f, 0.f);
@@ -1288,7 +1301,7 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float spl
     glm::mat4 camInvVP = glm::inverse(camVP);
 
     static const glm::vec3 ndcCorners[8] = {
-        {-1,-1,-1}, { 1,-1,-1}, { 1, 1,-1}, {-1, 1,-1},
+        {-1,-1, 0}, { 1,-1, 0}, { 1, 1, 0}, {-1, 1, 0},
         {-1,-1, 1}, { 1,-1, 1}, { 1, 1, 1}, {-1, 1, 1},
     };
 
@@ -1306,9 +1319,10 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float spl
         radius = std::max(radius, glm::length(worldCorners[i] - centroid));
     radius += m_shadowFrustumPadding;
 
-    glm::vec3 centroidLS = glm::vec3(lightView * glm::vec4(centroid, 1.0f));
-
     float worldUnitsPerTexel = (radius * 2.0f) / float(m_shadowMapSize);
+    texelWorldSize = worldUnitsPerTexel; // NEW: stash this before nearExtension distorts anything
+
+    glm::vec3 centroidLS = glm::vec3(lightView * glm::vec4(centroid, 1.0f));
     centroidLS.x = std::floor(centroidLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
     centroidLS.y = std::floor(centroidLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
 
@@ -1320,6 +1334,7 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float spl
     glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos - sunDir, worldUp);
 
     float farDist = radius * 2.0f + nearExtension;
+    lightDepthRange = farDist;
     return glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist) * finalLightView;
 }
 
@@ -1338,7 +1353,7 @@ void Scene_IC_Camp::runShadowPass() {
 
     for (int cascade = 0; cascade < NUM_CASCADES; ++cascade) {
         float splitFar = m_cascadeSplits[cascade];
-        m_lightViewProjCascades[cascade] = computeLightViewProjForRange(splitNear, splitFar);
+        m_lightViewProjCascades[cascade] = computeLightViewProjForRange(splitNear, splitFar, m_lightDepthRange[cascade], m_texelWorldSize[cascade]);
         splitNear = splitFar; // next cascade picks up where this one left off
 
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
@@ -1346,8 +1361,7 @@ void Scene_IC_Camp::runShadowPass() {
         glClear(GL_DEPTH_BUFFER_BIT);
 
         // --- terrain ---
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_FRONT);
+        glDisable(GL_CULL_FACE);
         glUseProgram(m_shadowProgram);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
@@ -1654,7 +1668,7 @@ void Scene_IC_Camp::renderOrbCreature()
 
     glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunDir"), 1, glm::value_ptr(sunDir));
     glUniform4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunColor"), 1, glm::value_ptr(sunColor));
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampIntensity"), 1.0f);
+    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampIntensity"), 2.0f);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampRange"),     200.0f);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampConeCos"),   1.0f);
     glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampEnabled"),
@@ -1727,6 +1741,8 @@ void Scene_IC_Camp::deferredLighting()
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_shadowMap"), 5);
     glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_lightViewProj"),
                         NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
+    glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_lightDepthRange"), NUM_CASCADES, m_lightDepthRange);
+    glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_texelWorldSize"), NUM_CASCADES, m_texelWorldSize);
     glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_cascadeSplitDepths"), NUM_CASCADES, m_cascadeSplits);
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_debugShowCascadeColors"), m_debugShowCascadeColors ? 1 : 0);
 
@@ -1766,8 +1782,21 @@ void Scene_IC_Camp::deferredLighting()
     // Headlamp Configuration (matches your orb configuration schema)
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampIntensity"), 2.0f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampRange"),     200.0f);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampConeCos"),   0.95f);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampConeCos"),   1.0f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampEnabled"),   shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+
+    // =========================================================================
+    // Bind Heightmap and Topography Textures
+    // =========================================================================
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_topoTopdownTex"), 6);
+    glUniform2f(glGetUniformLocation(m_lightingProgram, "u_topdownWorldMin"),
+                m_topdownWorldMin.x, m_topdownWorldMin.y);
+    glUniform2f(glGetUniformLocation(m_lightingProgram, "u_topdownWorldSize"),
+                m_topdownWorldSize.x, m_topdownWorldSize.y);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_heightMax"), m_topdownMaxHeight);
+
 
     // =========================================================================
     // Draw
@@ -1779,7 +1808,7 @@ void Scene_IC_Camp::deferredLighting()
     glBindVertexArray(0);
     glUseProgram(0);
     
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
         glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
