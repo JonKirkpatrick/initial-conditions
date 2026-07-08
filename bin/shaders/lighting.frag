@@ -131,7 +131,7 @@ float computeHeightmapShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascad
 float computeShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {
     float NdotL = max(dot(normal, sunDir), 0.0);
 
-    float normalOffsetTexels = mix(1.5, 0.5, NdotL);
+    float normalOffsetTexels = mix(1.5, 1.0, NdotL);
     vec3 offsetPos = worldPos + normal * (normalOffsetTexels * u_texelWorldSize[cascade]);
 
     vec4 lightClip = u_lightViewProj[cascade] * vec4(offsetPos, 1.0);
@@ -144,7 +144,7 @@ float computeShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {
         return 1.0;
     }
 
-    float bias = 0.0002;
+    float bias = 0.0005;
 
     float texelSize = 1.0 / float(textureSize(u_shadowMap, 0).x);
     float sum = 0.0;
@@ -190,14 +190,32 @@ void main()
     vec3 viewDir  = normalize(u_cameraPos - worldPos);
 
     // Initialize color accumulator with a low ambient fallback
-    vec3 ambientLight  = vec3(0.06) * albedo * mat.albedoTint.rgb;
+    // Calculate sun elevation for atmosphere blending
+    float sunElevation = asin(clamp(normalize(u_sunDir).y, -1.0, 1.0)) * 180.0 / 3.14159265;
+
+    // Replicate your sky blend factors to drive ambient ground colors
+    float dayFactor      = smoothstep(-2.0, 12.0, sunElevation);
+    float nightFactor    = smoothstep(-8.0, -18.0, sunElevation);
+    float twilightFactor = 1.0 - dayFactor - nightFactor;
+    twilightFactor       = clamp(twilightFactor, 0.0, 1.0);
+
+    // Define ambient colors matching your sky's feel
+    vec3 ambientDay      = vec3(0.08, 0.12, 0.20); // Cool daylight shadows
+    vec3 ambientTwilight = vec3(0.22, 0.10, 0.15); // Deep magenta/warm horizon scattering
+    vec3 ambientNight    = vec3(0.005, 0.005, 0.01); // Dark night sky fallback
+
+    // Blend the ambient color dynamically
+    vec3 dynamicAmbient = ambientDay * dayFactor + ambientTwilight * twilightFactor + ambientNight * nightFactor;
+
+    // Initialize color accumulator with the new dynamic sky-ambient
+    vec3 ambientLight  = dynamicAmbient * albedo * mat.albedoTint.rgb;
     vec3 diffuseLight  = vec3(0.0);
     vec3 specularLight = vec3(0.0);
     int cascade = selectCascade(worldPos);
 
     // 1. ==================== SUN DIRECTIONAL LIGHT ====================
     vec3 sunDirection  = normalize(u_sunDir);
-    float sunLambert   = max(dot(normal, sunDirection), 0.0);
+    float sunLambert   = max(dot(normal, sunDirection), -0.5);
 
     float viewDepth = dot(worldPos - u_cameraPos, u_cameraForward);
     float shadowContribution;

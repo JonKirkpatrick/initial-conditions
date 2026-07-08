@@ -1381,6 +1381,7 @@ void Scene_IC_Camp::runShadowPass() {
         glDisable(GL_CULL_FACE);
         glUseProgram(m_orbShadowProgram);
         glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
+        sunDir = glm::normalize(sunDir + glm::vec3(0.0f,0.342020143f, 0.0f));
         glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
         glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"),
