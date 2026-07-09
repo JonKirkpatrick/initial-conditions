@@ -9,7 +9,7 @@ SRC_DIR := ./src
 
 # linux compiler / linker flags
 ifeq ($(OS), Linux)
-    CXX_FLAGS := -O3 -std=c++23 -Wno-unused-result -Wno-deprecated-declarations -DGLEW_STATIC
+    CXX_FLAGS := -O3 -g -std=c++23 -Wno-unused-result -Wno-deprecated-declarations -DGLEW_STATIC -fno-omit-frame-pointer
     INCLUDES  := -I$(SRC_DIR) -I$(SRC_DIR)/imgui
     LDFLAGS   := -L/usr/local/lib -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio -lGLEW -lGL
 endif

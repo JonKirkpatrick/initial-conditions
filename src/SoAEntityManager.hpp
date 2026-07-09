@@ -144,12 +144,8 @@ namespace soa {
         }
     };
 
-    // A small example component: Position
-    struct Position { float x = 0.f; float y = 0.f; };
-
 } // namespace soa
 
 // Convenience typedefs for user code
 using SoAEntityHandle = soa::EntityHandle;
 using SoAEntityPool = soa::EntityPool;
-using PositionComponent = soa::ComponentArray<soa::Position>;

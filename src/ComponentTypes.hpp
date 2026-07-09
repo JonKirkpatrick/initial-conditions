@@ -15,7 +15,13 @@ struct CTransform3D
     float yaw   = 0.0f;
     float roll  = 0.0f;
 
+    // Cached forward, right, and up vectors for convenience
+    sf::Vector3f forward = { 0.0f, 0.0f, -1.0f };
+    sf::Vector3f right   = { 1.0f, 0.0f, 0.0f };
+    sf::Vector3f up      = { 0.0f, 1.0f, 0.0f };
+
     bool onGround = true;
+    bool isDirty = true; // Flag to indicate if the transform has changed and needs to update cached vectors
 
     CTransform3D() = default;
     CTransform3D(const sf::Vector3f & p) : pos(p) {}

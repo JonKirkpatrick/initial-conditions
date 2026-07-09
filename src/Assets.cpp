@@ -461,8 +461,6 @@ std::string Assets::preprocessShaderIncludesInternal(const std::string& filePath
         result += line + "\n";
     }
     
-    // NOTE: We do NOT remove the file from visitedFiles here. 
-    // It stays blocked for the duration of this layout tree.
     return result;
 }
 
@@ -532,9 +530,6 @@ void Assets::finalizeSpeciesBuffer()
         m_speciesSSBO.upload(m_speciesRegistry);
         std::cout << "Successfully generated Species SSBO with " 
                   << m_speciesRegistry.size() << " entries.\n";
-        
-        // Optional: Clear out the CPU vector if you don't intend to use updateOne() 
-        // down the line, saving a bit of host memory.
     }
 }
 
