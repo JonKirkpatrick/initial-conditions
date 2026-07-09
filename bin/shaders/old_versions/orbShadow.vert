@@ -1,6 +1,16 @@
 #version 460 core
 
-#include "orb/orbData.glsl"
+struct OrbData {
+    vec4 centreAndSpeciesIdx;               // xyz = centre,        w = species
+    vec4 forwardAndRadius;                  // xyz = forward,       w = radius
+    vec4 rightPadded;                       // xyz = right,         w = spare
+    vec4 upPadded;                          // xyz = up,            w = spare
+    vec4 gazeDirDilationAndEyelidClosure;   // xy  = gazeDir,       zw = Dilation and Eylid
+};
+
+layout(std430, binding = 0) readonly buffer OrbBuffer {
+    OrbData orbs[];
+};
 
 layout(location = 0) in vec3 a_cubePos;
 

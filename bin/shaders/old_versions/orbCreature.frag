@@ -1,13 +1,30 @@
 #version 460 core
 
-#include "common/raySphere.glsl"
-#include "orb/orbData.glsl"
-#include "orb/orbSpecies.glsl"
-#include "orb/orbCompound.glsl"
+// ==============================================================================
+// == SSBO Layout ===============================================================
+// ==============================================================================
 
-// ==============================================================================
-// == Varyings ===================================================================
-// ==============================================================================
+struct OrbData {
+    vec4 centreAndSpeciesIdx;               // xyz = centre,        w = species
+    vec4 forwardAndRadius;                  // xyz = forward,       w = radius
+    vec4 rightPadded;                       // xyz = right,         w = spare
+    vec4 upPadded;                          // xyz = up,            w = spare
+    vec4 gazeDirDilationAndEyelidClosure;   // xy  = gazeDir,       zw = Dilation and Eylid
+};
+
+layout(std430, binding = 0) readonly buffer OrbBuffer {
+    OrbData orbs[];
+};
+
+struct SpeciesData {
+    vec4 irisColourAndRadius;               // xyz = irisColour,    w = irisRadius
+    vec4 scleraColour;                      // xyz = scleraColour,  w = spare
+    vec4 tapetumColourAndPresence;          // xyz = tepetumColour, w = presence (0 or 1)
+};
+
+layout(std430, binding = 1) readonly buffer SpeciesBuffer {
+    SpeciesData species[];
+};
 
 flat in int v_instanceID;
 
@@ -30,7 +47,6 @@ uniform vec3      u_cameraRight;
 uniform vec3      u_cameraUp;
 uniform vec3      u_cameraForward;
 
-// G-Buffer Slots
 layout (location = 0) out vec4 outAlbedo;
 layout (location = 1) out vec4 outNormal;
 layout (location = 2) out vec4 outIndices;
@@ -85,11 +101,14 @@ OrbInstance unpackOrb(int instanceID)
                         + (gazeDirRaw.y * maxGazeSpread * o.up);
     o.gazeDir = normalize(gazeTarget);
 
-    // Derive eye placement geometry (shared with the shadow pass via orbCompound.glsl)
-    OrbEyeGeometry eyes = deriveOrbEyeGeometry(o.centre, o.forward, o.right, o.up, o.radius);
-    o.leftEyeCentre  = eyes.leftEyeCentre;
-    o.rightEyeCentre = eyes.rightEyeCentre;
-    o.eyeRadius      = eyes.eyeRadius;
+    // Derive eye placement geometry
+    o.eyeRadius = o.radius * 0.22;
+    float forwardPush = o.radius * 0.78;
+    float sideSpread  = o.radius * 0.35;
+    float verticalUp  = o.radius * 0.35;
+
+    o.leftEyeCentre  = o.centre + o.forward * forwardPush + o.right * sideSpread + o.up * verticalUp;
+    o.rightEyeCentre = o.centre + o.forward * forwardPush - o.right * sideSpread + o.up * verticalUp;
 
     // Pull species data
     int speciesIdx = int(o.speciesRaw);
@@ -103,7 +122,7 @@ OrbInstance unpackOrb(int instanceID)
 }
 
 // ==============================================================================
-// == Per-Pass Structs ==========================================================
+// == G-Buffer Structs ==========================================================
 // ==============================================================================
 
 struct GeometrySample {
@@ -121,20 +140,32 @@ struct MaterialSample {
     float headSpecMask;
     float eyelidCoverage;
 
+    // Lighting-phase hints — deliberately NOT resolved colours.
+    // Retroreflection depends on view/light alignment, so it belongs in
+    // resolveLight(), which can index the Species SSBO directly via
+    // speciesIdx rather than having tapetum colour ferried through here.
     float pupilMask;   // 1.0 inside the pupil disc, 0.0 elsewhere
     float speciesIdx;  // pass-through so lighting can re-index SpeciesBuffer
 };
 
 // ==============================================================================
-// == Camera Ray ================================================================
+// == Ray Helpers ===============================================================
 // ==============================================================================
+
+struct Ray {
+    vec3 origin;
+    vec3 dir;
+};
 
 Ray reconstructRay(vec2 fragCoord)
 {
+    // 1. Convert to pristine [-1, 1] Normalized Device Coordinates
     vec2  ndc         = (fragCoord / u_viewportSize) * 2.0 - 1.0;
     float aspectRatio = u_viewportSize.x / u_viewportSize.y;
     float halfTanFov  = tan(u_fovY * 0.5);
 
+    // 2. Standard Right-Handed Frustum ray building:
+    //    Right vector scales with X, Up vector scales with Y.
     vec3 viewDir = normalize(
         u_cameraForward 
         + (ndc.x * aspectRatio * halfTanFov * u_cameraRight) 
@@ -142,6 +173,45 @@ Ray reconstructRay(vec2 fragCoord)
     );
 
     return Ray(u_cameraPos, viewDir);
+}
+
+// ==============================================================================
+// == Sphere Intersection =======================================================
+// ==============================================================================
+
+struct SphereHit {
+    bool  hit;
+    float t;
+    vec3  pos;
+    vec3  normal;
+};
+
+SphereHit intersectSphere(Ray ray, vec3 centre, float radius)
+{
+    SphereHit result;
+    result.hit = false;
+
+    vec3  oc           = ray.origin - centre;
+    float a            = dot(ray.dir, ray.dir);
+    float b            = 2.0 * dot(oc, ray.dir);
+    float c            = dot(oc, oc) - radius * radius;
+    float discriminant = b * b - 4.0 * a * c;
+
+    if (discriminant < 0.0) return result;
+
+    float sqrtD = sqrt(discriminant);
+    float t0    = (-b - sqrtD) / (2.0 * a);
+    float t1    = (-b + sqrtD) / (2.0 * a);
+
+    float t = (t0 > 0.0) ? t0 : t1;
+    if (t <= 0.0) return result;
+
+    result.hit    = true;
+    result.t      = t;
+    result.pos    = ray.origin + t * ray.dir;
+    result.normal = normalize(result.pos - centre);
+
+    return result;
 }
 
 // ==============================================================================
@@ -175,7 +245,7 @@ GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int
 {
     GeometrySample geo;
     geo.pos     = finalHit.pos;
-    geo.normal  = finalHit.normal;
+    geo.normal  = finalHit.normal;   // will be refined below
     geo.depth   = finalHit.t;
     geo.hitType = hitType;
 
@@ -205,12 +275,14 @@ GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int
     }
     else
     {
+        // Eye — compute local coordinates relative to the struck eye
         vec3 eyeCentre   = (hitType == 1) ? orb.leftEyeCentre : orb.rightEyeCentre;
         vec3 eyeLocalNorm = normalize(finalHit.pos - eyeCentre);
         float eyeLocalY   = dot(eyeLocalNorm, orb.up);
 
         activeNormal = eyeLocalNorm;
 
+        // Eyelid closure normal bend
         float eyelidThreshold = mix(-0.6, 1.0, orb.eyelidClosure);
         float lipWidth        = 0.03;
         float eyelidMask      = smoothstep(eyelidThreshold, eyelidThreshold - lipWidth, -eyeLocalY);
@@ -225,6 +297,7 @@ GeometrySample resolveGeometry(Ray ray, OrbInstance orb, SphereHit finalHit, int
         }
     }
 
+    // Seam blending between eye and body normals
     float blendRadius = orb.radius * 0.05;
 
     if (hitType == 1 || hitType == 2)
@@ -312,6 +385,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb)
     }
     else
     {
+        // Eye — resolve pupil / iris / eyelid layers
         vec3  eyeCentre    = (geo.hitType == 1) ? orb.leftEyeCentre : orb.rightEyeCentre;
         vec3  eyeLocalNorm = normalize(geo.pos - eyeCentre);
         float eyeLocalY    = dot(eyeLocalNorm, orb.up);
@@ -331,6 +405,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb)
             albedo = orb.irisColour;
         }
 
+        // Eyelid — paint body texture over the eye where the lid has closed
         float eyelidThreshold = mix(-0.6, 1.0, orb.eyelidClosure);
         float lipWidth        = 0.03;
         float eyelidMask      = smoothstep(eyelidThreshold, eyelidThreshold - lipWidth, -eyeLocalY);
@@ -349,6 +424,7 @@ MaterialSample resolveMaterial(GeometrySample geo, OrbInstance orb)
             albedo       = mix(albedo, furSample, eyelidMask);
         }
 
+        // Blend spec parameters toward body values wherever the eyelid covers the eye
         mat.specPower     = mix(64.0,  12.0, eyelidMask);
         mat.specMask      = mix(0.85,  0.14, eyelidMask);
         mat.headSpecPower = mix(64.0,  12.0, eyelidMask);
@@ -368,15 +444,26 @@ void main()
     Ray         ray = reconstructRay(gl_FragCoord.xy);
     OrbInstance orb = unpackOrb(v_instanceID);
 
-    OrbEyeGeometry eyes     = OrbEyeGeometry(orb.leftEyeCentre, orb.rightEyeCentre, orb.eyeRadius);
-    OrbCompoundHit compound = intersectOrbCompound(ray, orb.centre, orb.radius, eyes);
+    // Intersect ray with body and both eyes
+    SphereHit bodyHit  = intersectSphere(ray, orb.centre,         orb.radius);
+    SphereHit leftHit  = intersectSphere(ray, orb.leftEyeCentre,  orb.eyeRadius);
+    SphereHit rightHit = intersectSphere(ray, orb.rightEyeCentre, orb.eyeRadius);
 
-    if (!compound.hit.hit) discard;
+    if (!bodyHit.hit && !leftHit.hit && !rightHit.hit) discard;
 
-    GeometrySample geo  = resolveGeometry(ray, orb, compound.hit, compound.hitType);
+    // Select the closest surface
+    float    closestT = 1e10;
+    SphereHit finalHit;
+    int      hitType = 0;
+
+    if (bodyHit.hit  && bodyHit.t  < closestT) { closestT = bodyHit.t;  finalHit = bodyHit;  hitType = 0; }
+    if (leftHit.hit  && leftHit.t  < closestT) { closestT = leftHit.t;  finalHit = leftHit;  hitType = 1; }
+    if (rightHit.hit && rightHit.t < closestT) { closestT = rightHit.t; finalHit = rightHit; hitType = 2; }
+
+    GeometrySample geo  = resolveGeometry(ray, orb, finalHit, hitType);
     MaterialSample mat  = resolveMaterial(geo, orb);
 
-    // Since this is a ray cast sphere and not a proper mesh, the depth buffer write needs to be explicit.
+    // Write the actual depth of the frag to the depth buffer
     vec4 clipPos        = u_viewProj * vec4(geo.pos, 1.0);
     float ndcZ          = clipPos.z / clipPos.w;
     gl_FragDepth        = ndcZ * 0.5 + 0.5;

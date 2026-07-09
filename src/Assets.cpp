@@ -410,7 +410,6 @@ void Assets::addShader(const std::string& shaderName, const std::string& path)
 {
     auto shader = std::make_unique<sf::Shader>();
     
-    // Preprocess #include directives
     std::string processedSource = preprocessShaderIncludes(path);
     
     if (!shader->loadFromMemory(processedSource, sf::Shader::Type::Fragment)) return;
@@ -419,13 +418,32 @@ void Assets::addShader(const std::string& shaderName, const std::string& path)
 
 std::string Assets::preprocessShaderIncludes(const std::string& filePath)
 {
+    std::unordered_set<std::string> visitedFiles;
+    return preprocessShaderIncludesInternal(filePath, visitedFiles);
+}
+
+std::string Assets::preprocessShaderIncludesInternal(const std::string& filePath, 
+                                                     std::unordered_set<std::string>& visitedFiles)
+{
+    // 1. If we've already processed this exact file for this shader, completely skip it!
+    if (visitedFiles.count(filePath)) {
+        return ""; 
+    }
+
     std::ifstream file(filePath);
+    if (!file.is_open()) {
+        std::cerr << "Warning: Could not open shader include: " << filePath << "\n";
+        return "";
+    }
+
+    // 2. Mark this file as visited so it can never be processed again in this compilation run
+    visitedFiles.insert(filePath);
+
     std::string result;
     std::string line;
-    std::string baseDir = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+    std::string baseDir = "shaders/";
     
     while (std::getline(file, line)) {
-        // Check for #include "filename"
         size_t includePos = line.find("#include");
         if (includePos != std::string::npos) {
             size_t quoteStart = line.find('"', includePos);
@@ -435,20 +453,16 @@ std::string Assets::preprocessShaderIncludes(const std::string& filePath)
                 std::string includePath = line.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
                 std::string fullIncludePath = baseDir + includePath;
                 
-                // Read the included file
-                std::ifstream includeFile(fullIncludePath);
-                if (includeFile.good()) {
-                    std::string includedContent((std::istreambuf_iterator<char>(includeFile)),
-                                                 std::istreambuf_iterator<char>());
-                    result += includedContent + "\n";
-                    continue;
-                }
+                // 3. Recursively parse, carrying the exact same tracking set downwards
+                result += preprocessShaderIncludesInternal(fullIncludePath, visitedFiles) + "\n";
+                continue;
             }
         }
-        
         result += line + "\n";
     }
     
+    // NOTE: We do NOT remove the file from visitedFiles here. 
+    // It stays blocked for the duration of this layout tree.
     return result;
 }
 

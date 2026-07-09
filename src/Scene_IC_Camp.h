@@ -65,7 +65,7 @@ protected:
     sf::Vector2f        m_topdownWorldSize{1.f, 1.f};
 
     // =========================================================================
-    // Rendering — Shaders
+    // Rendering — SFML Shaders
     // =========================================================================
 
     sf::Shader&         m_topoMinimapShader     = Assets::Instance().getShader("TopoMiniMap");
@@ -81,25 +81,20 @@ protected:
     sf::Image           m_topdownImage;
     unsigned int        m_minimapTextureSize    = 256;
 
-    // OpenGL resources for the main framebuffer
-    GLuint              m_mainFBO               = 0;
-    GLuint              m_mainColorTex          = 0;
-    GLuint              m_mainDepthRBO          = 0;
-
-    // New terrain pipeline
+    // terrain pipeline
     GLuint              m_gridVAO               = 0;
     GLuint              m_gridVBO               = 0;
     GLuint              m_gridEBO               = 0;
     GLuint              m_gridIndexCount        = 0;
     GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("Terrain");
 
-    // New sphere impostor pipeline
+    // sphere impostor pipeline
     GLuint              m_cubeVAO               = 0;
     GLuint              m_cubeVBO               = 0;
     GLuint              m_cubeEBO               = 0;
     GLuint              m_OrbCreatureProgram    = Assets::Instance().getGLProgram("OrbCreature");
 
-    // New G-Buffer for deferred lighting
+    // G-Buffer for deferred lighting
     GLuint              m_gBufferFBO            = 0;
     GLuint              m_gAlbedoTex            = 0;
     GLuint              m_gNormalTex            = 0;
@@ -127,7 +122,7 @@ protected:
     GLuint              m_lightingVBO               = 0;
 
     // =========================================================================
-    // Rendering — Shadow Map (CSM Phase 1: single fixed-size, camera-centered box)
+    // Rendering — Shadow Map
     // =========================================================================
 
     GLuint                  m_shadowFBO             = 0;
@@ -143,7 +138,7 @@ protected:
     float                   m_shadowFrustumPadding  = 100.0f;
     float                   m_shadowMaxDistance     = 500.0f;
 
-    GLuint                  m_shadowProgram         = Assets::Instance().getGLProgram("ShadowDepth");
+    GLuint                  m_terrainShadowProgram  = Assets::Instance().getGLProgram("TerrainShadow");
     GLuint                  m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
 
     bool                    m_debugShowShadowMap     = false;
@@ -189,12 +184,12 @@ protected:
     // =========================================================================
 
     sf::Vector3f m_cameraBobOffset{0.f, 0.f, 0.f};
-    float m_bobLag      = 0.16f;  // Smoothing factor (0..1)
-    float m_crouchFactor = 0.0f;  // 0 = standing, 1 = fully crouched
+    float m_bobLag                              = 0.16f;  // Smoothing factor (0..1)
+    float m_crouchFactor                        = 0.0f;  // 0 = standing, 1 = fully crouched
 
-    float m_lastStepPhase = 0.0f;
+    float m_lastStepPhase                       = 0.0f;
 
-    HeadlightState m_headlightState = HeadlightState::Auto;
+    HeadlightState m_headlightState             = HeadlightState::Auto;
 
     // =========================================================================
     // Debug and Editor Flags
@@ -230,7 +225,6 @@ protected:
     void buildTerrainGrid();
     void buildVertexCube();
     void initializeSkyCubemap();
-    void initializeMainFBO();
     void initializeOrbShaderStorage();
     void initializeGBuffer(unsigned int width, unsigned int height);
     void destroyGBuffer();
@@ -267,11 +261,11 @@ protected:
     // =========================================================================
 
     void runShadowPass();
-    void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
     void runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
     void renderOrbCreature();
-    void blitToScreen(GLuint tex);
+    void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
     void deferredLighting();
+    void blitToScreen(GLuint tex);
 
     // =========================================================================
     // Shader Uniform Upload

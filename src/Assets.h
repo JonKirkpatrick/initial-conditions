@@ -66,6 +66,7 @@ class Assets
 
 private:
     std::string preprocessShaderIncludes(const std::string& filePath);
+    std::string preprocessShaderIncludesInternal(const std::string& filePath, std::unordered_set<std::string>& includeStack);
     std::map<std::string, GLuint> m_cubemapMap; 
     
 

@@ -1199,38 +1199,6 @@ void Scene_IC_Camp::initializeSkyCubemap()
         std::cerr << "Sky cubemap 'NightSky' not found in Assets; falling back to procedural sky." << std::endl;
 }
 
-void Scene_IC_Camp::initializeMainFBO() {
-    sf::Vector2u windowSize = m_game.window().getSize();
-
-    glGenTextures(1, &m_mainColorTex);
-    glBindTexture(GL_TEXTURE_2D, m_mainColorTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
-        windowSize.x, windowSize.y,
-        0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glGenRenderbuffers(1, &m_mainDepthRBO);
-    glBindRenderbuffer(GL_RENDERBUFFER, m_mainDepthRBO);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
-        windowSize.x, windowSize.y);
-
-    glGenFramebuffers(1, &m_mainFBO);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_mainFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, m_mainColorTex, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-        GL_RENDERBUFFER, m_mainDepthRBO);
-
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (status != GL_FRAMEBUFFER_COMPLETE)
-        std::cerr << "Main FBO incomplete: 0x" << std::hex << status << std::endl;
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-}
-
 void Scene_IC_Camp::initializeShadowMap(unsigned int size) {
     m_shadowMapSize = size;
 
@@ -1362,16 +1330,16 @@ void Scene_IC_Camp::runShadowPass() {
 
         // --- terrain ---
         glDisable(GL_CULL_FACE);
-        glUseProgram(m_shadowProgram);
+        glUseProgram(m_terrainShadowProgram);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
-        glUniform1i(glGetUniformLocation(m_shadowProgram, "u_topoTopdownTex"), 0);
-        glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldMin"),
+        glUniform1i(glGetUniformLocation(m_terrainShadowProgram, "u_topoTopdownTex"), 0);
+        glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_topdownWorldMin"),
                     m_topdownWorldMin.x, m_topdownWorldMin.y);
-        glUniform2f(glGetUniformLocation(m_shadowProgram, "u_topdownWorldSize"),
+        glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_topdownWorldSize"),
                     m_topdownWorldSize.x, m_topdownWorldSize.y);
-        glUniform1f(glGetUniformLocation(m_shadowProgram, "u_heightMax"), m_topdownMaxHeight);
-        glUniformMatrix4fv(glGetUniformLocation(m_shadowProgram, "u_lightViewProj"),
+        glUniform1f(glGetUniformLocation(m_terrainShadowProgram, "u_heightMax"), m_topdownMaxHeight);
+        glUniformMatrix4fv(glGetUniformLocation(m_terrainShadowProgram, "u_lightViewProj"),
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
         glBindVertexArray(m_gridVAO);
         glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
