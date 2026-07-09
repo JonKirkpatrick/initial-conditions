@@ -12,55 +12,27 @@ namespace Camera {
         );
     }
 
-sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float roll) {
-        float cp = std::cos(pitch), sp = std::sin(pitch);
-        float cy = std::cos(yaw),   sy = std::sin(yaw);
-        float cr = std::cos(roll),  sr = std::sin(roll);
-
-        // 1. Undo YAW first (Right-to-left matrix order means this hits the world vector first)
-        float x1 = cy * v.x - sy * v.z;
-        float y1 = v.y;
-        float z1 = sy * v.x + cy * v.z;
-
-        // 2. Undo PITCH second
-        float x2 = x1;
-        float y2 = cp * y1 + sp * z1;
-        float z2 = -sp * y1 + cp * z1;
-
-        // 3. Undo ROLL last
-        float x3 = cr * x2 + sr * y2;
-        float y3 = -sr * x2 + cr * y2;
-        float z3 = z2;
-
-        return sf::Vector3f(x3, y3, z3);
+    sf::Vector3f cameraToWorld(const sf::Vector3f& v, const CTransform3D& t) {
+        // Local to World = Rotate vector forward by the orientation quaternion
+        glm::vec3 localVec(v.x, v.y, v.z);
+        glm::vec3 worldVec = t.orientation() * localVec;
+        
+        return sf::Vector3f(worldVec.x, worldVec.y, worldVec.z);
     }
 
-    sf::Vector3f cameraToWorld(const sf::Vector3f& v, float pitch, float yaw, float roll) {
-        float cp = std::cos(pitch), sp = std::sin(pitch);
-        float cy = std::cos(yaw),   sy = std::sin(yaw);
-        float cr = std::cos(roll),  sr = std::sin(roll);
+    sf::Vector3f worldToCamera(const sf::Vector3f& v, const CTransform3D& t) {
+        // World to Local = Rotate vector by the INVERSE (conjugate) of the orientation quaternion
+        glm::vec3 worldVec(v.x, v.y, v.z);
         
-        // 1. Forward pass applies ROLL first
-        float x1 = cr * v.x - sr * v.y;
-        float y1 = sr * v.x + cr * v.y;
-        float z1 = v.z;
+        // glm::conjugate(q) is an incredibly fast O(1) operation for unit quaternions—it just negates the vec3 part!
+        glm::vec3 localVec = glm::conjugate(t.orientation()) * worldVec;
         
-        // 2. Forward pass applies PITCH second
-        float x2 = x1;
-        float y2 = cp * y1 - sp * z1;
-        float z2 = sp * y1 + cp * z1;
-        
-        // 3. Forward pass applies YAW last
-        float x3 = cy * x2 + sy * z2;
-        float y3 = y2;
-        float z3 = -sy * x2 + cy * z2;
-        
-        return sf::Vector3f(x3, y3, z3);
+        return sf::Vector3f(localVec.x, localVec.y, localVec.z);
     }
 
     bool worldToScreen(const CTransform3D& t, const CCamera& c, const sf::Vector3f& world, sf::Vector2f& screenOut) {
         sf::Vector3f rel = world - t.pos;
-        sf::Vector3f cam = worldToCamera(rel, t.pitch, t.yaw, t.roll);
+        sf::Vector3f cam = worldToCamera(rel, t);
         
         // In right-handed camera space, objects in front of the lens have a NEGATIVE Z.
         // If cam.z is greater than -nearPlane (e.g., -0.05), it's either too close or behind the camera.
@@ -90,7 +62,7 @@ sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float 
         sf::Vector3f rayDirLocal(x_ndc * f * c.aspectRatio, y_ndc * f, -1.f);
         
         // 3. Transform the local ray direction into absolute world space vectors
-        sf::Vector3f rayDirWorld = cameraToWorld(rayDirLocal, t.pitch, t.yaw, t.roll);
+        sf::Vector3f rayDirWorld = cameraToWorld(rayDirLocal, t);
         
         // 4. Trace down to intersect with the flat landscape floor (Y = 0)
         if (std::abs(rayDirWorld.y) < 1e-6f) return t.pos;
@@ -101,50 +73,24 @@ sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float 
         return t.pos + rayDirWorld * tt;
     }
 
-    sf::Vector3f getForwardXZ(const CTransform3D& t) {
-        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
-        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
-        return sf::Vector3f(-sy * cp, 0.f, -cy * cp);
-    }
-
     sf::Vector3f getForward(const CTransform3D& t) {
-        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
-        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
-        
-        // Natively points to negative Z when angles are zero
-        return sf::Vector3f(-sy * cp, sp, -cy * cp);
+        return t.forward();
     }
 
     sf::Vector3f getRight(const CTransform3D& t) {
-        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
-        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
-        float cr = std::cos(t.roll),  sr = std::sin(t.roll);
-
-        // Account for Yaw, Pitch, and Roll to keep the horizontal axis rigid
-        float x = cy * cr + sy * sp * sr;
-        float y = cp * sr;
-        float z = -sy * cr + cy * sp * sr;
-        return sf::Vector3f(x, y, z);
+        return t.right();
     }
 
     sf::Vector3f getUp(const CTransform3D& t) {
-        float cp = std::cos(t.pitch), sp = std::sin(t.pitch);
-        float cy = std::cos(t.yaw),   sy = std::sin(t.yaw);
-        float cr = std::cos(t.roll),  sr = std::sin(t.roll);
-
-        // Natively points to positive Y when angles are zero
-        float x = -cy * sr + sy * sp * cr;
-        float y = cp * cr;
-        float z = sy * sr + cy * sp * cr;
-        return sf::Vector3f(x, y, z);
+        return t.up();
     }
 
-    sf::Vector3f rotate(const sf::Vector3f& v, float pitch, float yaw, float roll) {
-        return worldToCamera(v, pitch, yaw, roll);
+    sf::Vector3f rotate(const sf::Vector3f& v, const CTransform3D& t) {
+        return worldToCamera(v, t);
     }
 
-    sf::Vector3f rotateInverse(const sf::Vector3f& v, float pitch, float yaw, float roll) {
-        return cameraToWorld(v, pitch, yaw, roll);
+    sf::Vector3f rotateInverse(const sf::Vector3f& v, const CTransform3D& t) {
+        return cameraToWorld(v, t);
     }
 
     sf::Vector3f normalize(const sf::Vector3f& v) {
@@ -153,26 +99,19 @@ sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float 
         return v / m;
     }
 
-    std::array<std::array<float, 3>, 3> getWorldToCamMatrix(float pitch, float yaw, float roll) {
-        // Build a matrix that maps world-space vectors into camera-space using the
-        // same rotation conventions as `worldToCamera`. We compute the images of
-        // the world basis vectors so the result matches the CPU-side math.
+    std::array<std::array<float, 3>, 3> getWorldToCamMatrix(const CTransform3D& t) {
         std::array<std::array<float,3>,3> m{};
-        sf::Vector3f bx = worldToCamera(sf::Vector3f(1.f, 0.f, 0.f), pitch, yaw, roll);
-        sf::Vector3f by = worldToCamera(sf::Vector3f(0.f, 1.f, 0.f), pitch, yaw, roll);
-        sf::Vector3f bz = worldToCamera(sf::Vector3f(0.f, 0.f, 1.f), pitch, yaw, roll);
-
-        // toGlslMat3 flattens in column-major order as matrix[0][0], matrix[1][0], matrix[2][0],
-        // so store columns as m[0]=bx, m[1]=by, m[2]=bz (each column is an array of 3 rows)
-        m[0] = { bx.x, bx.y, bx.z };
-        m[1] = { by.x, by.y, by.z };
-        m[2] = { bz.x, bz.y, bz.z };
+        // Read directly from the cached transform vectors!
+        // No cos/sin calls, completely rigid
+        m[0] = { t.right().x,   t.up().x,   -t.forward().x };
+        m[1] = { t.right().y,   t.up().y,   -t.forward().y };
+        m[2] = { t.right().z,   t.up().z,   -t.forward().z };
         return m;
     }
 
     std::array<float, 16> getViewMatrix(const CTransform3D& t) {
         // Get rotation matrix from world vectors -> camera space
-        auto rot = getWorldToCamMatrix(t.pitch, t.yaw, t.roll);
+        auto rot = getWorldToCamMatrix(t);
 
         // Compute translation in camera space relative to current position
         double tx = -(double(rot[0][0]) * t.pos.x + double(rot[1][0]) * t.pos.y + double(rot[2][0]) * t.pos.z);
@@ -219,7 +158,7 @@ sf::Vector3f worldToCamera(const sf::Vector3f& v, float pitch, float yaw, float 
     std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c)
     {
         // 1. Get rotation: world -> camera (columns = transformed basis vectors)
-        auto rot = getWorldToCamMatrix(t.pitch, t.yaw, t.roll);
+        auto rot = getWorldToCamMatrix(t);
 
         // Translation in camera space: t_cam = - (R * world_pos)
         double tx = -(double(rot[0][0]) * t.pos.x + double(rot[1][0]) * t.pos.y + double(rot[2][0]) * t.pos.z);

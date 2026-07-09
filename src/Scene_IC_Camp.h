@@ -17,7 +17,7 @@ class Scene_IC_Camp : public Scene {
     struct CameraConfig
     {
         unsigned int VIEWPORT_WIDTH, VIEWPORT_HEIGHT;
-        float POSITION_X, POSITION_Y, POSITION_Z, PITCH, YAW, ROLL, FOVY, NEAR_PLANE, FAR_PLANE;
+        float FOVY, NEAR_PLANE, FAR_PLANE;
     };
 
     struct PlayerConfig

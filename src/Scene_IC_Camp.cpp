@@ -41,7 +41,7 @@ static glm::vec4 toGLMVec4(const sf::Glsl::Vec4& v) {
 
 static sf::Vector3f forwardFromTransform(const CTransform3D& transform)
 {
-    return Camera::cameraToWorld(sf::Vector3f(0.f, 0.f, -1.f), transform.pitch, transform.yaw, transform.roll);
+    return Camera::cameraToWorld(sf::Vector3f(0.f, 0.f, -1.f), transform);
 }
 
 static float length(const sf::Vector3f& v)
@@ -409,7 +409,7 @@ void Scene_IC_Camp::sGUI()
 void Scene_IC_Camp::sRender() {
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
-    auto rawWorldToCamMatrix = Camera::getWorldToCamMatrix(transform.pitch, transform.yaw, transform.roll);
+    auto rawWorldToCamMatrix = Camera::getWorldToCamMatrix(transform);
     auto worldToCamMatrix = toGlslMat3(rawWorldToCamMatrix);
 
 
@@ -506,11 +506,65 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     if (phys.isSprinting) moveSpeed *= 3.0f;
     else if (phys.isCrouching) moveSpeed *= 0.6f;
 
-    // === Terrain Info ===
-    sf::Vector3f flatForward = forwardFromTransform(t);
-    flatForward.y = 0.0f;
-    flatForward = Camera::normalize(flatForward);
+    // =========================================================================
+    // UPGRADE: Pure Quaternion Absolute Rotation Accumulation
+    // =========================================================================
+    
+    // 1. Calculate how much the mouse moved this frame
+    float yawDelta   = -input.mouseDelta.x * 0.002f;
+    float pitchDelta = -input.mouseDelta.y * 0.002f;
+    
+    if (input.strafe)
+    {
+        if (input.left)  yawDelta -= m_playerConfig.ROTATION_SPEED * dt;
+        if (input.right) yawDelta += m_playerConfig.ROTATION_SPEED * dt;
+    }
+    input.mouseDelta = {0.f, 0.f};
 
+    // 2. Apply YAW relative to the absolute WORLD UP axis (0, 1, 0)
+    // This ensures your character turns horizontally relative to the ground plane, never twisting side-to-side
+    if (yawDelta != 0.0f)
+    {
+        glm::quat globalYaw = glm::angleAxis(yawDelta, glm::vec3(0.0f, 1.0f, 0.0f));
+        t.setOrientation(globalYaw * t.orientation());
+    }
+
+    // 3. Apply PITCH relative to the character's LOCAL RIGHT axis
+    // This allows you to look up/down exactly along your current horizon
+    if (pitchDelta != 0.0f)
+    {
+        // Convert your cached right direction into a GLM vec3
+        glm::vec3 localRight(t.right().x, t.right().y, t.right().z);
+        
+        glm::quat localPitch = glm::angleAxis(pitchDelta, localRight);
+        glm::quat newOrientation = localPitch * t.orientation();
+
+        // --- Pitch Clamping Protection ---
+        // For a first-person player, we must prevent them from looking upside down.
+        // We check if the new forward vector's Y component gets too close to vertical.
+        glm::vec3 testForward = newOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
+        if (std::abs(testForward.y) < 0.99f) 
+        {
+            t.setOrientation(newOrientation);
+        }
+    }
+    
+    // Ensure normalization to prevent floating-point rounding deterioration over time
+    t.setOrientation(glm::normalize(t.orientation()));
+    // =========================================================================
+    // UPGRADE: Pull clean direction vectors right from our component cache
+    // =========================================================================
+    // We force a quick inline update or simply look at the math layout.
+    // If your dedicated `sUpdateTransformVectors` system pass runs *after* this,
+    // we can temporarily generate the current directions here to make the player movement frame-accurate.
+    glm::quat q = t.orientation();
+    glm::vec3 f = q * glm::vec3(0.0f, 0.0f, -1.0f);
+    
+    sf::Vector3f flatForward(f.x, 0.0f, f.z); 
+    if (std::sqrt(flatForward.x*flatForward.x + flatForward.z*flatForward.z) > 0.001f)
+        flatForward = Camera::normalize(flatForward);
+
+    // === Terrain Info ===
     sf::Vector3f normal = normalAt(t.pos.x, t.pos.z);
 
     sf::Vector3f terrainForward = flatForward - normal * dot(flatForward, normal);
@@ -532,28 +586,15 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 
         if (slopeCos < 0.0f) // === DOWNHILL ===
         {
-            // Very gentle momentum boost
             slopeFactor = 1.0f + std::clamp(grade * 0.65f, 0.0f, 0.22f);
         }
         else // === UPHILL ===
         {
-            // Very gentle retardation
             slopeFactor = 1.0f - std::clamp(grade * 1.1f, 0.0f, 0.18f);
         }
     }
 
     moveSpeed *= slopeFactor;
-    // === Rotation ===
-    t.yaw -= input.mouseDelta.x * 0.002f;
-    t.pitch -= input.mouseDelta.y * 0.002f;
-    input.mouseDelta = {0.f, 0.f};
-
-    if (input.strafe)
-    {
-        if (input.left) t.yaw -= m_playerConfig.ROTATION_SPEED * dt;
-        if (input.right) t.yaw += m_playerConfig.ROTATION_SPEED * dt;
-    }
-    t.pitch = std::clamp(t.pitch, -1.57f, 1.57f);
 
     // === Movement Direction ===
     sf::Vector3f moveDir(0.f, 0.f, 0.f);
@@ -572,7 +613,6 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 
         if (phys.onGround)
         {
-            // === Velocity follows the slope naturally ===
             sf::Vector3f desiredOnPlane = desired - normal * dot(desired, normal);
             if (length(desiredOnPlane) > 0.001f)
                 desiredOnPlane = Camera::normalize(desiredOnPlane) * moveSpeed;
@@ -609,24 +649,23 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     {
         float heightDiff = t.pos.y - terrainHeight;
 
-        if (heightDiff < -0.2f)                    // penetrated ground
+        if (heightDiff < -0.2f)
         {
             t.pos.y = terrainHeight;
             t.velocity.y = 0.0f;
         }
-        else if (heightDiff > 0.6f)                // lost contact
+        else if (heightDiff > 0.6f)
         {
             phys.onGround = false;
         }
         else
         {
-            t.pos.y = std::lerp(t.pos.y, terrainHeight, 0.35f);   // soft follow
+            t.pos.y = std::lerp(t.pos.y, terrainHeight, 0.35f);
             t.velocity.y = std::min(t.velocity.y, 0.0f);
         }
     }
     else
     {
-        // Landing detection
         if (t.velocity.y <= 0.0f && t.pos.y <= terrainHeight + 0.12f)
         {
             t.pos.y = terrainHeight;
@@ -875,7 +914,7 @@ void Scene_IC_Camp::spawnCamera()
 void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
                                    float bobRate, float bobMagnitude,
                                    const CEyes& eyes,
-                                   float yaw, int species)
+                                   float yawRad, int species)
 {
     // 1. Calculate the spatial data right now (no change here)
     const sf::Vector2f groundXZ = hexToWorld(hexQ, hexR);
@@ -883,10 +922,15 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
     const float        hoverY   = groundY + radius;
 
     CTransform3D t(sf::Vector3f(groundXZ.x, hoverY, groundXZ.y));
-    t.yaw = yaw;
+    
+    // =========================================================================
+    // UPGRADE: Convert the initial yaw from radians to your quaternion orientation.
+    // (Pitch = 0.0f, Yaw = converted to degrees, Roll = 0.0f)
+    // =========================================================================
+    float yawDeg = yawRad * (180.f / 3.14159265f);
+    t.setRotation(0.0f, yawDeg, 0.0f);
 
     // 2. Queue the spawn and pass a lambda to handle the lazy initialization
-    // We capture the values by value [=] so they survive until the queue is flushed
     m_entityManager.queueSpawn("orb", [=](SoAEntityHandle orb, EntityManager& em) 
     {
         // This code executes safely during the main thread sync phase!
@@ -906,13 +950,13 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     // Extents are -100 to 100 tiles. 
     std::uniform_int_distribution<int> hexDist(-1000, 1000);
     
-    std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f); // Expanded size range
+    std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
     std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
     std::uniform_real_distribution<float> bobMagDist(0.05f, 0.5f);
     std::uniform_real_distribution<float> gazeDist(-1.0f, 1.0f);
     std::uniform_real_distribution<float> dilationDist(0.5f, 1.0f);
     std::uniform_real_distribution<float> closureDist(0.0f, 0.0f);
-    std::uniform_real_distribution<float> yawDist(0.0f, 2.0f * 3.141592f);
+    std::uniform_real_distribution<float> yawDist(0.0f, 2.0f * 3.141592f); // Generates in Radians
     std::uniform_int_distribution<int> speciesDist(0, 6);
 
     // 2. Spatial Coalescing & Hashing
@@ -923,14 +967,10 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     };
     std::unordered_set<std::pair<int,int>, PairHash> usedCoords;
 
-    // --- Density Rule: Minimum hex distance separation ---
-    // If an orb is huge, we don't want another orb spawning 1 tile away.
-    // Setting this to 3 means any spawned orb blocks a 3-tile radius around it.
     const int minHexDistance = 3; 
 
     auto IsTooClose = [&](int q, int r) {
         for (const auto& [uq, ur] : usedCoords) {
-            // Hexagonal Manhattan Distance formula
             int dist = (std::abs(q - uq) + std::abs(q + r - uq - ur) + std::abs(r - ur)) / 2;
             if (dist < minHexDistance) {
                 return true;
@@ -940,7 +980,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     };
 
     int spawned     = 0;
-    int maxAttempts = count * 50; // Increased window since density constraints drop hints
+    int maxAttempts = count * 50; 
     int attempts    = 0;
 
     while (spawned < count && attempts < maxAttempts)
@@ -949,34 +989,29 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         int hexQ = hexDist(rng);
         int hexR = hexDist(rng);
 
-        // Enforce the coordinate density rule
         if (IsTooClose(hexQ, hexR)) continue;
 
-        // Reserve coordinates
         usedCoords.insert({hexQ, hexR});
 
-        // Pull parameter selections
         float radius           = radiusDist(rng);
         float bobRate          = bobRateDist(rng);
         float bobMag           = bobMagDist(rng);
-        float yaw              = yawDist(rng);
+        float yaw              = yawDist(rng); // Radians match perfectly
         int species            = speciesDist(rng);
-        // Setup Eye Vector/Object Data
+
         sf::Vector2f gazeDirection = { gazeDist(rng), gazeDist(rng) };
-        // Simple normalization for a 2D Vector
         float length = std::sqrt(gazeDirection.x * gazeDirection.x + gazeDirection.y * gazeDirection.y);
         if (length > 0.0f) {
             gazeDirection.x /= length;
             gazeDirection.y /= length;
         }
 
-
         CEyes eyes;
         eyes.gazeDirection = gazeDirection;
         eyes.pupilDilation = dilationDist(rng);
         eyes.eyelidClosure = closureDist(rng);
 
-        // 4. Execution Call matching your signature
+        // Passed safely over to be handled inside spawnOrbFauna
         spawnOrbFauna(hexQ, hexR, radius, bobRate, bobMag, eyes, yaw, species);
         ++spawned;
     }
@@ -1104,9 +1139,11 @@ void Scene_IC_Camp::updateCamera(float dt)
 
     sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
 
-    sf::Vector3f forward = forwardFromTransform(playerTransform);
-    forward = Camera::normalize(forward);
-    sf::Vector3f right(forward.z, 0.f, -forward.x);
+    // =========================================================================
+    // UPGRADE: Pull direction vectors straight from the player's vector cache
+    // =========================================================================
+    sf::Vector3f forward = playerTransform.forward();
+    sf::Vector3f right   = playerTransform.right();
 
     float horizontalSpeed = std::sqrt(
         playerTransform.velocity.x * playerTransform.velocity.x +
@@ -1114,9 +1151,7 @@ void Scene_IC_Camp::updateCamera(float dt)
     );
 
     float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
-
     float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
-
     float phase = playerBob.accumulator * 6.2831853f;
 
     // === Bob Parameters ===
@@ -1140,9 +1175,15 @@ void Scene_IC_Camp::updateCamera(float dt)
     sf::Vector3f targetBob = right * lateralBob + sf::Vector3f(0.f, verticalBob, 0.f);
     m_cameraBobOffset += (targetBob - m_cameraBobOffset) * m_bobLag;
 
+    // =========================================================================
+    // UPGRADE: Update position, match orientation, and automate the dirty state
+    // =========================================================================
     camTransform.pos = headPos - (forward * m_playerConfig.EYE_OFFSET) + m_cameraBobOffset;
-    camTransform.yaw   = playerTransform.yaw;
-    camTransform.pitch = playerTransform.pitch;
+    
+    // Instead of assigning individual angles, copy the entire rotation basis!
+    // If you haven't exposed a direct setter for the underlying quaternion yet, 
+    // you can add `void setOrientation(const glm::quat& q) { m_orientation = q; m_isDirty = true; }`
+    camTransform.setOrientation(playerTransform.orientation());
 
     // FOV scales continuously with speed rather than snapping on sprint state
     float targetFov = m_cameraConfig.FOVY + 0.14f * (speedFraction / 3.0f);
@@ -1932,7 +1973,7 @@ sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
     float y_ndc = 1.0f - (position.y / float(camConfig.VIEWPORT_HEIGHT)) * 2.0f;
     float f = std::tan(camConfig.FOVY * 0.5f);
 
-    sf::Vector3f rayDir = Camera::cameraToWorld(sf::Vector3f(x_ndc * f * aspectRatio, y_ndc * f, -1.0f), cam.pitch, cam.yaw, cam.roll);
+    sf::Vector3f rayDir = Camera::cameraToWorld(sf::Vector3f(x_ndc * f * aspectRatio, y_ndc * f, -1.0f), cam);
     rayDir = Camera::normalize(rayDir);
 
     float rayShallowness = std::abs(rayDir.y);

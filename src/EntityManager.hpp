@@ -101,6 +101,24 @@ class EntityManager
         }
     }
 
+    void sUpdateTransformVectors()
+    {
+        m_compTransform.each([](uint32_t entIndex, CTransform3D& transform) {
+            if (!transform.isDirty()) return; // Early-exit for static entities!
+
+            const glm::quat& q = transform.orientation();
+
+            // Rotate the default cardinal axes by our orientation quaternion
+            glm::vec3 f = q * glm::vec3(0.0f, 0.0f, -1.0f);
+            glm::vec3 r = q * glm::vec3(1.0f, 0.0f, 0.0f);
+            glm::vec3 u = q * glm::vec3(0.0f, 1.0f, 0.0f);
+
+            // Store back in the cached slots and clear the dirty flag
+            transform.setCachedVectors({f.x, f.y, f.z}, {r.x, r.y, r.z}, {u.x, u.y, u.z});
+            transform.clean();
+        });
+    }
+
 public:
 
     EntityManager()
@@ -133,6 +151,7 @@ public:
             }
         }
         m_spawnQueue.clear();
+        sUpdateTransformVectors();
     }
 
     // Create a new entity, return its SoA handle and register tag

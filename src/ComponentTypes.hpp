@@ -4,6 +4,7 @@
 #include "Theme.h"
 #include <array>
 #include <SFML/Graphics.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 struct CTransform3D
 {
@@ -11,23 +12,60 @@ struct CTransform3D
     sf::Vector3f scale    = { 1.0f, 1.0f, 1.0f };
     sf::Vector3f velocity = { 0.0f, 0.0f, 0.0f };
 
-    float pitch = 0.0f;
-    float yaw   = 0.0f;
-    float roll  = 0.0f;
+private:
+    // 1. The source of truth for orientation
+    glm::quat m_orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Identity quaternion
 
-    // Cached forward, right, and up vectors for convenience
-    sf::Vector3f forward = { 0.0f, 0.0f, -1.0f };
-    sf::Vector3f right   = { 1.0f, 0.0f, 0.0f };
-    sf::Vector3f up      = { 0.0f, 1.0f, 0.0f };
+    // 2. Densely packed cached vector properties
+    sf::Vector3f m_forward = { 0.0f, 0.0f, -1.0f };
+    sf::Vector3f m_right   = { 1.0f, 0.0f, 0.0f };
+    sf::Vector3f m_up      = { 0.0f, 1.0f, 0.0f };
 
+    bool m_isDirty = true;
+
+public:
     bool onGround = true;
-    bool isDirty = true; // Flag to indicate if the transform has changed and needs to update cached vectors
 
     CTransform3D() = default;
     CTransform3D(const sf::Vector3f & p) : pos(p) {}
-    CTransform3D(const sf::Vector3f & p, const sf::Vector3f & vel, const sf::Vector3f & sc,
-                 float pPitch, float pYaw, float pRoll)
-        : pos(p), velocity(vel), scale(sc), pitch(pPitch), yaw(pYaw), roll(pRoll) {}
+
+    // Getters
+    const glm::quat& orientation() const noexcept { return m_orientation; }
+    const sf::Vector3f& forward() const noexcept  { return m_forward; }
+    const sf::Vector3f& right() const noexcept    { return m_right; }
+    const sf::Vector3f& up() const noexcept       { return m_up; }
+    bool isDirty() const noexcept                 { return m_isDirty; }
+
+    // Automated Flag Cleansers
+    void clean() noexcept { m_isDirty = false; }
+    void setCachedVectors(const sf::Vector3f& f, const sf::Vector3f& r, const sf::Vector3f& u) noexcept {
+        m_forward = f; m_right = r; m_up = u;
+    }
+
+    // 3. Absolute Setters (Overwrites orientation completely)
+    void setRotation(float pitchDeg, float yawDeg, float rollDeg) noexcept {
+        glm::quat p = glm::angleAxis(glm::radians(pitchDeg), glm::vec3(1.f, 0.f, 0.f));
+        glm::quat y = glm::angleAxis(glm::radians(yawDeg),   glm::vec3(0.f, 1.f, 0.f));
+        glm::quat r = glm::angleAxis(glm::radians(rollDeg),  glm::vec3(0.f, 0.f, 1.f));
+        
+        m_orientation = y * p * r; // Or your preferred evaluation order
+        m_isDirty = true;
+    }
+
+    void setOrientation(const glm::quat& q) noexcept {
+        m_orientation = q;
+        m_isDirty = true;
+    }
+
+    // 4. Local Accumulators (Invaluable for aircraft flight controls!)
+    void addLocalRotation(float pitchDelta, float yawDelta, float rollDelta) noexcept {
+        if (pitchDelta != 0.f) m_orientation = m_orientation * glm::angleAxis(glm::radians(pitchDelta), glm::vec3(1.f, 0.f, 0.f));
+        if (yawDelta != 0.f)   m_orientation = m_orientation * glm::angleAxis(glm::radians(yawDelta),   glm::vec3(0.f, 1.f, 0.f));
+        if (rollDelta != 0.f)  m_orientation = m_orientation * glm::angleAxis(glm::radians(rollDelta),  glm::vec3(0.f, 0.f, 1.f));
+        
+        m_orientation = glm::normalize(m_orientation); // Stop floating-point drift
+        m_isDirty = true;
+    }
 };
 
 struct CPhysics
