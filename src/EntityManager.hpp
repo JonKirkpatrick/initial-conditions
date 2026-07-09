@@ -101,6 +101,22 @@ class EntityManager
         }
     }
 
+public:
+
+    EntityManager()
+    {
+        initDenseIndexArrays();
+        m_entityTags.resize(soa::MAX_ENTITIES);
+    }
+
+    void queueSpawn(const std::string& tag, SpawnCallback initializer) {
+        m_spawnQueue.push_back({ tag, std::move(initializer) });
+    }
+
+    void queueDestroy(SoAEntityHandle h) {
+        m_destroyQueue.push_back(h);
+    }
+
     void sUpdateTransformVectors()
     {
         m_compTransform.each([](uint32_t entIndex, CTransform3D& transform) {
@@ -119,22 +135,6 @@ class EntityManager
         });
     }
 
-public:
-
-    EntityManager()
-    {
-        initDenseIndexArrays();
-        m_entityTags.resize(soa::MAX_ENTITIES);
-    }
-
-    void queueSpawn(const std::string& tag, SpawnCallback initializer) {
-        m_spawnQueue.push_back({ tag, std::move(initializer) });
-    }
-
-    void queueDestroy(SoAEntityHandle h) {
-        m_destroyQueue.push_back(h);
-    }
-
     void update()
     {
         // Process destroy queue
@@ -151,7 +151,6 @@ public:
             }
         }
         m_spawnQueue.clear();
-        sUpdateTransformVectors();
     }
 
     // Create a new entity, return its SoA handle and register tag

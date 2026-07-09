@@ -91,11 +91,10 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    updateCamera(0.001f);
     spawnDebugOrbs(32000);
 
     m_entityManager.update();
-
+    m_entityManager.sUpdateTransformVectors();
     buildTerrainGrid();
     buildHud();
     updateHUDData();
@@ -147,7 +146,9 @@ void Scene_IC_Camp::update() {
             }
         }
     }
+
     sMovement(dt);
+    m_entityManager.sUpdateTransformVectors();
     updateCamera(dt);
     updateHUDData();
     updateSiderealTime();
@@ -155,11 +156,11 @@ void Scene_IC_Camp::update() {
     updateStarRotation();
     updateMoonPosition();
     updateOrbShaderStorage();
+
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
         sGUI();
     }
-    // FPS sampling: update once every 0.5s for a stable reading
     m_fpsFrameCount++;
     float elapsed = m_fpsClock.getElapsedTime().asSeconds();
     if (elapsed >= 0.5f) {
@@ -302,9 +303,21 @@ void Scene_IC_Camp::sGUI()
             ImGui::Text("Hex coords: (%d, %d)", hexCoords.x, hexCoords.y);
             ImGui::Text("Distance: %.1f", dist);
             ImGui::Text("Camera Forward: (%.2f, %.2f, %.2f)", 
-                forwardFromTransform(m_entityManager.getTransform(m_camera)).x, 
-                forwardFromTransform(m_entityManager.getTransform(m_camera)).y, 
-                forwardFromTransform(m_entityManager.getTransform(m_camera)).z);
+                m_entityManager.getTransform(m_camera).forward().x,
+                m_entityManager.getTransform(m_camera).forward().y,
+                m_entityManager.getTransform(m_camera).forward().z
+            );
+            ImGui::Text("Camera Right: (%.2f, %.2f, %.2f)", 
+                m_entityManager.getTransform(m_camera).right().x,
+                m_entityManager.getTransform(m_camera).right().y,
+                m_entityManager.getTransform(m_camera).right().z
+            );
+            ImGui::Text("Camera Up: (%.2f, %.2f, %.2f)", 
+                m_entityManager.getTransform(m_camera).up().x,
+                m_entityManager.getTransform(m_camera).up().y,
+                m_entityManager.getTransform(m_camera).up().z
+            );
+            ImGui::Separator();
 
             ImGui::EndTabItem();
         }
@@ -888,8 +901,10 @@ void Scene_IC_Camp::spawnPlayer()
     m_playerConfig.ROTATION_SPEED = Astro::toRad(m_playerConfig.ROTATION_SPEED);
     sf::Vector2f playerPosition = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
     sf::Vector3f spawnPos(playerPosition.x, heightAt(playerPosition.x, playerPosition.y), playerPosition.y);
+    CTransform3D playerTransform(spawnPos);
+    playerTransform.setRotation(0.0f, 0.0f, 0.0f);
     m_entityManager.addPlayer(m_player, CPlayer());
-    m_entityManager.addTransform(m_player, CTransform3D(spawnPos));
+    m_entityManager.addTransform(m_player, playerTransform);
     m_entityManager.addInput(m_player, CInput());
     m_entityManager.addPhysics(m_player, CPhysics());
     m_entityManager.addBob(m_player, CBob(1.0f, 0.06f, 0.055f));   // rate, vertical mag, lateral mag
@@ -901,6 +916,8 @@ void Scene_IC_Camp::spawnCamera()
 {
     m_camera = m_entityManager.addEntity("camera");
     m_cameraConfig.FOVY = Astro::toRad(m_cameraConfig.FOVY);
+    CTransform3D cameraTransform;
+    cameraTransform.setRotation(0.0f, 0.0f, 0.0f);
     m_entityManager.addCamera(m_camera, CCamera(
         m_cameraConfig.FOVY,
         float(m_cameraConfig.VIEWPORT_WIDTH)/m_cameraConfig.VIEWPORT_HEIGHT,
@@ -908,7 +925,7 @@ void Scene_IC_Camp::spawnCamera()
         m_cameraConfig.FAR_PLANE,
         sf::Vector2u(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT)
         ));
-    m_entityManager.addTransform(m_camera, CTransform3D());
+    m_entityManager.addTransform(m_camera, cameraTransform);
 }
 
 void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
