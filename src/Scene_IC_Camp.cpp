@@ -91,7 +91,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(32000);
+    spawnDebugOrbs(1);
 
     m_entityManager.update();
     m_entityManager.sUpdateTransformVectors();
@@ -111,6 +111,10 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 
 void Scene_IC_Camp::update() {
     m_entityManager.update();
+    if (m_cursorMode) {
+        m_cachedMousePos = sf::Mouse::getPosition(m_game.window());
+        m_leftMousePressed = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
+    }
     // Compute delta-time using the game's elapsed clock (wall time)
     float currentTime = m_game.getElapsedClock().getElapsedTime().asSeconds();
     float dt = 1.0f / 60.0f;
@@ -264,8 +268,11 @@ HUD* Scene_IC_Camp::getHUD() const
 }
 
 Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const {
-    return Topography::TerrainContext{
-        m_topdownImage,
+    sf::Vector2u imgSize = m_topdownImage.getSize();
+    return Topography::TerrainContext {
+        m_topdownImage.getPixelsPtr(), // Hand over the raw byte array address
+        imgSize.x,                     // Cached structural width
+        imgSize.y,                     // Cached structural height
         m_topdownWorldMin,
         m_topdownWorldSize,
         m_topdownMaxHeight
@@ -288,7 +295,7 @@ void Scene_IC_Camp::sGUI()
             ImGui::Checkbox("Draw Shadows", &m_debugShowShadowMap);
             ImGui::Checkbox("Disable Texel Snap", &m_debugDisableTexelSnap);
             ImGui::Checkbox("Show Cascade Colors", &m_debugShowCascadeColors);
-            sf::Vector2i mousePos = sf::Mouse::getPosition(m_game.window());
+            sf::Vector2i mousePos = m_cachedMousePos;
             sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
 
             sf::Vector3f worldPos = screenToWorld(mousePos);
@@ -1221,6 +1228,8 @@ void Scene_IC_Camp::updateHUDData()
     updateMinimapTexture();
 
     m_hudData.position = currentLocation;
+    m_hudData.mousePos = m_cachedMousePos;
+    m_hudData.leftMousePressed = m_leftMousePressed;
     m_hudData.homeLocation = sf::Vector2f(m_homeLocationXZ.x, m_homeLocationXZ.y);
     m_hudData.cameraYaw = currentHeading;
     m_hudData.headlightState = static_cast<int>(m_headlightState);
@@ -1538,7 +1547,7 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     auto vpMatrix   = Camera::getVPMatrix(transform, cameraData);
-    sf::Vector3f worldPos = screenToWorld(sf::Mouse::getPosition(m_game.window()));
+    sf::Vector3f worldPos = screenToWorld(m_cachedMousePos);
     sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
 
     sf::Vector2u windowSize = m_game.window().getSize();

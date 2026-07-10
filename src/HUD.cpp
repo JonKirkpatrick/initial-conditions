@@ -80,7 +80,7 @@ void HUD::init(const sf::Vector2u& windowSize)
 void HUD::update(sf::RenderWindow& window, const HUD_Data& data)
 {
     std::vector<Action> actions;
-    sf::Vector2i mouseI = sf::Mouse::getPosition(window);
+    sf::Vector2i mouseI = data.mousePos;
     sf::Vector2f mousePos = window.mapPixelToCoords(mouseI);
     m_yawDeg = data.cameraYaw;
     m_headlightState = data.headlightState;
@@ -92,7 +92,7 @@ void HUD::update(sf::RenderWindow& window, const HUD_Data& data)
     
     sf::Vector2f output(0.f, 0.f);
 
-    if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left))
+    if (data.leftMousePressed)
     {
         if (!m_isDragging)
         {

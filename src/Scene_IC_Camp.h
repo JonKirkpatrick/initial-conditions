@@ -39,6 +39,8 @@ protected:
     SoAEntityHandle     m_player;
     CameraConfig        m_cameraConfig;
     PlayerConfig        m_playerConfig;
+    sf::Vector2i        m_cachedMousePos{0,0};
+    bool                m_leftMousePressed = false;
 
     float               m_hexSize = 1.f;
     sf::Color           m_gridColour;

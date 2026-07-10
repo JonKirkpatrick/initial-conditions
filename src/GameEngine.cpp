@@ -28,7 +28,7 @@ void GameEngine::init(const std::string & path)
         std::exit(1);
     }
     m_window.create(modes[1], "Initial Conditions", sf::Style::None, sf::State::Fullscreen, settings);
-    m_window.setVerticalSyncEnabled(false);
+    m_window.setVerticalSyncEnabled(true);
     m_window.setKeyRepeatEnabled(false);
     m_window.setPosition(sf::Vector2i(0, 0));
     m_window.setSize(sf::Vector2u(modes[1].size.x, modes[1].size.y));

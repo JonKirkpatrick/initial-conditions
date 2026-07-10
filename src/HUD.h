@@ -10,6 +10,8 @@
 struct HUD_Data
 {
     sf::Vector3f position;
+    sf::Vector2i mousePos;
+    bool leftMousePressed;
     float cameraYaw;
     sf::Vector2f homeLocation;
     float relativeHomeAngle;
