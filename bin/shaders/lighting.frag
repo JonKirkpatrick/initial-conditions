@@ -102,7 +102,7 @@ float decodeHeightFrag(vec2 worldXZ) {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
         return -1e6; // outside the terrain's domain: treat as "nothing there to occlude"
 
-    vec2 s = vec2(uv.x, 1.0 - uv.y);
+    vec2 s = uv;
     vec4 c = texture(u_topoTopdownTex, s);
     vec3 bytes = floor(c.rgb * 255.0 + 0.5);
     return dot(bytes, vec3(65536.0, 256.0, 1.0)) * (u_heightMax / 16777215.0);

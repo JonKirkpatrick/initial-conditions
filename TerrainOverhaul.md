@@ -9,13 +9,30 @@ This document outlines the multi-stage rollout plan to transition the engine's t
 * **CPU Memory Footprint:** 7x7 Grid (49 Tiles) with integrated 256 x 256 Spatial Partitioning Grid
 * **GPU Memory Footprint:** 5x5 Grid (25 Active Array Slices, size 256 x 256)
 
+## First Version of the Tileset Description Schema
+```json
+{
+  "schema_version": 1,
+  "name": "Avalon",
+  "world_origin_latlon": [47.0, -53.0],
+  "world_size_m": [111320.0, 111320.0],
+  "tile_resolution": 256,
+  "apron_texels": 1,
+  "meters_per_texel": 3.4,
+  "grid_dimensions": [7, 7],
+  "tile_directory": "tiles/Avalon/",
+  "tile_naming_pattern": "tile_{row}_{col}.bin",
+  "channels": ["height"]
+}
+```
+The intention is to have the toolchain take as few of these properties as possible from the 
 ---
 
 ## Rollout Pipeline
 
 ### Stage 1: Documentation & Planning
 * [x] Draft and finalize the multi-stage rollout roadmap.
-* [ ] Commit roadmap to repository tracking.
+* [x] Commit roadmap to repository tracking.
 
 ### Stage 2: Toolchain Data Extraction
 * **Goal:** Write a Python script to slice raw Cloud Optimized GeoTIFF (COG) data directly into raw floating-point chunks.
@@ -35,6 +52,7 @@ This document outlines the multi-stage rollout plan to transition the engine's t
 
 ### Stage 4: Engine Integration (Legacy Format, New Dimensions)
 * **Goal:** Isolate engine coordinate math adjustments from data format changes.
+* [ ] Implement a JSON manifest schema to be exported by the software tool defining key details about a tile set.
 * [ ] Update game engine to handle the new 256 x 256 base grid bounds instead of 300 x 300.
 * [ ] Package a monolithic 5 x 5 set of tiles into a single legacy PNG sheet (1280 x 1280 pixels) and ensure vertex displacement and grounding functions still behave perfectly.
 

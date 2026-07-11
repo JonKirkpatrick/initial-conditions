@@ -19,8 +19,8 @@ namespace Topography {
         float          maxHeight;
     };
 
-    constexpr int GRID_RESOLUTION = 1500;
-    constexpr float BASE_SIZE = 938.0f * 5.0f;
+    constexpr int GRID_RESOLUTION = 1280;
+    constexpr float BASE_SIZE = 1024.0f * 5.0f;
 
     float heightAt(const TerrainContext& ctx, float worldX, float worldZ);
     sf::Vector3f normalAt(const TerrainContext& ctx, float worldX, float worldZ);

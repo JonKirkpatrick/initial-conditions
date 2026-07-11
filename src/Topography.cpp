@@ -15,7 +15,7 @@ namespace Topography {
 
     float heightAt(const TerrainContext& ctx, float worldX, float worldZ) {
         float u = std::clamp((worldX - ctx.worldMin.x) / ctx.worldSize.x, 0.0f, 1.0f);
-        float v = 1.0f - std::clamp((worldZ - ctx.worldMin.y) / ctx.worldSize.y, 0.0f, 1.0f);
+        float v = std::clamp((worldZ - ctx.worldMin.y) / ctx.worldSize.y, 0.0f, 1.0f);
 
         float px = u * (ctx.width - 1);
         float py = v * (ctx.height - 1);

@@ -67,7 +67,6 @@ vec2 decodeXZ(vec4 c) {
 // ================== HEIGHT from topdown texture (Bilinear) ==================
 float decodeHeight(vec2 xz) {
     vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
-    uv.y = 1.0 - uv.y;
     
     // Convert to texel space
     vec2 texSize = vec2(textureSize(topoTopdownTex, 0));

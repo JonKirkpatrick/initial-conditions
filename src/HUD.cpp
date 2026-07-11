@@ -165,7 +165,7 @@ void HUD::drawMiniMap(sf::RenderWindow& window)
     mapCircle.setPointCount(smoothness);
     mapCircle.setOrigin({mapRadius, mapRadius});
     mapCircle.setPosition(mapCenter);
-    mapCircle.setRotation(sf::degrees(-m_yawDeg - 180.f));
+    mapCircle.setRotation(sf::degrees(-m_yawDeg + 180.f));
     mapCircle.setTexture(m_minimapTex, true);
     mapCircle.setFillColor(sf::Color::White);
     window.draw(mapCircle);
@@ -218,8 +218,8 @@ void HUD::drawCompass(sf::RenderWindow& window, float yawDeg)
     float heading = std::fmod(yawDeg, 360.f);
     if (heading < 0.f) heading += 360.f;
     
-    // Anchor the tape at the calibrated zero-yaw pixel, then flip direction and phase by 180 degrees.
-    float textureRectLeft = ZERO_YAW_TAPE_LEFT + (heading + 180.f) * PIXELS_PER_DEGREE;
+    // Anchor the tape at the calibrated zero-yaw pixel, then flip direction.
+    float textureRectLeft = ZERO_YAW_TAPE_LEFT + (heading) * PIXELS_PER_DEGREE;
     
     // Set texture rect for tape layer (texture repeating handles wrapping)
     m_compassTape->setTextureRect(sf::IntRect(

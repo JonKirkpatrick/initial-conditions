@@ -91,7 +91,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(1);
+    spawnDebugOrbs(32000);
 
     m_entityManager.update();
     m_entityManager.sUpdateTransformVectors();
@@ -324,6 +324,10 @@ void Scene_IC_Camp::sGUI()
                 m_entityManager.getTransform(m_camera).up().y,
                 m_entityManager.getTransform(m_camera).up().z
             );
+            if (ImGui::Button("Reset Orientation", ImVec2(-1.0f, 0.0f))) // -1.0f spans full width of panel
+            {
+                m_entityManager.getTransform(m_player).setRotation(0.0f, 0.0f, 0.0f);
+            }
             ImGui::Separator();
 
             ImGui::EndTabItem();
@@ -1612,7 +1616,7 @@ void Scene_IC_Camp::updateMinimapTexture()
     const sf::Vector3f playerPos = m_entityManager.getTransform(m_player).pos;
     const float texSize  = static_cast<float>(m_minimapTextureSize);  // 256
     const float center   = texSize * 0.5f;
-    const float worldRadius = 25600.f;
+    const float worldRadius = 2560.f;
 
     // == Draw the hillshaded topo layer via shader ==========================
     m_minimapTexture.clear(sf::Color::Transparent);

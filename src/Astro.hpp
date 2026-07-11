@@ -74,9 +74,9 @@ namespace Astro {
     inline sf::Glsl::Vec3 altAzToDirection(float elevationRad, float azimuthRad)
     {
         return sf::Glsl::Vec3(
-            std::cos(elevationRad) * std::sin(azimuthRad),  // X (East-West)
+            -std::cos(elevationRad) * std::sin(azimuthRad),  // X (East-West)
             std::sin(elevationRad),                         // Y (Up)
-            std::cos(elevationRad) * std::cos(azimuthRad)   // Z (North-South)
+            -std::cos(elevationRad) * std::cos(azimuthRad)   // Z (North-South)
         );
     }
 
@@ -130,21 +130,19 @@ namespace Astro {
     {
         float lat = (90.0f - latitude) * static_cast<float>(PI) / 180.0f;
         float lon = longitude * static_cast<float>(PI) / 180.0f;
-
-        // Account for Local Sidereal Time from your calibrated offset
         lon -= epochOffset;
 
-        outMatrix[0] = std::cos(lon);
+        outMatrix[0] = -std::cos(lon);
         outMatrix[1] = 0.0f;
-        outMatrix[2] = std::sin(lon);
-        
+        outMatrix[2] = -std::sin(lon);
+
         outMatrix[3] = std::sin(lon) * std::sin(lat);
         outMatrix[4] = std::cos(lat);
         outMatrix[5] = -std::cos(lon) * std::sin(lat);
-        
-        outMatrix[6] = -std::sin(lon) * std::cos(lat);
-        outMatrix[7] = std::sin(lat);
-        outMatrix[8] = std::cos(lon) * std::cos(lat);
+
+        outMatrix[6] = std::sin(lon) * std::cos(lat);
+        outMatrix[7] = -std::sin(lat);
+        outMatrix[8] = -std::cos(lon) * std::cos(lat);
     }
 
     // Add this inside namespace Astro
