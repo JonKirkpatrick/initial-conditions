@@ -94,6 +94,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     spawnDebugOrbs(32000);
 
     m_entityManager.update();
+    m_entityManager.getTransform(m_player).setRotation(0.f, 0.f, 0.f);
     m_entityManager.sUpdateTransformVectors();
     buildTerrainGrid();
     buildHud();
@@ -126,7 +127,7 @@ void Scene_IC_Camp::update() {
     m_lastFrameTime = currentTime;
     // Time advancement — debug rate: 1 in-game hour per 4 real seconds
     // To slow later: replace 1.0f / 4.0f with 1.0f / (4.0f * desiredSlowdown)
-    const float realSecondsPerGameHour = 30.0f;
+    const float realSecondsPerGameHour = 3600.0f;
     m_gameTimeOfDay += static_cast<double>(dt) * (1.0f / realSecondsPerGameHour);
     if (m_gameTimeOfDay >= 24.0f)
     {
@@ -558,11 +559,14 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     if (pitchDelta != 0.0f)
     {
         // Convert your cached right direction into a GLM vec3
-        glm::vec3 localRight(t.right().x, t.right().y, t.right().z);
-        
+        glm::vec3 curForward = t.orientation() * glm::vec3(0.0f, 0.0f, -1.0f);
+        glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+        glm::vec3 localRight = glm::normalize(glm::cross(worldUp, curForward) * -1.0f); 
+        // (sign/order depends on your handedness convention — match it to whatever
+        // your sUpdateTransformVectors uses for "right" today)
+
         glm::quat localPitch = glm::angleAxis(pitchDelta, localRight);
         glm::quat newOrientation = localPitch * t.orientation();
-
         // --- Pitch Clamping Protection ---
         // For a first-person player, we must prevent them from looking upside down.
         // We check if the new forward vector's Y component gets too close to vertical.
@@ -1311,14 +1315,42 @@ void Scene_IC_Camp::destroyShadowMap() {
     }
 }
 
+float Scene_IC_Camp::computeDistanceToMapFarCorner(const glm::vec3& camPos) const {
+    glm::vec2 camPosXZ(camPos.x, camPos.z);
+    glm::vec2 mapMin(m_topdownWorldMin.x, m_topdownWorldMin.y);
+    glm::vec2 mapMax = mapMin + glm::vec2(m_topdownWorldSize.x, m_topdownWorldSize.y);
+
+    glm::vec2 corners[4] = {
+        { mapMin.x, mapMin.y }, { mapMax.x, mapMin.y },
+        { mapMin.x, mapMax.y }, { mapMax.x, mapMax.y }
+    };
+
+    float maxDist = 0.0f;
+    for (auto& c : corners) {
+        maxDist = std::max(maxDist, glm::length(c - camPosXZ));
+    }
+    return maxDist;
+}
+
 void Scene_IC_Camp::computeCascadeSplits(float camNear, float camFar) {
     for (int i = 0; i < NUM_CASCADES; ++i) {
         float p = float(i + 1) / float(NUM_CASCADES);
-        float logSplit    = camNear * std::pow(camFar / camNear, p);
+        float logSplit     = camNear * std::pow(camFar / camNear, p);
         float uniformSplit = camNear + (camFar - camNear) * p;
         m_cascadeSplits[i] = m_cascadeSplitLambda * logSplit
                            + (1.0f - m_cascadeSplitLambda) * uniformSplit;
     }
+
+    // Override the last split: instead of following the log/uniform scheme,
+    // extend it all the way to the farthest corner of the currently loaded map.
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    float mapEdgeDist  = computeDistanceToMapFarCorner(toGLMVec3(camTransform.pos));
+
+    // Guard against the map-edge distance ever being smaller than the
+    // previous split (e.g. camera standing right at the map boundary) --
+    // runShadowPass depends on splits being strictly increasing.
+    m_cascadeSplits[NUM_CASCADES - 1] =
+        std::max(mapEdgeDist, m_cascadeSplits[NUM_CASCADES - 2] + 1.0f);
 }
 
 glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float splitFar, float& lightDepthRange, float& texelWorldSize) const {
@@ -1377,6 +1409,52 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float spl
     return glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist) * finalLightView;
 }
 
+glm::mat4 Scene_IC_Camp::computeLightViewProjForMapBounds(float& lightDepthRange, float& texelWorldSize) const {
+    glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection));
+    glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
+                                                      : glm::vec3(0.f, 1.f, 0.f);
+    glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), -sunDir, worldUp);
+
+    glm::vec2 mapMin(m_topdownWorldMin.x, m_topdownWorldMin.y);
+    glm::vec2 mapMax(mapMin.x + m_topdownWorldSize.x, mapMin.y + m_topdownWorldSize.y);
+    float heightMin = 0.0f; // adjust if your terrain can go negative
+    float heightMax = m_topdownMaxHeight;
+
+    glm::vec3 worldCorners[8] = {
+        { mapMin.x, heightMin, mapMin.y }, { mapMax.x, heightMin, mapMin.y },
+        { mapMax.x, heightMin, mapMax.y }, { mapMin.x, heightMin, mapMax.y },
+        { mapMin.x, heightMax, mapMin.y }, { mapMax.x, heightMax, mapMin.y },
+        { mapMax.x, heightMax, mapMax.y }, { mapMin.x, heightMax, mapMax.y },
+    };
+
+    glm::vec3 centroid(0.0f);
+    for (auto& c : worldCorners) centroid += c;
+    centroid /= 8.0f;
+
+    float radius = 0.0f;
+    for (auto& c : worldCorners)
+        radius = std::max(radius, glm::length(c - centroid));
+    radius += m_shadowFrustumPadding;
+
+    float worldUnitsPerTexel = (radius * 2.0f) / float(m_shadowMapSize);
+    texelWorldSize = worldUnitsPerTexel;
+
+    glm::vec3 centroidLS = glm::vec3(lightView * glm::vec4(centroid, 1.0f));
+    centroidLS.x = std::floor(centroidLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
+    centroidLS.y = std::floor(centroidLS.y / worldUnitsPerTexel) * worldUnitsPerTexel;
+
+    float nearExtension = m_shadowFrustumPadding * 20.0f;
+    centroidLS.z += radius + nearExtension;
+
+    glm::mat4 lightViewInv = glm::inverse(lightView);
+    glm::vec3 eyeWorldPos  = glm::vec3(lightViewInv * glm::vec4(centroidLS, 1.0f));
+    glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos - sunDir, worldUp);
+
+    float farDist = radius * 2.0f + nearExtension;
+    lightDepthRange = farDist;
+    return glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist) * finalLightView;
+}
+
 void Scene_IC_Camp::runShadowPass() {
     auto& camData = m_entityManager.getCamera(m_camera);
     float clampedFar = std::min(camData.farPlane, m_shadowMaxDistance);
@@ -1392,7 +1470,16 @@ void Scene_IC_Camp::runShadowPass() {
 
     for (int cascade = 0; cascade < NUM_CASCADES; ++cascade) {
         float splitFar = m_cascadeSplits[cascade];
-        m_lightViewProjCascades[cascade] = computeLightViewProjForRange(splitNear, splitFar, m_lightDepthRange[cascade], m_texelWorldSize[cascade]);
+
+        if (cascade == NUM_CASCADES - 1) {
+            // Fill cascade: fit to the loaded map's world bounds instead of
+            // the camera sub-frustum for this range.
+            m_lightViewProjCascades[cascade] = computeLightViewProjForMapBounds(
+                m_lightDepthRange[cascade], m_texelWorldSize[cascade]);
+        } else {
+            m_lightViewProjCascades[cascade] = computeLightViewProjForRange(
+                splitNear, splitFar, m_lightDepthRange[cascade], m_texelWorldSize[cascade]);
+        }
         splitNear = splitFar; // next cascade picks up where this one left off
 
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
@@ -1420,7 +1507,6 @@ void Scene_IC_Camp::runShadowPass() {
         glDisable(GL_CULL_FACE);
         glUseProgram(m_orbShadowProgram);
         glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
-        sunDir = glm::normalize(sunDir + glm::vec3(0.0f,0.342020143f, 0.0f));
         glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
         glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"),

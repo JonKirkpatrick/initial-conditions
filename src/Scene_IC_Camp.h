@@ -130,14 +130,14 @@ protected:
     GLuint                  m_shadowFBO             = 0;
     GLuint                  m_shadowDepthTexArray   = 0;
     unsigned int            m_shadowMapSize         = 4096;
-    static constexpr int    NUM_CASCADES            = 4;
+    static constexpr int    NUM_CASCADES            = 5;
 
     float                   m_cascadeSplits[NUM_CASCADES] = {};
     glm::mat4               m_lightViewProjCascades[NUM_CASCADES] = {};
     float                   m_lightDepthRange[NUM_CASCADES] = {};
     float                   m_texelWorldSize[NUM_CASCADES] = {};
     float                   m_cascadeSplitLambda    = 0.5f; // 0 = uniform, 1 = logarithmic
-    float                   m_shadowFrustumPadding  = 100.0f;
+    float                   m_shadowFrustumPadding  = 30.0f;
     float                   m_shadowMaxDistance     = 500.0f;
 
     GLuint                  m_terrainShadowProgram  = Assets::Instance().getGLProgram("TerrainShadow");
@@ -247,6 +247,8 @@ protected:
     void updateBob(SoAEntityHandle e, float dt, float horizSpeed);
     void updateOrbBobbing(SoAEntityHandle e, float dt);
     glm::mat4 computeLightViewProjForRange(float splitNear, float splitFar, float& lightDepthRange, float& texelWorldSize) const;
+    glm::mat4 computeLightViewProjForMapBounds(float& lightDepthRange, float& texelWorldSize) const;
+    float computeDistanceToMapFarCorner(const glm::vec3& cameraPos) const;
     void computeCascadeSplits(float camNear, float camFar);
 
     // =========================================================================

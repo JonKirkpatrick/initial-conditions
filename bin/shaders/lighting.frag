@@ -66,21 +66,25 @@ uniform float u_headlampEnabled;
 
 // Shadow Uniforms
 uniform sampler2DArrayShadow u_shadowMap;
-uniform mat4      u_lightViewProj[4];
-uniform float     u_cascadeSplitDepths[4];
-uniform float     u_lightDepthRange[4];
-uniform float     u_texelWorldSize[4];
+uniform mat4      u_lightViewProj[5];
+uniform float     u_cascadeSplitDepths[5];
+uniform float     u_lightDepthRange[5];
+uniform float     u_texelWorldSize[5];
 uniform bool      u_debugShowCascadeColors;
 
-const vec3 cascadeDebugColors[4] = vec3[](
-    vec3(1.0, 0.3, 0.3), vec3(0.3, 1.0, 0.3), vec3(0.3, 0.3, 1.0), vec3(1.0, 1.0, 0.3)
+const vec3 cascadeDebugColors[5] = vec3[](
+    vec3(1.0, 0.3, 0.3), 
+    vec3(0.3, 1.0, 0.3), 
+    vec3(0.3, 0.3, 1.0), 
+    vec3(1.0, 1.0, 0.3), 
+    vec3(1.0, 0.3, 1.0)
 );
 
 int selectCascade(vec3 worldPos) {
     float viewDepth = dot(worldPos - u_cameraPos, u_cameraForward);
     for (int i = 0; i < 4; ++i)
         if (viewDepth < u_cascadeSplitDepths[i]) return i;
-    return 3;
+    return 4;  // fall through to the fill cascade, not back to 3
 }
 
 vec3 reconstructWorldPos(vec2 uv, float rawDepth) {
@@ -108,30 +112,11 @@ float decodeHeightFrag(vec2 worldXZ) {
     return dot(bytes, vec3(65536.0, 256.0, 1.0)) * (u_heightMax / 16777215.0);
 }
 
-float computeHeightmapShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {
-    if (sunDir.y <= -0.2) return 0.0;
-
-    float NdotL = max(dot(normal, sunDir), 0.0);
-    float biasTexels = mix(2.5, 1.25, NdotL);
-    float worldBias  = biasTexels * u_texelWorldSize[cascade];
-
-    const int   STEPS    = 48;
-    const float MAX_DIST = 2500.0;
-    float stepSize = MAX_DIST / float(STEPS);
-    float t = worldBias + stepSize * 0.5;
-
-    for (int i = 0; i < STEPS; ++i) {
-        vec3 samplePos = worldPos + sunDir * t;
-        if (decodeHeightFrag(samplePos.xz) > samplePos.y) return 0.0;
-        t += stepSize;
-    }
-    return 1.0;
-}
-
 float computeShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {
     float NdotL = max(dot(normal, sunDir), 0.0);
 
-    float normalOffsetTexels = mix(1.5, 1.0, NdotL);
+    // keep this modest -- it's the main source of peter panning
+    float normalOffsetTexels = mix(1.0, 0.5, NdotL);
     vec3 offsetPos = worldPos + normal * (normalOffsetTexels * u_texelWorldSize[cascade]);
 
     vec4 lightClip = u_lightViewProj[cascade] * vec4(offsetPos, 1.0);
@@ -144,7 +129,11 @@ float computeShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {
         return 1.0;
     }
 
-    float bias = 0.0005;
+    // slope-scaled bias -- grows as the surface turns away from the light
+    float tanTheta = sqrt(1.0 - NdotL * NdotL) / max(NdotL, 0.05);
+    const float baseBias = 0.0003;
+    const float maxBias  = 0.004; // clamp so extreme grazing doesn't over-bias
+    float bias = clamp(baseBias * (1.0 + tanTheta), baseBias, maxBias);
 
     float texelSize = 1.0 / float(textureSize(u_shadowMap, 0).x);
     float sum = 0.0;
@@ -219,15 +208,9 @@ void main()
 
     float viewDepth = dot(worldPos - u_cameraPos, u_cameraForward);
     float shadowContribution;
+    shadowContribution = computeShadow(worldPos, normal, sunDirection, cascade);
 
-    if (viewDepth < u_cascadeSplitDepths[3]) {
-        int cascade = selectCascade(worldPos);
-        shadowContribution = computeShadow(worldPos, normal, sunDirection, cascade);
-    } else {
-        shadowContribution = computeHeightmapShadow(worldPos, normal, sunDirection, cascade);
-    }
-
-    shadowContribution = mix(0.15, 1.0, shadowContribution);
+    // shadowContribution = mix(0.15, 1.0, shadowContribution);
 
     if (u_debugShowCascadeColors) {
         FragColor = vec4(cascadeDebugColors[cascade] * (0.4 + 0.6 * shadowContribution), 1.0);
