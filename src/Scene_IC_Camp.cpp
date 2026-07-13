@@ -90,7 +90,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(1);
+    spawnDebugOrbs(32000);
     m_entityManager.update();
     buildTerrainGrid();
     buildHud();

@@ -60,7 +60,7 @@ The intention is to have the toolchain take as few of these properties as possib
 * **Goal:** Cut ties with the PNG format on the CPU.
 * [x] Strip out the RGB byte-unpacking ALU operations.
 * [x] Update engine to read the raw float binary files directly into a contiguous `float*` or `std::vector<float>` heap allocation.
-* [ ] Benchmark CPU cache performance improvements on height-lookup queries.
+* [x] Benchmark CPU cache performance improvements on height-lookup queries.
 
 ### Stage 6: Fixed Multi-Tile Grid & Array Shaders
 * **Goal:** Transition from a monolithic mega-texture to modular slots.
