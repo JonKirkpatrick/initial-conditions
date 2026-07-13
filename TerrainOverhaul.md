@@ -36,30 +36,30 @@ The intention is to have the toolchain take as few of these properties as possib
 
 ### Stage 2: Toolchain Data Extraction
 * **Goal:** Write a Python script to slice raw Cloud Optimized GeoTIFF (COG) data directly into raw floating-point chunks.
-* [ ] Parse COG/TIFF metadata to map absolute physical world heights to floating-point binaries.
-* [ ] Implement export of a single tile as a flat binary file of continuous `float32` variables (256 x 256).
-* [ ] Include edge-duplication logic to bake the 1-texel **apron** border directly into the exported binary, resulting in a physical 257 x 257 float array per file.
+* [x] Parse COG/TIFF metadata to map absolute physical world heights to floating-point binaries.
+* [x] Implement export of a single tile as a flat binary file of continuous `float32` variables (256 x 256).
+* [x] Include edge-duplication logic to bake the 1-texel **apron** border directly into the exported binary, resulting in a physical 257 x 257 float array per file.
 
 ### Stage 2a: Legacy Support Generator
 * **Goal:** Create a bridge to keep current engine systems functioning during the transition.
-* [ ] Modify existing asset pipeline script to output tiles in the current legacy packed RGB PNG format, but clamped to the new 256 x 256 dimensions.
+* [x] Modify existing asset pipeline script to output tiles in the current legacy packed RGB PNG format, but clamped to the new 256 x 256 dimensions.
 
 ### Stage 3: Data Verification & Test Suite
 * **Goal:** Ensure mathematical parity between the source GIS file and exported assets before modifying engine code.
-* [ ] Write a verification test script (Python/C++).
-* [ ] Sample random coordinates across the original COG TIFF.
-* [ ] Compare the source values against the newly minted raw float binary data and the legacy packed PNG tiles to guarantee 100% precision accuracy.
+* [x] Write a verification test script (Python/C++).
+* [x] Sample random coordinates across the original COG TIFF.
+* [x] Compare the source values against the newly minted raw float binary data and the legacy packed PNG tiles to guarantee 100% precision accuracy.
 
 ### Stage 4: Engine Integration (Legacy Format, New Dimensions)
 * **Goal:** Isolate engine coordinate math adjustments from data format changes.
-* [ ] Implement a JSON manifest schema to be exported by the software tool defining key details about a tile set.
-* [ ] Update game engine to handle the new 256 x 256 base grid bounds instead of 300 x 300.
-* [ ] Package a monolithic 5 x 5 set of tiles into a single legacy PNG sheet (1280 x 1280 pixels) and ensure vertex displacement and grounding functions still behave perfectly.
+* [x] Implement a JSON manifest schema to be exported by the software tool defining key details about a tile set.
+* [x] Update game engine to handle the new 256 x 256 base grid bounds instead of 300 x 300.
+* [x] Package a monolithic 5 x 5 set of tiles into a single legacy PNG sheet (1280 x 1280 pixels) and ensure vertex displacement and grounding functions still behave perfectly.
 
 ### Stage 5: Native Float Buffer Engine Integration
 * **Goal:** Cut ties with the PNG format on the CPU.
-* [ ] Strip out the RGB byte-unpacking ALU operations.
-* [ ] Update engine to read the raw float binary files directly into a contiguous `float*` or `std::vector<float>` heap allocation.
+* [x] Strip out the RGB byte-unpacking ALU operations.
+* [x] Update engine to read the raw float binary files directly into a contiguous `float*` or `std::vector<float>` heap allocation.
 * [ ] Benchmark CPU cache performance improvements on height-lookup queries.
 
 ### Stage 6: Fixed Multi-Tile Grid & Array Shaders

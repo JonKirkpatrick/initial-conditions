@@ -115,6 +115,73 @@ bool Assets::readRawHalfFile(const std::filesystem::path& path,
     return true;
 }
 
+bool Assets::readRawFloatFile(const std::filesystem::path& path,
+                        int& width,
+                        int& height,
+                        std::vector<float>& values)
+{
+    // 1. Open the file and check size
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        std::cerr << "Could not open RAW float file: " << path << std::endl;
+        return false;
+    }
+
+    const std::streamsize fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    // 2. Single-channel float32, assumed square (monolithic mosaic, no header).
+    const size_t totalTexels = static_cast<size_t>(fileSize) / sizeof(float);
+
+    width = static_cast<int>(std::sqrt(totalTexels));
+    height = width;
+
+    if (static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(float) != static_cast<size_t>(fileSize))
+    {
+        std::cerr << "Error: RAW float file size does not match expected square single-channel layout: " << path << std::endl;
+        return false;
+    }
+
+    // 3. Read the payload
+    values.resize(totalTexels);
+    file.read(reinterpret_cast<char*>(values.data()), fileSize);
+
+    if (!file)
+    {
+        std::cerr << "Could not read RAW float payload: " << path << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+void Assets::addHeightArray(const std::string& heightArrayName, const std::string& path)
+{
+    HeightArray ha;
+
+    if (!readRawFloatFile(path, ha.width, ha.height, ha.data))
+    {
+        std::cerr << "Failed to load height array: " << path << std::endl;
+        return;
+    }
+
+    glGenTextures(1, &ha.textureId);
+    glBindTexture(GL_TEXTURE_2D, ha.textureId);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, ha.width, ha.height, 0,
+                 GL_RED, GL_FLOAT, ha.data.data());
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    m_heightArrayMap[heightArrayName] = std::move(ha);
+}
+
 void Assets::addTexture(const std::string& textureName, const std::string& path, bool smooth)
 {
     m_textureMap[textureName] = sf::Texture();
@@ -153,6 +220,13 @@ void Assets::loadFromFile(const std::string& path)
             std::string name, path;
             file >> name >> path;
             addTexture(name, path, false);
+        }
+        else if (str == "HeightArray")
+        {
+            std::string name, path;
+            file >> name >> path;
+            addHeightArray(name, path);
+            std::cout << "Loaded height array: " << name << " from " << path << std::endl;
         }
         else if (str == "Font")
         {
@@ -366,6 +440,12 @@ const sf::Texture& Assets::getTexture(const std::string& textureName) const
 {
     assert(m_textureMap.find(textureName) != m_textureMap.end());
     return m_textureMap.at(textureName);
+}
+
+const HeightArray& Assets::getHeightArray(const std::string& heightArrayName) const
+{
+    assert(m_heightArrayMap.find(heightArrayName) != m_heightArrayMap.end());
+    return m_heightArrayMap.at(heightArrayName);
 }
            
 const sf::Font& Assets::getFont(const std::string& fontName) const

@@ -9,6 +9,8 @@ Texture     Moon            images/skymap/Moon_Cropped.png
 
 Texture     Test1           images/terrain/45_20-49_24.png
 
+HeightArray Test2           images/terrain/45_20-49_24.bin
+
 Music       MusicTitle      music/title_menu.mp3
 
 Sound       FootLeft        sounds/left_foot.wav

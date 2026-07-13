@@ -45,6 +45,7 @@ protected:
     float               m_hexSize = 1.f;
     sf::Color           m_gridColour;
     sf::Vector2f        m_homeLocationXZ{0.f, 0.f};
+    sf::Vector3f        m_homeLocation3D{0.f, 0.f, 0.f};
 
     // =========================================================================
     // Time, Date and Location
@@ -80,7 +81,6 @@ protected:
     sf::RenderTexture   m_skyTexture;
     sf::RenderTexture   m_minimapTexture;
     sf::Texture         m_topdownTexture;
-    sf::Image           m_topdownImage;
     unsigned int        m_minimapTextureSize    = 256;
 
     // terrain pipeline
@@ -136,8 +136,8 @@ protected:
     glm::mat4               m_lightViewProjCascades[NUM_CASCADES] = {};
     float                   m_lightDepthRange[NUM_CASCADES] = {};
     float                   m_texelWorldSize[NUM_CASCADES] = {};
-    float                   m_cascadeSplitLambda    = 0.5f; // 0 = uniform, 1 = logarithmic
-    float                   m_shadowFrustumPadding  = 30.0f;
+    float                   m_cascadeSplitLambda    = 0.0f; // 0 = uniform, 1 = logarithmic
+    float                   m_shadowFrustumPadding  = 45.0f;
     float                   m_shadowMaxDistance     = 500.0f;
 
     GLuint                  m_terrainShadowProgram  = Assets::Instance().getGLProgram("TerrainShadow");

@@ -5,18 +5,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdint>
+
+struct HeightArray; // defined in Assets.h; TerrainContext only needs a pointer here
 
 namespace Topography {
 
     struct TerrainContext
     {
-        const uint8_t* pixels;      // Direct pointer to raw RGBA pixel data
-        unsigned int   width;       // Cached image width
-        unsigned int   height;      // Cached image height
-        sf::Vector2f   worldMin;
-        sf::Vector2f   worldSize;
-        float          maxHeight;
+        const HeightArray* heightArray;  // owns width, height, and the flat float buffer
+        sf::Vector2f        worldMin;
+        sf::Vector2f        worldSize;
     };
 
     constexpr int GRID_RESOLUTION = 1280;

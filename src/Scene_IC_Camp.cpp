@@ -72,6 +72,10 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     , m_levelPath(levelPath)
 {
     m_topdownMaxHeight = 1000.f;
+    float worldSize = Topography::BASE_SIZE;
+    float worldMinCoord = -worldSize / 2.0f;
+    m_topdownWorldMin = { worldMinCoord, worldMinCoord };
+    m_topdownWorldSize = { worldSize, worldSize };
     sf::ContextSettings settings;
     settings.antiAliasingLevel = 8;
     sf::Vector2u windowSize = game.window().getSize();
@@ -79,11 +83,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_skyTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
     m_topdownTexture = Assets::Instance().getTexture("Test1");
-    m_topdownImage = m_topdownTexture.copyToImage();
-    float worldSize = Topography::BASE_SIZE;
-    float worldMinCoord = -worldSize / 2.0f;
-    m_topdownWorldMin = { worldMinCoord, worldMinCoord };
-    m_topdownWorldSize = { worldSize, worldSize };
     m_gridColour = Theme::color("cerulean");
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
@@ -91,11 +90,8 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(32000);
-
+    spawnDebugOrbs(1);
     m_entityManager.update();
-    m_entityManager.getTransform(m_player).setRotation(0.f, 0.f, 0.f);
-    m_entityManager.sUpdateTransformVectors();
     buildTerrainGrid();
     buildHud();
     updateHUDData();
@@ -269,14 +265,10 @@ HUD* Scene_IC_Camp::getHUD() const
 }
 
 Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const {
-    sf::Vector2u imgSize = m_topdownImage.getSize();
     return Topography::TerrainContext {
-        m_topdownImage.getPixelsPtr(), // Hand over the raw byte array address
-        imgSize.x,                     // Cached structural width
-        imgSize.y,                     // Cached structural height
+        &Assets::Instance().getHeightArray("Test2"),
         m_topdownWorldMin,
         m_topdownWorldSize,
-        m_topdownMaxHeight
     };
 }
 
@@ -303,7 +295,7 @@ void Scene_IC_Camp::sGUI()
             sf::Vector2i hexCoords = worldToHex(worldPos.x, worldPos.z);
 
             auto& playerTransform = m_entityManager.getTransform(m_player);
-            sf::Vector3f rel = worldPos - playerTransform.pos;
+            sf::Vector3f rel = m_homeLocation3D - playerTransform.pos;
             float dist = std::sqrt(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
 
             ImGui::Text("Mouse screen: (%.1f, %.1f)", mouseScreen.x, mouseScreen.y);
@@ -522,7 +514,6 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     auto& input = m_entityManager.getInput(e);
     auto& phys  = m_entityManager.getPhysics(e);
     auto& bob   = m_entityManager.getBob(e);
-
     // === Locomotion State ===
     phys.isCrouching = input.crouch;
     phys.isSprinting = input.sprint && !phys.isCrouching;
@@ -531,11 +522,6 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     if (phys.isSprinting) moveSpeed *= 3.0f;
     else if (phys.isCrouching) moveSpeed *= 0.6f;
 
-    // =========================================================================
-    // UPGRADE: Pure Quaternion Absolute Rotation Accumulation
-    // =========================================================================
-    
-    // 1. Calculate how much the mouse moved this frame
     float yawDelta   = -input.mouseDelta.x * 0.002f;
     float pitchDelta = -input.mouseDelta.y * 0.002f;
     
@@ -546,30 +532,19 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
     }
     input.mouseDelta = {0.f, 0.f};
 
-    // 2. Apply YAW relative to the absolute WORLD UP axis (0, 1, 0)
-    // This ensures your character turns horizontally relative to the ground plane, never twisting side-to-side
     if (yawDelta != 0.0f)
     {
         glm::quat globalYaw = glm::angleAxis(yawDelta, glm::vec3(0.0f, 1.0f, 0.0f));
         t.setOrientation(globalYaw * t.orientation());
     }
 
-    // 3. Apply PITCH relative to the character's LOCAL RIGHT axis
-    // This allows you to look up/down exactly along your current horizon
     if (pitchDelta != 0.0f)
     {
-        // Convert your cached right direction into a GLM vec3
         glm::vec3 curForward = t.orientation() * glm::vec3(0.0f, 0.0f, -1.0f);
         glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
         glm::vec3 localRight = glm::normalize(glm::cross(worldUp, curForward) * -1.0f); 
-        // (sign/order depends on your handedness convention — match it to whatever
-        // your sUpdateTransformVectors uses for "right" today)
-
         glm::quat localPitch = glm::angleAxis(pitchDelta, localRight);
         glm::quat newOrientation = localPitch * t.orientation();
-        // --- Pitch Clamping Protection ---
-        // For a first-person player, we must prevent them from looking upside down.
-        // We check if the new forward vector's Y component gets too close to vertical.
         glm::vec3 testForward = newOrientation * glm::vec3(0.0f, 0.0f, -1.0f);
         if (std::abs(testForward.y) < 0.99f) 
         {
@@ -577,14 +552,7 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
         }
     }
     
-    // Ensure normalization to prevent floating-point rounding deterioration over time
     t.setOrientation(glm::normalize(t.orientation()));
-    // =========================================================================
-    // UPGRADE: Pull clean direction vectors right from our component cache
-    // =========================================================================
-    // We force a quick inline update or simply look at the math layout.
-    // If your dedicated `sUpdateTransformVectors` system pass runs *after* this,
-    // we can temporarily generate the current directions here to make the player movement frame-accurate.
     glm::quat q = t.orientation();
     glm::vec3 f = q * glm::vec3(0.0f, 0.0f, -1.0f);
     
@@ -647,7 +615,6 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 
             t.velocity.x = desiredOnPlane.x;
             t.velocity.z = desiredOnPlane.z;
-            t.velocity.y = desiredOnPlane.y;
         }
         else
         {
@@ -908,6 +875,7 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
     }
     std::srand(std::time(0));
     m_homeLocationXZ = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
+    m_homeLocation3D = sf::Vector3f(m_homeLocationXZ.x, heightAt(m_homeLocationXZ.x, m_homeLocationXZ.y), m_homeLocationXZ.y);
 }
 
 void Scene_IC_Camp::spawnPlayer()
@@ -1791,14 +1759,6 @@ void Scene_IC_Camp::renderOrbCreature()
     glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraUp"),      1, glm::value_ptr(camUp));
     glUniformMatrix4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_viewProj"),
         1, GL_FALSE, vp.data());
-
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunDir"), 1, glm::value_ptr(sunDir));
-    glUniform4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_sunColor"), 1, glm::value_ptr(sunColor));
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampIntensity"), 2.0f);
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampRange"),     200.0f);
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampConeCos"),   1.0f);
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_headlampEnabled"),
-        shouldHeadlightsBeOn() ? 1.0f : 0.0f);
 
     // ==================== DRAW ====================
     m_orbSSBO.bind(0);

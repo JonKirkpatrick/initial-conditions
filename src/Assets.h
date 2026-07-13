@@ -35,9 +35,27 @@ struct SpeciesTexturePaths
     std::string normal;
 };
 
+// Temporary shim (pre-Stage-6 tiled sampler2DArray system): a single
+// monolithic float32 heightfield, held as a flat CPU buffer for height
+// queries and mirrored to a single-channel GL_R32F texture for GPU sampling.
+struct HeightArray
+{
+    int width = 0;
+    int height = 0;
+    std::vector<float> data;   // row-major, size == width * height
+    GLuint textureId = 0;      // GL_TEXTURE_2D, GL_R32F
+
+    float sample(int x, int y) const
+    {
+        assert(x >= 0 && x < width && y >= 0 && y < height);
+        return data[static_cast<size_t>(y) * width + x];
+    }
+};
+
 class Assets
 {
     std::map<std::string, sf::Texture>                  m_textureMap;
+    std::map<std::string, HeightArray>                  m_heightArrayMap;
     std::map<std::string, sf::Font>                     m_fontMap;
     std::map<std::string, sf::SoundBuffer>              m_soundBufferMap;
     std::map<std::string, sf::Sound>                    m_soundMap;
@@ -53,6 +71,7 @@ class Assets
     std::vector<SpeciesData>                            m_speciesRegistry;
 
     void addTexture(const std::string& textureName, const std::string& path, bool smooth = false);
+    void addHeightArray(const std::string& heightArrayName, const std::string& path);
     void buildSpeciesTextureArrays();
     void releaseSpeciesTextures();
     void addFont(const std::string& fontName, const std::string& path);
@@ -78,6 +97,7 @@ public:
     };
 
     bool readRawHalfFile(const std::filesystem::path& path, int& width, int& height, std::vector<uint16_t>& pixels);
+    bool readRawFloatFile(const std::filesystem::path& path, int& width, int& height, std::vector<float>& values);
     static Assets& Instance();
     Assets(const Assets&) = delete;
     Assets& operator=(const Assets&) = delete;
@@ -88,6 +108,7 @@ public:
     void finalizeSpeciesBuffer();
 
     const sf::Texture& getTexture(const std::string& textureName) const;
+    const HeightArray& getHeightArray(const std::string& heightArrayName) const;
     const sf::Font& getFont(const std::string& fontName) const;
     sf::Sound& getSound(const std::string& soundName);
     sf::Music& getMusic(const std::string& musicName);
