@@ -1,5 +1,6 @@
 #include <GL/glew.h>
 #include "Scene_IC_Camp.h"
+#include "WorldCoordinates.hpp"
 #include "GameEngine.h"
 #include "OrbSSBO.h"
 #include <SFML/Graphics.hpp>
@@ -13,6 +14,7 @@
 #include "imgui-SFML.h"
 #include "Camera.h"
 #include "Astro.hpp"
+#include "TerrainStreamer.h"
 #include <random>
 #include <array>
 #include <filesystem>
@@ -64,6 +66,13 @@ static sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b)
 }
 
 // =========================================================================
+// Namespace Aliases
+// =========================================================================
+
+namespace WCS = WorldCoordinates::Square;
+namespace WCH = WorldCoordinates::Hex;
+
+// =========================================================================
 // Public Interface
 // =========================================================================
 
@@ -104,6 +113,11 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     initializeOrbShaderStorage();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
+}
+
+Scene_IC_Camp::~Scene_IC_Camp() {
+    destroyGBuffer();
+    destroyShadowMap();
 }
 
 void Scene_IC_Camp::update() {
@@ -292,7 +306,7 @@ void Scene_IC_Camp::sGUI()
             sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
 
             sf::Vector3f worldPos = screenToWorld(mousePos);
-            sf::Vector2i hexCoords = worldToHex(worldPos.x, worldPos.z);
+            sf::Vector2i hexCoords = WCH::worldToHex(worldPos.x, worldPos.z);
 
             auto& playerTransform = m_entityManager.getTransform(m_player);
             sf::Vector3f rel = m_homeLocation3D - playerTransform.pos;
@@ -845,16 +859,28 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
 
     std::ifstream file(filename);
     std::string str;
-    int terrainLayerIndex = 0;
+    
     while (file >> str)
     {
-        if (str == "Camera")
+        if (str == "Terrain")
+        {
+            std::string manifestPathStr;
+            file >> manifestPathStr;
+            
+            m_terrainStreamer = std::make_unique<TerrainStreamer>(manifestPathStr);
+            
+            const auto& manifest = m_terrainStreamer->getManifest();
+            
+            m_latitude  = manifest.worldOriginLatLon.x;
+            m_longitude = manifest.worldOriginLatLon.y;
+        }
+        else if (str == "Camera")
         {
             file >> m_cameraConfig.FOVY
                  >> m_cameraConfig.NEAR_PLANE
                  >> m_cameraConfig.FAR_PLANE;
         }
-        if (str == "Player")
+        else if (str == "Player")
         {
             file >> m_playerConfig.MOVE_SPEED
                  >> m_playerConfig.ROTATION_SPEED
@@ -863,18 +889,18 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
                  >> m_playerConfig.POSITION_X
                  >> m_playerConfig.POSITION_Z;
         }
-        if (str == "DateTimePlace")
+        else if (str == "DateTimePlace")
         {
+            // Now only reading time parameters!
             file >> m_gameYear
                  >> m_gameMonth
                  >> m_gameDayOfMonth
-                 >> m_gameTimeOfDay
-                 >> m_latitude
-                 >> m_longitude;
+                 >> m_gameTimeOfDay;
         }
     }
+    
     std::srand(std::time(0));
-    m_homeLocationXZ = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
+    m_homeLocationXZ = WCH::hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
     m_homeLocation3D = sf::Vector3f(m_homeLocationXZ.x, heightAt(m_homeLocationXZ.x, m_homeLocationXZ.y), m_homeLocationXZ.y);
 }
 
@@ -882,7 +908,7 @@ void Scene_IC_Camp::spawnPlayer()
 {
     m_player = m_entityManager.addEntity("player");
     m_playerConfig.ROTATION_SPEED = Astro::toRad(m_playerConfig.ROTATION_SPEED);
-    sf::Vector2f playerPosition = hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
+    sf::Vector2f playerPosition = WCH::hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
     sf::Vector3f spawnPos(playerPosition.x, heightAt(playerPosition.x, playerPosition.y), playerPosition.y);
     CTransform3D playerTransform(spawnPos);
     playerTransform.setRotation(0.0f, 0.0f, 0.0f);
@@ -917,7 +943,7 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
                                    float yawRad, int species)
 {
     // 1. Calculate the spatial data right now (no change here)
-    const sf::Vector2f groundXZ = hexToWorld(hexQ, hexR);
+    const sf::Vector2f groundXZ = WCH::hexToWorld(hexQ, hexR);
     const float        groundY  = heightAt(groundXZ.x, groundXZ.y);
     const float        hoverY   = groundY + radius;
 
@@ -1606,7 +1632,7 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     auto& cameraData = m_entityManager.getCamera(m_camera);
     auto vpMatrix   = Camera::getVPMatrix(transform, cameraData);
     sf::Vector3f worldPos = screenToWorld(m_cachedMousePos);
-    sf::Vector2i hex = worldToHex(worldPos.x, worldPos.z);
+    sf::Vector2i hex = WCH::worldToHex(worldPos.x, worldPos.z);
 
     sf::Vector2u windowSize = m_game.window().getSize();
 
@@ -2004,29 +2030,6 @@ sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
         color.g / 255.0f,
         color.b / 255.0f
     );
-}
-
-sf::Vector2i Scene_IC_Camp::worldToHex(float x, float z) const {
-    float q = (2.f/3.f * x) / m_hexSize;
-    float r = (z / (m_hexSize * std::sqrt(3.f))) - q / 2.f;
-    
-    float s = -q - r;
-    int rq = int(std::round(q));
-    int rr = int(std::round(r));
-    int rs = int(std::round(s));
-    float dq = std::abs(rq - q);
-    float dr = std::abs(rr - r);
-    float ds = std::abs(rs - s);
-    if (dq > dr && dq > ds)      rq = -rr - rs;
-    else if (dr > ds)             rr = -rq - rs;
-    
-    return sf::Vector2i(rq, rr);
-}
-
-sf::Vector2f Scene_IC_Camp::hexToWorld(int q, int r) const {
-    float x = m_hexSize * 3.f/2.f * q;
-    float z = m_hexSize * std::sqrt(3.f) * (r + q/2.f);
-    return sf::Vector2f(x, z);
 }
 
 sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {

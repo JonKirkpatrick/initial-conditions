@@ -8,6 +8,8 @@
 #include "Astro.hpp"
 #include <SFML/System.hpp>
 
+class TerrainStreamer;
+
 class Scene_IC_Camp : public Scene {
 
     // =========================================================================
@@ -39,6 +41,7 @@ protected:
     SoAEntityHandle     m_player;
     CameraConfig        m_cameraConfig;
     PlayerConfig        m_playerConfig;
+    std::unique_ptr<TerrainStreamer> m_terrainStreamer;
     sf::Vector2i        m_cachedMousePos{0,0};
     bool                m_leftMousePressed = false;
 
@@ -294,8 +297,6 @@ protected:
     // =========================================================================
 
     sf::Glsl::Vec3 colorToShader(const sf::Color& color);
-    sf::Vector2i   worldToHex(float x, float z) const;
-    sf::Vector2f   hexToWorld(int q, int r) const;
     sf::Vector3f   screenToWorld(sf::Vector2i mousePos) const;
 
 public:
@@ -305,6 +306,7 @@ public:
     // =========================================================================
 
     Scene_IC_Camp(GameEngine& game, const std::string& levelPath);
+    ~Scene_IC_Camp() override;
     void sGUI();
     void update();
     void sDoAction(const Action& action);
