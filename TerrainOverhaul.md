@@ -12,16 +12,12 @@ This document outlines the multi-stage rollout plan to transition the engine's t
 ## First Version of the Tileset Description Schema
 ```json
 {
-  "schema_version": 1,
+  "schemaVersion": 2,
   "name": "Avalon",
-  "world_origin_latlon": [47.0, -53.0],
-  "world_size_m": [111320.0, 111320.0],
-  "tile_resolution": 256,
-  "apron_texels": 1,
-  "meters_per_texel": 3.4,
-  "grid_dimensions": [7, 7],
-  "tile_directory": "tiles/Avalon/",
-  "tile_naming_pattern": "tile_{row}_{col}.bin",
+  "worldOriginLatLon": [47.0, -53.0],
+  "tileBoundsUpperLeft": { "row": 0, "col": 0 },
+  "tileBoundsLowerRight": { "row": 42, "col": 42 },
+  "tileDirectory": "tiles/Avalon/",
   "channels": ["height"]
 }
 ```

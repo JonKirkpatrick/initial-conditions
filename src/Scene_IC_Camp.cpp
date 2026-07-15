@@ -82,7 +82,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 {
     m_topdownMaxHeight = 1000.f;
     float worldSize = Topography::BASE_SIZE;
-    float worldMinCoord = -worldSize / 2.0f;
+    float worldMinCoord = 0.f;
     m_topdownWorldMin = { worldMinCoord, worldMinCoord };
     m_topdownWorldSize = { worldSize, worldSize };
     sf::ContextSettings settings;
@@ -163,6 +163,9 @@ void Scene_IC_Camp::update() {
     }
 
     sMovement(dt);
+    sf::Vector3f playerPos = m_entityManager.getTransform(m_player).pos;
+    sf::Vector2f playerPos2D(playerPos.x, playerPos.z);
+    m_terrainStreamer->update(playerPos2D);
     m_entityManager.sUpdateTransformVectors();
     updateCamera(dt);
     updateHUDData();
@@ -973,7 +976,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     // 1. Random Number Engine Setup
     std::mt19937 rng(1337); // Seeded for consistency
     
-    // Extents are -100 to 100 tiles. 
+    // Extents are -1000 to 1000 tiles. 
     std::uniform_int_distribution<int> hexDist(-1000, 1000);
     
     std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
@@ -1012,8 +1015,8 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     while (spawned < count && attempts < maxAttempts)
     {
         ++attempts;
-        int hexQ = hexDist(rng);
-        int hexR = hexDist(rng);
+        int hexQ = hexDist(rng) + m_playerConfig.POSITION_X;
+        int hexR = hexDist(rng) + m_playerConfig.POSITION_Z;
 
         if (IsTooClose(hexQ, hexR)) continue;
 

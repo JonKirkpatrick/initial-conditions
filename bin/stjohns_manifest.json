@@ -3,12 +3,12 @@
     "name": "StJohns",
     "worldOriginLatLon": [47.0, -53.0],
     "tileBoundsUpperLeft": {
-        "row": 40,
-        "col": 10
+        "row": 45,
+        "col": 20
     },
     "tileBoundsLowerRight": {
-        "row": 50,
-        "col": 20
+        "row": 49,
+        "col": 24
     },
     "tileDirectory": "./tiles/StJohns",
     "channels": ["height"]

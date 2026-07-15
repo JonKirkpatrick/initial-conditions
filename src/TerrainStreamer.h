@@ -51,6 +51,7 @@ private:
     bool m_gridInitialized = false;
 
     TileCoord clampToWorldBounds(TileCoord coord) const;
+    TileCoord worldPosToAbsoluteTileCoord(const sf::Vector2f& cameraWorldPos) const;
     void      initializeGrid(const sf::Vector2f& cameraWorldPos);
     void      loadTileIntoSlot(TileCoord coord);
 

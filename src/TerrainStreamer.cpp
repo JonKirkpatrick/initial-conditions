@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <nlohmann/json.hpp>
 
@@ -52,7 +53,7 @@ TerrainManifest TerrainManifest::loadFromFile(const std::filesystem::path& manif
     manifest.tileBoundsLowerRight.row = lr.at("row").get<int>();
     manifest.tileBoundsLowerRight.col = lr.at("col").get<int>();
 
-    manifest.tileDirectory = data.at("tileDirectory").get<std::filesystem::path>();
+    manifest.tileDirectory = std::filesystem::path(data.at("tileDirectory").get<std::string>());
 
     manifest.channels = data.at("channels").get<std::vector<std::string>>();
 
@@ -99,6 +100,8 @@ void TerrainStreamer::update(const sf::Vector2f& cameraWorldPos)
     if (m_slotValid.empty() || !m_gridInitialized)
     {
         initializeGrid(cameraWorldPos);
+        std::cout << "[TerrainStreamer] Grid initialized at center tile: [" 
+                  << m_centerTileCoord.row << ", " << m_centerTileCoord.col << "]\n";
         return;
     }
 
@@ -122,10 +125,21 @@ TileCoord TerrainStreamer::clampToWorldBounds(TileCoord coord) const
     return coord;
 }
 
+TileCoord TerrainStreamer::worldPosToAbsoluteTileCoord(const sf::Vector2f& cameraWorldPos) const
+{
+    TileCoord localTile = WorldCoordinates::Square::worldPosToTileCoord(cameraWorldPos);
+    
+    TileCoord geoTile;
+    geoTile.row = m_manifest.tileBoundsUpperLeft.row + localTile.row;
+    geoTile.col = m_manifest.tileBoundsUpperLeft.col + localTile.col;
+    
+    return geoTile;
+}
+
 void TerrainStreamer::initializeGrid(const sf::Vector2f& cameraWorldPos)
 {
-    m_centerTileCoord = clampToWorldBounds(
-        WorldCoordinates::Square::worldPosToTileCoord(cameraWorldPos));
+    // Use the offset helper!
+    m_centerTileCoord = clampToWorldBounds(worldPosToAbsoluteTileCoord(cameraWorldPos));
 
     for (int row = m_centerTileCoord.row - kHalfWindow;
          row <= m_centerTileCoord.row + kHalfWindow; ++row)
@@ -141,37 +155,70 @@ void TerrainStreamer::initializeGrid(const sf::Vector2f& cameraWorldPos)
 
 void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
 {
-    TileCoord newCenter = clampToWorldBounds(
-        WorldCoordinates::Square::worldPosToTileCoord(cameraWorldPos));
-
+    TileCoord newCenter = clampToWorldBounds(worldPosToAbsoluteTileCoord(cameraWorldPos));
     if (newCenter == m_centerTileCoord)
         return;
 
+    // Log the initiation of a boundary crossing
+    std::cout << "[TerrainStreamer] Boundary crossed! "
+              << "Center: [" << m_centerTileCoord.row << ", " << m_centerTileCoord.col << "] -> "
+              << "New Center: [" << newCenter.row << ", " << newCenter.col << "]\n";
+
+    // Track steps taken for a summary at the end
+    int rowsStepped = 0;
+    int colsStepped = 0;
+
+    // Shift Rows
     while (m_centerTileCoord.row != newCenter.row)
     {
         const int step = (newCenter.row > m_centerTileCoord.row) ? 1 : -1;
+        const int oldRow = m_centerTileCoord.row;
         m_centerTileCoord.row += step;
+        rowsStepped++;
+
+        std::cout << "  -> Stepping Row: " << oldRow << " -> " << m_centerTileCoord.row << "\n";
 
         const int edgeRow = m_centerTileCoord.row + kHalfWindow * step;
         for (int col = m_centerTileCoord.col - kHalfWindow;
              col <= m_centerTileCoord.col + kHalfWindow; ++col)
         {
-            loadTileIntoSlot(TileCoord{edgeRow, col});
+            TileCoord targetTile{edgeRow, col};
+            int slot = WorldCoordinates::Square::slotIndexForTile(targetTile);
+            
+            std::cout << "     [Row Edge] Loading Tile [" << targetTile.row << ", " << targetTile.col 
+                      << "] into Mem Slot " << slot << "\n";
+                      
+            loadTileIntoSlot(targetTile);
         }
     }
 
+    // Shift Columns
     while (m_centerTileCoord.col != newCenter.col)
     {
         const int step = (newCenter.col > m_centerTileCoord.col) ? 1 : -1;
+        const int oldCol = m_centerTileCoord.col;
         m_centerTileCoord.col += step;
+        colsStepped++;
+
+        std::cout << "  -> Stepping Col: " << oldCol << " -> " << m_centerTileCoord.col << "\n";
 
         const int edgeCol = m_centerTileCoord.col + kHalfWindow * step;
         for (int row = m_centerTileCoord.row - kHalfWindow;
              row <= m_centerTileCoord.row + kHalfWindow; ++row)
         {
-            loadTileIntoSlot(TileCoord{row, edgeCol});
+            TileCoord targetTile{row, edgeCol};
+            int slot = WorldCoordinates::Square::slotIndexForTile(targetTile);
+
+            std::cout << "     [Col Edge] Loading Tile [" << targetTile.row << ", " << targetTile.col 
+                      << "] into Mem Slot " << slot << "\n";
+
+            loadTileIntoSlot(targetTile);
         }
     }
+
+    std::cout << "[TerrainStreamer] Shift Complete. (Stepped " << rowsStepped << " rows, " 
+              << colsStepped << " cols). New Center is [" 
+              << m_centerTileCoord.row << ", " << m_centerTileCoord.col << "]\n\n";
 }
 
 void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
