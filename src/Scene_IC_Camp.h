@@ -71,11 +71,11 @@ protected:
     sf::Vector2f        m_topdownWorldSize{1.f, 1.f};
 
     // =========================================================================
-    // Rendering — SFML Shaders
+    // Rendering — OpenGL Programs
     // =========================================================================
 
-    sf::Shader&         m_topoMinimapShader     = Assets::Instance().getShader("TopoMiniMap");
-    sf::Shader&         m_sky                   = Assets::Instance().getShader("Sky");
+    GLuint              m_minimapProgram        = Assets::Instance().getGLProgram("MiniMap");
+    GLuint              m_skyProgram            = Assets::Instance().getGLProgram("Sky");
 
     // =========================================================================
     // Rendering — Render Textures and OpenGL Resources
@@ -83,7 +83,6 @@ protected:
 
     sf::RenderTexture   m_skyTexture;
     sf::RenderTexture   m_minimapTexture;
-    sf::Texture         m_topdownTexture;
     unsigned int        m_minimapTextureSize    = 256;
 
     // terrain pipeline

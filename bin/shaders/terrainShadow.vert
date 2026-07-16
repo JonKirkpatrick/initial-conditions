@@ -5,7 +5,6 @@ layout(location = 0) in vec2 a_uv;
 uniform sampler2D u_topoTopdownTex;
 uniform vec2      u_topdownWorldMin;
 uniform vec2      u_topdownWorldSize;
-uniform float     u_heightMax;
 uniform mat4      u_lightViewProj;
 
 float decodeHeightVertex(vec2 uv) {

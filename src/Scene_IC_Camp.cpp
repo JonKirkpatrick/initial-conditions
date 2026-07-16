@@ -91,7 +91,6 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     m_moonTexture = Assets::Instance().getTexture("Moon");
     m_skyTexture = sf::RenderTexture({windowSize.x, windowSize.y});
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
-    m_topdownTexture = Assets::Instance().getTexture("Test1");
     m_gridColour = Theme::color("cerulean");
     m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
@@ -99,7 +98,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(32000);
+    spawnDebugOrbs(1);
     m_entityManager.update();
     buildTerrainGrid();
     buildHud();
@@ -976,8 +975,8 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     // 1. Random Number Engine Setup
     std::mt19937 rng(1337); // Seeded for consistency
     
-    // Extents are -1000 to 1000 tiles. 
-    std::uniform_int_distribution<int> hexDist(-10000, 10000);
+    // Extents are -500 to 500 tiles. 
+    std::uniform_int_distribution<int> hexDist(-500, 500);
     
     std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
     std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
@@ -1414,7 +1413,7 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForMapBounds(float& lightDepthRange
 
     glm::vec2 mapMin(m_topdownWorldMin.x, m_topdownWorldMin.y);
     glm::vec2 mapMax(mapMin.x + m_topdownWorldSize.x, mapMin.y + m_topdownWorldSize.y);
-    float heightMin = 0.0f; // adjust if your terrain can go negative
+    float heightMin = 0.0f;
     float heightMax = m_topdownMaxHeight;
 
     glm::vec3 worldCorners[8] = {
@@ -1498,7 +1497,6 @@ void Scene_IC_Camp::runShadowPass() {
                     m_topdownWorldMin.x, m_topdownWorldMin.y);
         glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_topdownWorldSize"),
                     m_topdownWorldSize.x, m_topdownWorldSize.y);
-        glUniform1f(glGetUniformLocation(m_terrainShadowProgram, "u_heightMax"), m_topdownMaxHeight);
         glUniformMatrix4fv(glGetUniformLocation(m_terrainShadowProgram, "u_lightViewProj"),
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
         glBindVertexArray(m_gridVAO);
@@ -1709,22 +1707,31 @@ void Scene_IC_Camp::updateMinimapTexture()
     const float center   = texSize * 0.5f;
     const float worldRadius = 2560.f;
 
-    // == Draw the hillshaded topo layer via shader ==========================
     m_minimapTexture.clear(sf::Color::Transparent);
+    m_minimapTexture.setActive(true); // Directs OpenGL context to this target
 
-    sf::RectangleShape fullQuad({texSize, texSize});
+    glViewport(0, 0, m_minimapTextureSize, m_minimapTextureSize);
 
-    m_topoMinimapShader.setUniform("topdownWorldMin", sf::Glsl::Vec2(m_topdownWorldMin.x, m_topdownWorldMin.y));
-    m_topoMinimapShader.setUniform("topdownWorldSize", sf::Glsl::Vec2(m_topdownWorldSize.x, m_topdownWorldSize.y));
-    m_topoMinimapShader.setUniform("topoTopdownTex", m_topdownTexture);
-    m_topoMinimapShader.setUniform("u_playerXZ",
-        sf::Glsl::Vec2(playerPos.x, playerPos.z));
-    m_topoMinimapShader.setUniform("u_worldRadius",  worldRadius);
-    m_topoMinimapShader.setUniform("u_texSize",      texSize);
-    m_topoMinimapShader.setUniform("u_heightMax",    m_topdownMaxHeight);
-    sf::RenderStates states;
-    states.shader = &m_topoMinimapShader;
-    m_minimapTexture.draw(fullQuad, states);
+    const auto& heightArray = Assets::Instance().getHeightArray("Test2");
+
+    glUseProgram(m_minimapProgram);
+
+    glUniform2f(glGetUniformLocation(m_minimapProgram, "topdownWorldMin"), m_topdownWorldMin.x, m_topdownWorldMin.y);
+    glUniform2f(glGetUniformLocation(m_minimapProgram, "topdownWorldSize"), m_topdownWorldSize.x, m_topdownWorldSize.y);
+    glUniform2f(glGetUniformLocation(m_minimapProgram, "u_playerXZ"), playerPos.x, playerPos.z);
+    glUniform1f(glGetUniformLocation(m_minimapProgram, "u_worldRadius"), worldRadius);
+    glUniform1f(glGetUniformLocation(m_minimapProgram, "u_heightMax"), m_topdownMaxHeight);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
+    glUniform1i(glGetUniformLocation(m_minimapProgram, "topoTopdownTex"), 0);
+
+    glBindVertexArray(m_gridVAO); // Any bound VAO is fine because the vertex shader relies solely on gl_VertexID
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
 
     sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
@@ -1750,6 +1757,7 @@ void Scene_IC_Camp::updateMinimapTexture()
         homeHex.setFillColor(sf::Color(245, 225, 98, 255));
         homeHex.setOutlineThickness(1.f);
         homeHex.setOutlineColor(sf::Color(88, 70, 24, 240));
+        
         m_minimapTexture.draw(homeHex);
     }
 
@@ -1986,25 +1994,54 @@ void Scene_IC_Camp::blitToScreen(GLuint tex)
 
 void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& cameraData = m_entityManager.getCamera(m_camera);
-    auto transform = m_entityManager.getTransform(m_camera);
-    sf::RectangleShape skyQuad(sf::Vector2f(m_game.window().getSize().x, m_game.window().getSize().y));
-    m_sky.setUniform("viewportSize",  sf::Glsl::Vec2(m_game.window().getSize().x, m_game.window().getSize().y));
-    m_sky.setUniform("fovY",          cameraData.fovY);
-    m_sky.setUniform("aspectRatio",   cameraData.aspectRatio);
-    m_sky.setUniform("worldToCamMatrix", worldToCamMatrix);
-    m_sky.setUniform("sunDir", m_astroState.sunDirection);
-    m_sky.setUniform("useSkyCubemap", m_skyCubemapReady);
-    m_sky.setUniform("starRotationMatrix", sf::Glsl::Mat3(m_astroState.starRotationMatrix));
-    m_sky.setUniform("skyExposure", 5.0f);
-    m_sky.setUniform("moonDir", m_astroState.moonDirection);
-    m_sky.setUniform("moonTexture", m_moonTexture);
-
-    if (m_skyCubemapReady && m_skyCubemapHandle != 0)
-    {
-        glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
-    }
+    
     m_skyTexture.clear(sf::Color::Transparent);
-    m_skyTexture.draw(skyQuad, &m_sky);
+    m_skyTexture.setActive(true); // Gain off-screen FBO focus
+
+    // Match output viewport to target
+    glViewport(0, 0, m_skyTexture.getSize().x, m_skyTexture.getSize().y);
+
+    glUseProgram(m_skyProgram);
+
+    // 1. Send mathematical uniforms
+    glUniform1f(glGetUniformLocation(m_skyProgram, "fovY"), cameraData.fovY);
+    glUniform1f(glGetUniformLocation(m_skyProgram, "aspectRatio"), cameraData.aspectRatio);
+    glUniformMatrix3fv(glGetUniformLocation(m_skyProgram, "worldToCamMatrix"), 1, GL_FALSE, &worldToCamMatrix.array[0]);
+    glUniform3f(glGetUniformLocation(m_skyProgram, "sunDir"), m_astroState.sunDirection.x, m_astroState.sunDirection.y, m_astroState.sunDirection.z);
+    glUniform4f(glGetUniformLocation(m_skyProgram, "sunColor"), 1.0f, 1.0f, 1.0f, 1.0f); // Default sunColor fallback
+    glUniform1i(glGetUniformLocation(m_skyProgram, "useSkyCubemap"), m_skyCubemapReady);
+    glUniformMatrix3fv(glGetUniformLocation(m_skyProgram, "starRotationMatrix"), 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
+    glUniform1f(glGetUniformLocation(m_skyProgram, "skyExposure"), 5.0f);
+    glUniform3f(glGetUniformLocation(m_skyProgram, "moonDir"), m_astroState.moonDirection.x, m_astroState.moonDirection.y, m_astroState.moonDirection.z);
+
+    // 2. Bind Texture Units Determenistically
+    // Texture Unit 0: Cubemap Stars
+    glActiveTexture(GL_TEXTURE0);
+    if (m_skyCubemapReady && m_skyCubemapHandle != 0) {
+        glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
+    } else {
+        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    }
+    glUniform1i(glGetUniformLocation(m_skyProgram, "skyCubemap"), 0);
+
+    // Texture Unit 1: Moon Texture (Utilizing the SFML native texture handle)
+    glActiveTexture(GL_TEXTURE1);
+    sf::Texture::bind(&m_moonTexture); // Safely grabs the SFML image context handle
+    glUniform1i(glGetUniformLocation(m_skyProgram, "moonTexture"), 1);
+
+    // 3. Procedural Draw Call (Zero-buffer Overhead)
+    glBindVertexArray(m_gridVAO); // Any valid VAO is fine to satisfy Core Profile drawing
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    // Cleanup active bindings
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glUseProgram(0);
+
+    // Wrap up SFML texture sequence
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
 }

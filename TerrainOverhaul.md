@@ -67,13 +67,13 @@ The whole idea of tiling and streaming our terrain in this manner is to support 
 ### Stage 6: Fixed Multi-Tile Grid & Array Shaders
 * **Goal:** Transition from a monolithic mega-texture to modular slots.
 * [ ] Implement the `sampler2DArray` vertex shader logic on the GPU.
-* [ ] Set up the static 7 x 7 array pointer layout on the CPU.
+* [x] Set up the static 7 x 7 array pointer layout on the CPU.
 * [ ] Implement the CPU-to-GPU Uniform Translation Map (`u_ActiveTileSlices[25]`) to feed the shader viewport.
 
 ### Stage 7.1: Synchronous Toroidal Indexing
 * **Goal:** Build the ring-buffer modulo mapping
 * [x] Determine which of the 49 slots currently represents which world-tile coordinate.
-* [ ] On boundary crossing, block and load new tile directly on main thread.
+* [x] On boundary crossing, block and load new tile directly on main thread.
 
 ### Stage 7.2:  Extract "load tile from disc" As A Pure Function
 * **Goal:** Input: tile coordinate.  Output:  a filled 257x257 float buffer.

@@ -32,8 +32,8 @@ namespace Topography {
         localX = std::clamp(localX, 0.0f, static_cast<float>(kTileResolution - 1));
         localZ = std::clamp(localZ, 0.0f, static_cast<float>(kTileResolution - 1));
 
-        int tx0 = static_cast<int>(std::floor(localX));
-        int tz0 = static_cast<int>(std::floor(localZ));
+        int tx0 = static_cast<int>(localX);
+        int tz0 = static_cast<int>(localZ);
 
         float fx = localX - static_cast<float>(tx0);
         float fz = localZ - static_cast<float>(tz0);
@@ -87,8 +87,8 @@ namespace Topography {
         localX = std::clamp(localX, 0.0f, static_cast<float>(kTileResolution - 1));
         localZ = std::clamp(localZ, 0.0f, static_cast<float>(kTileResolution - 1));
 
-        int tx0 = static_cast<int>(std::floor(localX));
-        int tz0 = static_cast<int>(std::floor(localZ));
+        int tx0 = static_cast<int>(localX);
+        int tz0 = static_cast<int>(localZ);
 
         float fx = localX - static_cast<float>(tx0);
         float fz = localZ - static_cast<float>(tz0);

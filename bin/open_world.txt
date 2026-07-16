@@ -1,4 +1,4 @@
 Terrain ./stjohns_manifest.json
 Camera 45.0 1.0 5000.0
 Player 27.7777778 45.0 1.72 0.20 2566 615
-DateTimePlace 2026 7 16 6.1
+DateTimePlace 2026 8 12 15.5

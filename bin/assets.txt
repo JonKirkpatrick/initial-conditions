@@ -20,12 +20,11 @@ Font        Good            fonts/good-timing-bd.otf
 
 Cubemap     NightSky        images/skymap
 
-Shader      TopoMiniMap     shaders/minimap_topo.frag
-Shader      Sky             shaders/sky.frag
-
-GLProgram   Terrain         shaders/terrain.vert shaders/terrain.frag
-GLProgram   OrbCreature     shaders/orbCreature.vert shaders/orbCreature.frag
 GLProgram   Blit            shaders/blit.vert shaders/blit.frag
-GLProgram   Lighting        shaders/lighting.vert shaders/lighting.frag
+GLProgram   MiniMap         shaders/minimap_topo.vert shaders/minimap_topo.frag
+GLProgram   Sky             shaders/sky.vert shaders/sky.frag
+GLProgram   Terrain         shaders/terrain.vert shaders/terrain.frag
 GLProgram   TerrainShadow   shaders/terrainShadow.vert shaders/terrainShadow.frag
+GLProgram   OrbCreature     shaders/orbCreature.vert shaders/orbCreature.frag
 GLProgram   OrbShadow       shaders/orbShadow.vert shaders/orbShadow.frag
+GLProgram   Lighting        shaders/lighting.vert shaders/lighting.frag
