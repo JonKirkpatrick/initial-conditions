@@ -7,8 +7,8 @@
         "col": 20
     },
     "tileBoundsLowerRight": {
-        "row": 49,
-        "col": 24
+        "row": 55,
+        "col": 30
     },
     "tileDirectory": "./tiles/StJohns",
     "channels": ["height"]

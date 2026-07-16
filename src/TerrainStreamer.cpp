@@ -157,68 +157,39 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
 {
     TileCoord newCenter = clampToWorldBounds(worldPosToAbsoluteTileCoord(cameraWorldPos));
     if (newCenter == m_centerTileCoord)
+    {
         return;
+    }
 
-    // Log the initiation of a boundary crossing
-    std::cout << "[TerrainStreamer] Boundary crossed! "
-              << "Center: [" << m_centerTileCoord.row << ", " << m_centerTileCoord.col << "] -> "
-              << "New Center: [" << newCenter.row << ", " << newCenter.col << "]\n";
+    auto isInWindow = [](TileCoord coord, TileCoord center) {
+        return std::abs(coord.row - center.row) <= kHalfWindow &&
+               std::abs(coord.col - center.col) <= kHalfWindow;
+    };
 
-    // Track steps taken for a summary at the end
-    int rowsStepped = 0;
-    int colsStepped = 0;
+    std::vector<TileCoord> tilesToLoad;
+    float gridDim = WorldCoordinates::Square::kStreamerGridDim;
+    tilesToLoad.reserve(gridDim * gridDim);
 
-    // Shift Rows
-    while (m_centerTileCoord.row != newCenter.row)
+    for (int row = newCenter.row - kHalfWindow; row <= newCenter.row + kHalfWindow; ++row)
     {
-        const int step = (newCenter.row > m_centerTileCoord.row) ? 1 : -1;
-        const int oldRow = m_centerTileCoord.row;
-        m_centerTileCoord.row += step;
-        rowsStepped++;
-
-        std::cout << "  -> Stepping Row: " << oldRow << " -> " << m_centerTileCoord.row << "\n";
-
-        const int edgeRow = m_centerTileCoord.row + kHalfWindow * step;
-        for (int col = m_centerTileCoord.col - kHalfWindow;
-             col <= m_centerTileCoord.col + kHalfWindow; ++col)
+        for (int col = newCenter.col - kHalfWindow; col <= newCenter.col + kHalfWindow; ++col)
         {
-            TileCoord targetTile{edgeRow, col};
-            int slot = WorldCoordinates::Square::slotIndexForTile(targetTile);
-            
-            std::cout << "     [Row Edge] Loading Tile [" << targetTile.row << ", " << targetTile.col 
-                      << "] into Mem Slot " << slot << "\n";
-                      
-            loadTileIntoSlot(targetTile);
+            TileCoord target{row, col};
+            if (!isInWindow(target, m_centerTileCoord))
+            {
+                tilesToLoad.push_back(target);
+            }
         }
     }
 
-    // Shift Columns
-    while (m_centerTileCoord.col != newCenter.col)
+    for (const auto& tile : tilesToLoad)
     {
-        const int step = (newCenter.col > m_centerTileCoord.col) ? 1 : -1;
-        const int oldCol = m_centerTileCoord.col;
-        m_centerTileCoord.col += step;
-        colsStepped++;
-
-        std::cout << "  -> Stepping Col: " << oldCol << " -> " << m_centerTileCoord.col << "\n";
-
-        const int edgeCol = m_centerTileCoord.col + kHalfWindow * step;
-        for (int row = m_centerTileCoord.row - kHalfWindow;
-             row <= m_centerTileCoord.row + kHalfWindow; ++row)
-        {
-            TileCoord targetTile{row, edgeCol};
-            int slot = WorldCoordinates::Square::slotIndexForTile(targetTile);
-
-            std::cout << "     [Col Edge] Loading Tile [" << targetTile.row << ", " << targetTile.col 
-                      << "] into Mem Slot " << slot << "\n";
-
-            loadTileIntoSlot(targetTile);
-        }
+        loadTileIntoSlot(tile);
     }
 
-    std::cout << "[TerrainStreamer] Shift Complete. (Stepped " << rowsStepped << " rows, " 
-              << colsStepped << " cols). New Center is [" 
-              << m_centerTileCoord.row << ", " << m_centerTileCoord.col << "]\n\n";
+    m_centerTileCoord = newCenter;
+    std::cout << "[TerrainStreamer] Center tile updated to [" << m_centerTileCoord.row
+              << ", " << m_centerTileCoord.col << "]\n";
 }
 
 void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
@@ -228,6 +199,8 @@ void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
 
     m_slotWorldCoord[slot] = coord;
     m_slotValid[slot]      = ok;
+    std::cout << "[TerrainStreamer] Loaded tile [" << coord.row << ", " << coord.col
+              << "] into slot " << slot << " (valid: " << std::boolalpha << ok << ")\n";
 }
 
 // ---------------------------------------------------------------------

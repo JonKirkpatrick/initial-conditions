@@ -5,23 +5,29 @@ This document outlines the multi-stage rollout plan to transition the engine's t
 ## Target Architecture Specifications
 * **Base Core Tile Resolution:** 256 x 256 texels
 * **Memory Allocation (with Apron):** 257 x 257 floats per tile
-* **World Space Resolution:** 1 texel = ~3.1 to 4 meters
+* **World Space Resolution:** 1 texel = 4 meters
 * **CPU Memory Footprint:** 7x7 Grid (49 Tiles) with integrated 256 x 256 Spatial Partitioning Grid
 * **GPU Memory Footprint:** 5x5 Grid (25 Active Array Slices, size 256 x 256)
 
-## First Version of the Tileset Description Schema
+## Second Version of the Tileset Description Schema
+
 ```json
 {
   "schemaVersion": 2,
-  "name": "Avalon",
-  "worldOriginLatLon": [47.0, -53.0],
-  "tileBoundsUpperLeft": { "row": 0, "col": 0 },
-  "tileBoundsLowerRight": { "row": 42, "col": 42 },
-  "tileDirectory": "tiles/Avalon/",
+  "name": "StJohns",
+  "worldOriginLatLon": [48.00013888888889, -53.00013888888889],
+  "tileBoundsUpperLeft": { "row": 40, "col": 10 },
+  "tileBoundsLowerRight": { "row": 50, "col": 20 },
+  "tileDirectory": "tiles/StJohns/",
   "channels": ["height"]
 }
 ```
-The intention is to have the toolchain take as few of these properties as possible from the 
+The description above describes an 11x11 patch of tiles containing much of the St. John's, NL area.  The worldOriginLatLon is taken directly from the Python tooling we built to extract these tiles from Copernicus COG DEM GeoTiff files.  It is the latitude and longitude of the northwest corner of the actual GeoTiff file, not the specific offset of the tile bounds included in the patch described by this manifest.  Each GeoTiff contains exactly one degree of latitude and longitude, representing one arcsecond square per pixel.  This results in a source file of 3600x3600 pixels, which we interpolate to give us tiles of (256+1)x(256+1) pixel tiles, where each pixel represents a 4 metre square of terrain.  In the tiles, the additional row and column is just the first row and column of the adjacent tile, serving as an apron to be sampled in game instead of ever needing to read from two files for a single height lookup which uses a 2x2 neighbourhood to bilinearly interpolate over.
+
+We have included channels as a single element list in Schema Version 2, where we are only using height as our data.  We will likely be using parallel assets or a revised binary format to pack additional channels in the future, such as what is actually on the terrain, or other data about the terrain needed for other systems.  We may end up mapping out water here, or forests, or even roads.  It may even serve to provide a simple way to register spawn points or patrol paths when we build out a level editor.
+
+The whole idea of tiling and streaming our terrain in this manner is to support larger levels in the future, that would otherwise just eat into system memory.
+
 ---
 
 ## Rollout Pipeline
@@ -66,7 +72,7 @@ The intention is to have the toolchain take as few of these properties as possib
 
 ### Stage 7.1: Synchronous Toroidal Indexing
 * **Goal:** Build the ring-buffer modulo mapping
-* [ ] Determine which of the 49 slots currently represents which world-tile coordinate.
+* [x] Determine which of the 49 slots currently represents which world-tile coordinate.
 * [ ] On boundary crossing, block and load new tile directly on main thread.
 
 ### Stage 7.2:  Extract "load tile from disc" As A Pure Function
