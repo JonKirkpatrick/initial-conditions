@@ -15,10 +15,9 @@ out vec2 v_normalXZ;
 out float v_worldY;
 
 float decodeHeightVertex(vec2 uv) {
-    vec2 s = uv;
-    vec4 c = textureLod(u_topoTopdownTex, s, 0.0);
-    vec3 bytes = floor(c.rgb * 255.0 + 0.5);
-    return dot(bytes, vec3(65536.0, 256.0, 1.0)) * (u_heightMax / 16777215.0);
+    // With GL_R32F, the GPU hardware automatically reads and interpolates
+    // the raw height float in the red channel.
+    return textureLod(u_topoTopdownTex, uv, 0.0).r;
 }
 
 void main() {

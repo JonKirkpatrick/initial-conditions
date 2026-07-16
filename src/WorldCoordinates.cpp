@@ -10,13 +10,6 @@ namespace WorldCoordinates::Square {
         return TileCoord{ row, col };
     }
 
-    TexelCoord worldPosToTexelCoord(sf::Vector2f worldPos)
-    {
-        int x = static_cast<int>(std::floor(worldPos.x / kTexelSizeM));
-        int z = static_cast<int>(std::floor(worldPos.y / kTexelSizeM));
-        return TexelCoord{ x, z };
-    }
-
     int slotIndexForTile(TileCoord coord)
     {
         auto wrap = [](int v) { return ((v % kStreamerGridDim) + kStreamerGridDim) % kStreamerGridDim; };
@@ -25,6 +18,15 @@ namespace WorldCoordinates::Square {
         return r * kStreamerGridDim + c;
     }
 
+
+    TileCoord worldPosToAbsoluteTile(sf::Vector2f worldPos, TileCoord originTile)
+    {
+        TileCoord localTile = worldPosToTileCoord(worldPos);
+        return TileCoord{
+            originTile.row + localTile.row,
+            originTile.col + localTile.col
+        };
+    }
 }
 
 namespace WorldCoordinates::Hex {

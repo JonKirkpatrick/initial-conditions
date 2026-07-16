@@ -1,64 +1,119 @@
 #include "Topography.h"
 #include "Assets.h"
+#include "WorldCoordinates.hpp"
 
 namespace Topography {
 
-    // Direct call into the already bounds-checked HeightArray accessor —
-    // no decode math, no maxHeight rescale, the buffer already holds true meters.
-    inline float sampleHeight(const TerrainContext& ctx, int x, int y) {
-        return ctx.heightArray->sample(x, y);
+    float heightAt(const TerrainContext& ctx, sf::Vector2f worldPos) {
+        using namespace WorldCoordinates::Square;
+
+        if (!ctx.streamer) {
+            return 0.0f;
+        }
+
+        TileCoord originTile = ctx.streamer->getOriginTile();
+        TileCoord absoluteTile = worldPosToAbsoluteTile(worldPos, originTile);
+
+        const float* tileBuffer = ctx.streamer->getTileData(absoluteTile);
+        if (!tileBuffer) {
+            return 0.0f; 
+        }
+
+        constexpr float kTileSizeM = kTexelSizeM * kTileResolution;
+        int localColIdx = absoluteTile.col - originTile.col;
+        int localRowIdx = absoluteTile.row - originTile.row;
+
+        float tileMinX = localColIdx * kTileSizeM;
+        float tileMinZ = localRowIdx * kTileSizeM;
+
+        float localX = (worldPos.x - tileMinX) / kTexelSizeM - 0.5f;
+        float localZ = (worldPos.y - tileMinZ) / kTexelSizeM - 0.5f;
+
+        localX = std::clamp(localX, 0.0f, static_cast<float>(kTileResolution - 1));
+        localZ = std::clamp(localZ, 0.0f, static_cast<float>(kTileResolution - 1));
+
+        int tx0 = static_cast<int>(std::floor(localX));
+        int tz0 = static_cast<int>(std::floor(localZ));
+
+        float fx = localX - static_cast<float>(tx0);
+        float fz = localZ - static_cast<float>(tz0);
+
+        int bX0 = tx0;
+        int bZ0 = tz0;
+
+        constexpr int kStride = kTileResolution + kApronTexels; // 257
+        
+        bX0 = std::clamp(bX0, 0, kTileResolution - 1); 
+        bZ0 = std::clamp(bZ0, 0, kTileResolution - 1);
+
+        size_t idx00 = static_cast<size_t>(bZ0) * kStride + bX0;
+        size_t idx10 = idx00 + 1;
+        size_t idx01 = idx00 + kStride;
+        size_t idx11 = idx01 + 1;
+
+        float h00 = tileBuffer[idx00];
+        float h10 = tileBuffer[idx10];
+        float h01 = tileBuffer[idx01];
+        float h11 = tileBuffer[idx11];
+
+        return (h00 + fx * (h10 - h00)) * (1.0f - fz) + (h01 + fx * (h11 - h01)) * fz;
     }
 
-    float heightAt(const TerrainContext& ctx, float worldX, float worldZ) {
-        float u = std::clamp((worldX - ctx.worldMin.x) / ctx.worldSize.x, 0.0f, 1.0f);
-        float v = std::clamp((worldZ - ctx.worldMin.y) / ctx.worldSize.y, 0.0f, 1.0f);
+    sf::Vector3f normalAt(const TerrainContext& ctx, sf::Vector2f worldPos) {
+        using namespace WorldCoordinates::Square;
 
-        float px = u * (ctx.heightArray->width - 1);
-        float py = v * (ctx.heightArray->height - 1);
+        if (!ctx.streamer) {
+            return sf::Vector3f(0.0f, 1.0f, 0.0f);
+        }
 
-        int x0 = static_cast<int>(px);
-        int y0 = static_cast<int>(py);
-        int x1 = std::min(x0 + 1, ctx.heightArray->width - 1);
-        int y1 = std::min(y0 + 1, ctx.heightArray->height - 1);
+        TileCoord originTile = ctx.streamer->getOriginTile();
+        TileCoord absoluteTile = worldPosToAbsoluteTile(worldPos, originTile);
 
-        float fx = px - x0;
-        float fy = py - y0;
+        const float* tileBuffer = ctx.streamer->getTileData(absoluteTile);
+        if (!tileBuffer) {
+            return sf::Vector3f(0.0f, 1.0f, 0.0f); 
+        }
 
-        float h00 = sampleHeight(ctx, x0, y0);
-        float h10 = sampleHeight(ctx, x1, y0);
-        float h01 = sampleHeight(ctx, x0, y1);
-        float h11 = sampleHeight(ctx, x1, y1);
+        constexpr float kTileSizeM = kTexelSizeM * kTileResolution;
+        int localColIdx = absoluteTile.col - originTile.col;
+        int localRowIdx = absoluteTile.row - originTile.row;
 
-        return (h00 + fx * (h10 - h00)) * (1.0f - fy) + (h01 + fx * (h11 - h01)) * fy;
-    }
+        float tileMinX = localColIdx * kTileSizeM;
+        float tileMinZ = localRowIdx * kTileSizeM;
 
-    sf::Vector3f normalAt(const TerrainContext& ctx, float worldX, float worldZ) {
-        float u = std::clamp((worldX - ctx.worldMin.x) / ctx.worldSize.x, 0.0f, 1.0f);
-        float v = 1.0f - std::clamp((worldZ - ctx.worldMin.y) / ctx.worldSize.y, 0.0f, 1.0f);
+        float localX = (worldPos.x - tileMinX) / kTexelSizeM - 0.5f;
+        float localZ = (worldPos.y - tileMinZ) / kTexelSizeM - 0.5f;
 
-        float px = u * (ctx.heightArray->width - 1);
-        float py = v * (ctx.heightArray->height - 1);
+        localX = std::clamp(localX, 0.0f, static_cast<float>(kTileResolution - 1));
+        localZ = std::clamp(localZ, 0.0f, static_cast<float>(kTileResolution - 1));
 
-        int x0 = static_cast<int>(px);
-        int y0 = static_cast<int>(py);
-        int x1 = std::min(x0 + 1, ctx.heightArray->width - 1);
-        int y1 = std::min(y0 + 1, ctx.heightArray->height - 1);
+        int tx0 = static_cast<int>(std::floor(localX));
+        int tz0 = static_cast<int>(std::floor(localZ));
 
-        float fx = px - x0;
-        float fy = py - y0;
+        float fx = localX - static_cast<float>(tx0);
+        float fz = localZ - static_cast<float>(tz0);
 
-        float h00 = sampleHeight(ctx, x0, y0);
-        float h10 = sampleHeight(ctx, x1, y0);
-        float h01 = sampleHeight(ctx, x0, y1);
-        float h11 = sampleHeight(ctx, x1, y1);
+        int bX0 = tx0;
+        int bZ0 = tz0;
 
-        float dHdx = (1.0f - fy) * (h10 - h00) + fy * (h11 - h01);
+        constexpr int kStride = kTileResolution + kApronTexels; // 257
+        bX0 = std::clamp(bX0, 0, kTileResolution - 1); 
+        bZ0 = std::clamp(bZ0, 0, kTileResolution - 1);
+
+        size_t idx00 = static_cast<size_t>(bZ0) * kStride + bX0;
+        size_t idx10 = idx00 + 1;
+        size_t idx01 = idx00 + kStride;
+        size_t idx11 = idx01 + 1;
+
+        float h00 = tileBuffer[idx00];
+        float h10 = tileBuffer[idx10];
+        float h01 = tileBuffer[idx01];
+        float h11 = tileBuffer[idx11];
+
+        float dHdx = (1.0f - fz) * (h10 - h00) + fz * (h11 - h01);
         float dHdz = (1.0f - fx) * (h01 - h00) + fx * (h11 - h10);
 
-        float texelSizeX = ctx.worldSize.x / (ctx.heightArray->width - 1);
-        float texelSizeZ = ctx.worldSize.y / (ctx.heightArray->height - 1);
-
-        sf::Vector3f normal(-dHdx / texelSizeX, 1.0f, dHdz / texelSizeZ);
+        sf::Vector3f normal(-dHdx / kTexelSizeM, 1.0f, -dHdz / kTexelSizeM);
 
         float length = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
         if (length > 0.0f) {

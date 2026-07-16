@@ -203,22 +203,62 @@ void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
               << "] into slot " << slot << " (valid: " << std::boolalpha << ok << ")\n";
 }
 
-// ---------------------------------------------------------------------
-// Stage 7.2: pure "load tile from disk" -- stubbed for now.
-// Zero-fills and always reports success so the allocation/indexing
-// path above is exercisable end-to-end before real file I/O exists.
-// ---------------------------------------------------------------------
-bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& /*manifest*/,
-                                        TileCoord /*coord*/,
-                                        float* outBuffer)
+bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
+                                       TileCoord coord,
+                                       float* outBuffer)
 {
     using namespace WorldCoordinates::Square;
+    
     const size_t floatsPerTile =
         static_cast<size_t>(kTileResolution + kApronTexels) *
         static_cast<size_t>(kTileResolution + kApronTexels);
+    const size_t bytesPerTile = floatsPerTile * sizeof(float);
 
-    std::memset(outBuffer, 0, floatsPerTile * sizeof(float));
+    std::string fileName = "tile_" + std::to_string(coord.row) + "_" + std::to_string(coord.col) + ".bin";
+    std::filesystem::path tilePath = manifest.tileDirectory / fileName;
+
+    if (!std::filesystem::exists(tilePath))
+    {
+        std::memset(outBuffer, 0, bytesPerTile);
+        return true; 
+    }
+
+    std::ifstream file(tilePath, std::ios::binary);
+    if (!file.is_open())
+    {
+        std::cerr << "[TerrainStreamer] Error: Failed to open existing file: " << tilePath << "\n";
+        std::memset(outBuffer, 0, bytesPerTile);
+        return false;
+    }
+
+    file.read(reinterpret_cast<char*>(outBuffer), bytesPerTile);
+
+    const std::streamsize bytesRead = file.gcount();
+    if (static_cast<size_t>(bytesRead) != bytesPerTile)
+    {
+        std::cerr << "[TerrainStreamer] Warning: Incomplete tile read on " << tilePath 
+                  << ". Expected " << bytesPerTile << " bytes, but read " << bytesRead << ".\n";
+        
+        std::memset(reinterpret_cast<char*>(outBuffer) + bytesRead, 0, bytesPerTile - bytesRead);
+        return false;
+    }
+
     return true;
+}
+
+const float* TerrainStreamer::getTileData(TileCoord coord) const
+{
+    const int slot = WorldCoordinates::Square::slotIndexForTile(coord);
+    if (m_slotValid[slot] && m_slotWorldCoord[slot] == coord)
+    {
+        return slotData(slot);
+    }
+    return nullptr; // Not loaded, out of bounds, or catching up
+}
+
+TileCoord TerrainStreamer::getOriginTile() const
+{
+    return m_manifest.tileBoundsUpperLeft;
 }
 
 // ---------------------------------------------------------------------

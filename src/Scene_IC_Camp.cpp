@@ -283,7 +283,7 @@ HUD* Scene_IC_Camp::getHUD() const
 
 Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const {
     return Topography::TerrainContext {
-        &Assets::Instance().getHeightArray("Test2"),
+        m_terrainStreamer.get(),
         m_topdownWorldMin,
         m_topdownWorldSize,
     };
@@ -977,7 +977,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     std::mt19937 rng(1337); // Seeded for consistency
     
     // Extents are -1000 to 1000 tiles. 
-    std::uniform_int_distribution<int> hexDist(-1000, 1000);
+    std::uniform_int_distribution<int> hexDist(-10000, 10000);
     
     std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
     std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
@@ -1486,8 +1486,13 @@ void Scene_IC_Camp::runShadowPass() {
         // --- terrain ---
         glDisable(GL_CULL_FACE);
         glUseProgram(m_terrainShadowProgram);
+        // Fetch the raw float height array asset
+        const auto& heightArray = Assets::Instance().getHeightArray("Test2");
+
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+        glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
+
+        // Bind texture unit 0 to the sampler
         glUniform1i(glGetUniformLocation(m_terrainShadowProgram, "u_topoTopdownTex"), 0);
         glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_topdownWorldMin"),
                     m_topdownWorldMin.x, m_topdownWorldMin.y);
@@ -1641,10 +1646,13 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
 
     glUseProgram(m_terrainProgram);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+    // Fetch the raw float height array asset
+    const auto& heightArray = Assets::Instance().getHeightArray("Test2");
 
-    // Uniforms for the Vertex Portion of the Shader
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
+
+    // Bind texture unit 0 to the sampler
     glUniform1i(glGetUniformLocation(m_terrainProgram, "u_topoTopdownTex"), 0);
     glUniform2f(glGetUniformLocation(m_terrainProgram, "u_topdownWorldMin"),
                 m_topdownWorldMin.x, m_topdownWorldMin.y);
@@ -1903,8 +1911,9 @@ void Scene_IC_Camp::deferredLighting()
     // =========================================================================
     // Bind Heightmap and Topography Textures
     // =========================================================================
+    const auto& heightArray = Assets::Instance().getHeightArray("Test2");
     glActiveTexture(GL_TEXTURE6);
-    glBindTexture(GL_TEXTURE_2D, m_topdownTexture.getNativeHandle());
+    glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_topoTopdownTex"), 6);
     glUniform2f(glGetUniformLocation(m_lightingProgram, "u_topdownWorldMin"),
                 m_topdownWorldMin.x, m_topdownWorldMin.y);

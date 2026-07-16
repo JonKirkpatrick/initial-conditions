@@ -286,10 +286,10 @@ protected:
 
     float getCameraHeightAboveGround(const sf::Vector3f& cameraPos) const;
     float heightAt(float x, float z) const {
-        return Topography::heightAt(getTerrainContext(), x, z);
+        return Topography::heightAt(getTerrainContext(), sf::Vector2f(x, z));
     }
     sf::Vector3f normalAt(float x, float z) const {
-        return Topography::normalAt(getTerrainContext(), x, z);
+        return Topography::normalAt(getTerrainContext(), sf::Vector2f(x, z));
     }
 
     // =========================================================================

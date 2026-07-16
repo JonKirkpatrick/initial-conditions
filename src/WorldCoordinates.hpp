@@ -39,9 +39,9 @@ namespace WorldCoordinates {
             int z = 0;
         };
 
-        TileCoord  worldPosToTileCoord(sf::Vector2f worldPos);
-        TexelCoord worldPosToTexelCoord(sf::Vector2f worldPos);
-        int        slotIndexForTile(TileCoord coord); // toroidal %7 wrap
+        TileCoord   worldPosToTileCoord(sf::Vector2f worldPos);
+        int         slotIndexForTile(TileCoord coord); // toroidal %7 wrap
+        TileCoord   worldPosToAbsoluteTile(sf::Vector2f worldPos, TileCoord originTile);
     }
 
     namespace Hex {
@@ -50,5 +50,4 @@ namespace WorldCoordinates {
         sf::Vector2i worldToHex(float worldX, float worldZ);
         sf::Vector2f hexToWorld(int q, int r);
     }
-
 }

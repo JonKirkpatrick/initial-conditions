@@ -30,6 +30,8 @@ struct TerrainManifest
 class TerrainStreamer
 {
 public:
+    using TileCoord = WorldCoordinates::Square::TileCoord;
+
     explicit TerrainStreamer(const std::filesystem::path& manifestPath);
     ~TerrainStreamer();
 
@@ -40,9 +42,11 @@ public:
 
     const std::array<GLint, 25>& getActiveSliceUniforms() const;
     const TerrainManifest& getManifest() const { return m_manifest; }
+    float sampleHeightAt(sf::Vector2f worldPos) const;
+    const float* getTileData(TileCoord coord) const;
+    TileCoord getOriginTile() const;
 
 private:
-    using TileCoord = WorldCoordinates::Square::TileCoord;
 
     static bool loadTileFromDisk(const TerrainManifest& manifest,
                                   TileCoord coord,
