@@ -77,8 +77,8 @@ The whole idea of tiling and streaming our terrain in this manner is to support 
 
 ### Stage 7.2:  Extract "load tile from disc" As A Pure Function
 * **Goal:** Input: tile coordinate.  Output:  a filled 257x257 float buffer.
-* [ ] Ensure it doesn't touch any shared engine state.  Just file I/O in, and buffer out.
-* [ ] Gracefully handle missing data.
+* [x] Ensure it doesn't touch any shared engine state.  Just file I/O in, and buffer out.
+* [x] Gracefully handle missing data.
 
 ### Stage 7.3:  Add A Staging Buffer
 * **Goal:** Separate the live slot from access contention.

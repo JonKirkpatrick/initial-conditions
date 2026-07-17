@@ -98,7 +98,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(1);
+    spawnDebugOrbs(32000);
     m_entityManager.update();
     buildTerrainGrid();
     buildHud();
@@ -975,8 +975,8 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     // 1. Random Number Engine Setup
     std::mt19937 rng(1337); // Seeded for consistency
     
-    // Extents are -500 to 500 tiles. 
-    std::uniform_int_distribution<int> hexDist(-500, 500);
+    // Extents are -3000 to 3000 tiles. 
+    std::uniform_int_distribution<int> hexDist(-3000, 3000);
     
     std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
     std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
@@ -1014,6 +1014,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     while (spawned < count && attempts < maxAttempts)
     {
         ++attempts;
+        // Generate a random hex coordinate
         int hexQ = hexDist(rng) + m_playerConfig.POSITION_X;
         int hexR = hexDist(rng) + m_playerConfig.POSITION_Z;
 
@@ -1486,17 +1487,20 @@ void Scene_IC_Camp::runShadowPass() {
         glDisable(GL_CULL_FACE);
         glUseProgram(m_terrainShadowProgram);
         // Fetch the raw float height array asset
-        const auto& heightArray = Assets::Instance().getHeightArray("Test2");
-
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
+        glUniform1i(glGetUniformLocation(m_terrainShadowProgram, "u_terrainHeightArray"), 0);
 
-        // Bind texture unit 0 to the sampler
-        glUniform1i(glGetUniformLocation(m_terrainShadowProgram, "u_topoTopdownTex"), 0);
-        glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_topdownWorldMin"),
-                    m_topdownWorldMin.x, m_topdownWorldMin.y);
-        glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_topdownWorldSize"),
-                    m_topdownWorldSize.x, m_topdownWorldSize.y);
+        sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
+        glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_terrainGridWorldOrigin"),
+                    gridOrigin.x, gridOrigin.y);
+
+        constexpr float kTileWorldSize =
+            WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
+        glUniform1f(glGetUniformLocation(m_terrainShadowProgram, "u_terrainTileWorldSize"), kTileWorldSize);
+
+        glUniform1iv(glGetUniformLocation(m_terrainShadowProgram, "u_terrainSliceValid"), 25,
+                    m_terrainStreamer->getActiveSliceUniforms().data());
         glUniformMatrix4fv(glGetUniformLocation(m_terrainShadowProgram, "u_lightViewProj"),
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
         glBindVertexArray(m_gridVAO);
@@ -1644,21 +1648,23 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
 
     glUseProgram(m_terrainProgram);
 
-    // Fetch the raw float height array asset
-    const auto& heightArray = Assets::Instance().getHeightArray("Test2");
-
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
+    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_terrainHeightArray"), 0);
 
-    // Bind texture unit 0 to the sampler
-    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_topoTopdownTex"), 0);
-    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_topdownWorldMin"),
-                m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_topdownWorldSize"),
-                m_topdownWorldSize.x, m_topdownWorldSize.y);
+    sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
+    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_terrainGridWorldOrigin"),
+                gridOrigin.x, gridOrigin.y);
+
+    constexpr float kTileWorldSize =
+        WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_terrainTileWorldSize"), kTileWorldSize);
+
+    glUniform1iv(glGetUniformLocation(m_terrainProgram, "u_terrainSliceValid"), 25,
+                m_terrainStreamer->getActiveSliceUniforms().data());
+
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_heightMax"), m_topdownMaxHeight);
-    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_viewProj"),
-                       1, GL_FALSE, vpMatrix.data());
+    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_viewProj"), 1, GL_FALSE, vpMatrix.data());
 
     // Uniforms for the Fragment Portion of the Shader
     glUniform3f(glGetUniformLocation(m_terrainProgram, "u_cameraPos"), transform.pos.x, transform.pos.y, transform.pos.z);
@@ -1687,11 +1693,10 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     glBindVertexArray(0);
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
     glUseProgram(0);
     sf::Shader::bind(nullptr);
-    sf::Texture::bind(nullptr);
 }
 
 void Scene_IC_Camp::updateMinimapTexture()
@@ -1710,29 +1715,48 @@ void Scene_IC_Camp::updateMinimapTexture()
     m_minimapTexture.clear(sf::Color::Transparent);
     m_minimapTexture.setActive(true); // Directs OpenGL context to this target
 
-    glViewport(0, 0, m_minimapTextureSize, m_minimapTextureSize);
+    // --- 1. SAVE SFML STATES ---
+    m_minimapTexture.pushGLStates();
 
-    const auto& heightArray = Assets::Instance().getHeightArray("Test2");
+    // Reset viewport to match the texture size
+    glViewport(0, 0, m_minimapTextureSize, m_minimapTextureSize);
 
     glUseProgram(m_minimapProgram);
 
-    glUniform2f(glGetUniformLocation(m_minimapProgram, "topdownWorldMin"), m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_minimapProgram, "topdownWorldSize"), m_topdownWorldSize.x, m_topdownWorldSize.y);
+    // Uniforms
     glUniform2f(glGetUniformLocation(m_minimapProgram, "u_playerXZ"), playerPos.x, playerPos.z);
     glUniform1f(glGetUniformLocation(m_minimapProgram, "u_worldRadius"), worldRadius);
     glUniform1f(glGetUniformLocation(m_minimapProgram, "u_heightMax"), m_topdownMaxHeight);
 
+    // Bind the terrain height array texture safely to texture unit 0
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
-    glUniform1i(glGetUniformLocation(m_minimapProgram, "topoTopdownTex"), 0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
+    glUniform1i(glGetUniformLocation(m_minimapProgram, "u_terrainHeightArray"), 0);
 
-    glBindVertexArray(m_gridVAO); // Any bound VAO is fine because the vertex shader relies solely on gl_VertexID
+    sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
+    glUniform2f(glGetUniformLocation(m_minimapProgram, "u_terrainGridWorldOrigin"),
+                gridOrigin.x, gridOrigin.y);
+
+    constexpr float kTileWorldSize =
+        WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
+    glUniform1f(glGetUniformLocation(m_minimapProgram, "u_terrainTileWorldSize"), kTileWorldSize);
+
+    glUniform1iv(glGetUniformLocation(m_minimapProgram, "u_terrainSliceValid"), 25,
+                m_terrainStreamer->getActiveSliceUniforms().data());
+
+    // Draw fullscreen triangle using the zero-attribute VAO trick
+    glBindVertexArray(m_gridVAO); 
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
 
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Unbind shader and texture to clean up raw GL states
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glUseProgram(0);
 
+    // --- 2. RESTORE SFML STATES ---
+    m_minimapTexture.popGLStates();
+
+    // Now SFML's 2D drawer can safely draw the home marker without state corruption!
     sf::Vector2f delta = m_homeLocationXZ - sf::Vector2f(playerPos.x, playerPos.z);
     float dist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
     const float circleRadiusPx = center - 2.f;
@@ -1917,20 +1941,6 @@ void Scene_IC_Camp::deferredLighting()
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampEnabled"),   shouldHeadlightsBeOn() ? 1.0f : 0.0f);
 
     // =========================================================================
-    // Bind Heightmap and Topography Textures
-    // =========================================================================
-    const auto& heightArray = Assets::Instance().getHeightArray("Test2");
-    glActiveTexture(GL_TEXTURE6);
-    glBindTexture(GL_TEXTURE_2D, heightArray.textureId);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_topoTopdownTex"), 6);
-    glUniform2f(glGetUniformLocation(m_lightingProgram, "u_topdownWorldMin"),
-                m_topdownWorldMin.x, m_topdownWorldMin.y);
-    glUniform2f(glGetUniformLocation(m_lightingProgram, "u_topdownWorldSize"),
-                m_topdownWorldSize.x, m_topdownWorldSize.y);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_heightMax"), m_topdownMaxHeight);
-
-
-    // =========================================================================
     // Draw
     // =========================================================================
     glBindVertexArray(m_lightingVAO);
@@ -1940,7 +1950,7 @@ void Scene_IC_Camp::deferredLighting()
     glBindVertexArray(0);
     glUseProgram(0);
     
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < 6; ++i) {
         glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, 0);
     }

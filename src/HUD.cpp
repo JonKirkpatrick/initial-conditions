@@ -178,11 +178,12 @@ void HUD::drawMiniMap(sf::RenderWindow& window)
     playerDot.setOutlineColor(sf::Color(30, 34, 28, 220));
     window.draw(playerDot);
 
-    // Optional: Add a ring overlay for aesthetics
+    /*
     sf::Sprite ring(*m_minimapRing);
     ring.setOrigin({150.f, 150.f});
     ring.setPosition(mapCenter);
     window.draw(ring);
+    */
 }
 
 void HUD::drawHeadlightWidget(sf::RenderWindow& window)

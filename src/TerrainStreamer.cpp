@@ -76,19 +76,30 @@ TerrainStreamer::TerrainStreamer(const std::filesystem::path& manifestPath)
     m_slotValid.assign(slotCount, false);
     m_stagingBuffer.assign(floatsPerTile, 0.0f);
 
+    using namespace WorldCoordinates::Square;
+    constexpr int kTexSide = kTileResolution + kApronTexels;
+
+    glGenTextures(1, &m_arrayTexture);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_R32F, kTexSide, kTexSide,
+                   kVisibleGridDim * kVisibleGridDim);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
     // Worker thread intentionally not started yet -- Stage 7.1 runs
     // synchronously on the calling thread. Stage 7.4 will start it here.
 }
 
 TerrainStreamer::~TerrainStreamer()
 {
-    // No worker thread running yet in this stage; nothing to signal or
-    // join. Left as a no-op deliberately rather than omitted, so the
-    // shutdown sequence has a home to grow into once 7.4 lands:
-    //
-    // m_shutdownRequested = true;
-    // m_workerWakeCV.notify_all();
-    // if (m_workerThread.joinable()) m_workerThread.join();
+    if (m_arrayTexture != 0)
+    {
+        glDeleteTextures(1, &m_arrayTexture);
+    }
+    // worker-thread teardown, still pending 7.4, unchanged
 }
 
 // ---------------------------------------------------------------------
@@ -151,6 +162,8 @@ void TerrainStreamer::initializeGrid(const sf::Vector2f& cameraWorldPos)
         }
     }
     m_gridInitialized = true;
+    m_subgridDirty = true;
+    refreshActiveSliceUniforms();
 }
 
 void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
@@ -170,6 +183,7 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
     float gridDim = WorldCoordinates::Square::kStreamerGridDim;
     tilesToLoad.reserve(gridDim * gridDim);
 
+    // 1. Determine what we need to load BEFORE we change the center
     for (int row = newCenter.row - kHalfWindow; row <= newCenter.row + kHalfWindow; ++row)
     {
         for (int col = newCenter.col - kHalfWindow; col <= newCenter.col + kHalfWindow; ++col)
@@ -182,12 +196,20 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
         }
     }
 
+    // 2. CRITICAL: Update the center coordinate FIRST.
+    // This ensures all slot mapping math correctly targets the new layout.
+    m_centerTileCoord = newCenter;
+
+    // 3. Now load the new tiles into their newly designated slots
     for (const auto& tile : tilesToLoad)
     {
         loadTileIntoSlot(tile);
     }
 
-    m_centerTileCoord = newCenter;
+    // 4. Finalize uniforms and mark dirty
+    refreshActiveSliceUniforms();
+    m_subgridDirty = true;
+    
     std::cout << "[TerrainStreamer] Center tile updated to [" << m_centerTileCoord.row
               << ", " << m_centerTileCoord.col << "]\n";
 }
@@ -283,10 +305,102 @@ const float* TerrainStreamer::slotData(int slotIndex) const
 }
 
 // ---------------------------------------------------------------------
-// Stage 6 placeholder
+// Stage 7.1: Active subgrid and uniforms
 // ---------------------------------------------------------------------
+
+TerrainStreamer::ActiveSubgrid TerrainStreamer::getActiveSubgrid() const
+{
+    using namespace WorldCoordinates::Square;
+    constexpr int kHalfVisible = kVisibleGridDim / 2; // 2
+
+    ActiveSubgrid subgrid{};
+    int i = 0;
+    for (int row = m_centerTileCoord.row - kHalfVisible;
+         row <= m_centerTileCoord.row + kHalfVisible; ++row)
+    {
+        for (int col = m_centerTileCoord.col - kHalfVisible;
+             col <= m_centerTileCoord.col + kHalfVisible; ++col, ++i)
+        {
+            const TileCoord coord{row, col};
+            const int slot = slotIndexForTile(coord);
+
+            ActiveTileSlice& slice = subgrid[i];
+            slice.coord = coord;
+
+            if (m_slotValid[slot] && m_slotWorldCoord[slot] == coord)
+            {
+                slice.data  = slotData(slot);
+                slice.valid = true;
+            }
+        }
+    }
+    return subgrid;
+}
 
 const std::array<GLint, 25>& TerrainStreamer::getActiveSliceUniforms() const
 {
     return m_activeSliceUniforms;
+}
+
+void TerrainStreamer::refreshActiveSliceUniforms()
+{
+    using namespace WorldCoordinates::Square;
+    constexpr int kHalfVisible = kVisibleGridDim / 2; // 2
+
+    int i = 0;
+    for (int row = m_centerTileCoord.row - kHalfVisible;
+         row <= m_centerTileCoord.row + kHalfVisible; ++row)
+    {
+        for (int col = m_centerTileCoord.col - kHalfVisible;
+             col <= m_centerTileCoord.col + kHalfVisible; ++col, ++i)
+        {
+            const TileCoord coord{row, col};
+            const int slot = slotIndexForTile(coord);
+            const bool valid = m_slotValid[slot] && m_slotWorldCoord[slot] == coord;
+            m_activeSliceUniforms[i] = valid ? 1 : 0;
+        }
+    }
+}
+
+GLuint TerrainStreamer::getOrUploadArrayTexture()
+{
+    if (!m_subgridDirty)
+    {
+        return m_arrayTexture;
+    }
+
+    using namespace WorldCoordinates::Square;
+    constexpr int kTexSide = kTileResolution + kApronTexels;
+    static const std::vector<float> kZeroTile(static_cast<size_t>(kTexSide) * kTexSide, 0.0f);
+
+    const ActiveSubgrid subgrid = getActiveSubgrid();
+
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
+    for (int layer = 0; layer < static_cast<int>(subgrid.size()); ++layer)
+    {
+        const ActiveTileSlice& slice = subgrid[layer];
+        const float* src = slice.valid ? slice.data : kZeroTile.data();
+        glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
+                         0, 0, layer,
+                         kTexSide, kTexSide, 1,
+                         GL_RED, GL_FLOAT, src);
+    }
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+    m_subgridDirty = false;
+    return m_arrayTexture;
+}
+
+sf::Vector2f TerrainStreamer::getVisibleGridWorldOrigin() const
+{
+    using namespace WorldCoordinates::Square;
+    constexpr int kHalfVisible = kVisibleGridDim / 2; // 2
+
+    const TileCoord absoluteOrigin{ m_centerTileCoord.row - kHalfVisible,
+                                     m_centerTileCoord.col - kHalfVisible };
+    const TileCoord localOrigin{ absoluteOrigin.row - m_manifest.tileBoundsUpperLeft.row,
+                                  absoluteOrigin.col - m_manifest.tileBoundsUpperLeft.col };
+
+    constexpr float kTileSizeM = kTexelSizeM * kTileResolution;
+    return sf::Vector2f(localOrigin.col * kTileSizeM, localOrigin.row * kTileSizeM);
 }

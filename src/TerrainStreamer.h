@@ -46,6 +46,18 @@ public:
     const float* getTileData(TileCoord coord) const;
     TileCoord getOriginTile() const;
 
+    struct ActiveTileSlice
+    {
+        WorldCoordinates::Square::TileCoord coord;
+        const float* data  = nullptr;
+        bool         valid = false;
+    };
+
+    using ActiveSubgrid = std::array<ActiveTileSlice, WorldCoordinates::Square::kVisibleGridDim * WorldCoordinates::Square::kVisibleGridDim>;
+    ActiveSubgrid getActiveSubgrid() const;
+    GLuint getOrUploadArrayTexture();
+    sf::Vector2f getVisibleGridWorldOrigin() const;
+
 private:
 
     static bool loadTileFromDisk(const TerrainManifest& manifest,
@@ -60,7 +72,7 @@ private:
     void      loadTileIntoSlot(TileCoord coord);
 
     void checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos);
-
+    void refreshActiveSliceUniforms();
     void publishStagedTile(int slotIndex, TileCoord newCoord);
 
     struct LoadRequest  { int slotIndex; TileCoord coord; };
@@ -93,4 +105,6 @@ private:
     std::atomic<bool>        m_shutdownRequested{false};
 
     std::array<GLint, 25> m_activeSliceUniforms{};
+    GLuint m_arrayTexture = 0;
+    bool   m_subgridDirty = true;
 };

@@ -50,12 +50,6 @@ uniform mat4 u_invViewProj;
 uniform vec3 u_cameraPos;
 uniform vec3 u_cameraForward;
 
-// Terrain Reconstruction
-uniform sampler2D u_topoTopdownTex;
-uniform vec2      u_topdownWorldMin;
-uniform vec2      u_topdownWorldSize;
-uniform float     u_heightMax;
-
 // Lighting Uniforms
 uniform vec3 u_sunDir;
 uniform vec4 u_sunColor;
@@ -98,15 +92,6 @@ vec3 reconstructWorldPos(vec2 uv, float rawDepth) {
     vec4 worldPosPadded = u_invViewProj * ndc;
     
     return worldPosPadded.xyz / worldPosPadded.w;
-}
-
-float decodeHeightFrag(vec2 worldXZ) {
-    vec2 uv = (worldXZ - u_topdownWorldMin) / u_topdownWorldSize;
-
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
-        return -1e6; // outside the terrain's domain: treat as "nothing there to occlude"
-
-    return textureLod(u_topoTopdownTex, uv, 0.0).r;
 }
 
 float computeShadow(vec3 worldPos, vec3 normal, vec3 sunDir, int cascade) {

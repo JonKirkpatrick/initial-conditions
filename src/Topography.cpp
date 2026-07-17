@@ -26,8 +26,8 @@ namespace Topography {
         float tileMinX = localColIdx * kTileSizeM;
         float tileMinZ = localRowIdx * kTileSizeM;
 
-        float localX = (worldPos.x - tileMinX) / kTexelSizeM - 0.5f;
-        float localZ = (worldPos.y - tileMinZ) / kTexelSizeM - 0.5f;
+        float localX = (worldPos.x - tileMinX) / kTexelSizeM;
+        float localZ = (worldPos.y - tileMinZ) / kTexelSizeM;
 
         localX = std::clamp(localX, 0.0f, static_cast<float>(kTileResolution - 1));
         localZ = std::clamp(localZ, 0.0f, static_cast<float>(kTileResolution - 1));
@@ -81,8 +81,8 @@ namespace Topography {
         float tileMinX = localColIdx * kTileSizeM;
         float tileMinZ = localRowIdx * kTileSizeM;
 
-        float localX = (worldPos.x - tileMinX) / kTexelSizeM - 0.5f;
-        float localZ = (worldPos.y - tileMinZ) / kTexelSizeM - 0.5f;
+        float localX = (worldPos.x - tileMinX) / kTexelSizeM;
+        float localZ = (worldPos.y - tileMinZ) / kTexelSizeM;
 
         localX = std::clamp(localX, 0.0f, static_cast<float>(kTileResolution - 1));
         localZ = std::clamp(localZ, 0.0f, static_cast<float>(kTileResolution - 1));

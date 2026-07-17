@@ -1,15 +1,23 @@
 #version 460 core
 
-uniform vec2 topdownWorldMin;
-uniform vec2 topdownWorldSize;
-uniform sampler2D topoTopdownTex; // Your GL_R32F raw float texture
+// == Terrain Array Uniforms (matching terrain.vert) =========================
+uniform sampler2DArray u_terrainHeightArray;
+uniform vec2           u_terrainGridWorldOrigin; // world-space origin of subgrid tile [0][0]
+uniform float          u_terrainTileWorldSize;   // meters per tile side (e.g., 256 * 4m)
+uniform int            u_terrainSliceValid[25];  // active slice validation flags
 
+// == Minimap Parameters =====================================================
 uniform vec2  u_playerXZ;
 uniform float u_worldRadius;
 uniform float u_heightMax;
 
-in vec2 v_uv; // Received from vertex shader
+in vec2 v_uv; // Spans [0, 1] in circular minimap quad space
 out vec4 fragColor;
+
+// == Constants matching terrain grid layout =================================
+const int  kVisibleGridDim = 5;
+const int  kTileResolution = 256;   // core texels/side
+const int  kTexSide        = 257;   // stored texels/side (with apron)
 
 // == Colour palette =========================================================
 vec3 topoColour(float normHeight, float shade) {
@@ -37,16 +45,45 @@ vec3 topoColour(float normHeight, float shade) {
     return clamp(base * light * tint, 0.0, 1.0);
 }
 
-// ================== SAMPLE FLOAT HEIGHT ==================
-float sampleHeight(vec2 xz) {
-    vec2 uv = (xz - topdownWorldMin) / topdownWorldSize;
-    return textureLod(topoTopdownTex, uv, 0.0).r;
+// ================== RESOLVE TILE SAMPLE ==================
+void resolveTileSample(vec2 gridUV, out int layer, out vec2 texUV)
+{
+    vec2 tileF   = clamp(gridUV, 0.0, 1.0) * float(kVisibleGridDim);
+    ivec2 tileXY = clamp(ivec2(floor(tileF)), ivec2(0), ivec2(kVisibleGridDim - 1));
+    layer = tileXY.y * kVisibleGridDim + tileXY.x;
+
+    vec2 localUV = fract(tileF); // 0..1 across this tile's 256 core texels
+    texUV = (localUV * float(kTileResolution) + 0.5) / float(kTexSide);
 }
 
-// ================== NORMAL from topdown texture ==================
+// ================== SAMPLE FLOAT HEIGHT ==================
+float sampleHeight(vec2 xz) {
+    // 1. Determine size of the entire 5x5 subgrid in world units
+    float gridWorldSize = float(kVisibleGridDim) * u_terrainTileWorldSize;
+
+    // 2. Convert absolute world-space xz coordinates to the relative 0..1 gridUV space
+    vec2 gridUV = (xz - u_terrainGridWorldOrigin) / gridWorldSize;
+
+    // 3. SHORT CIRCUIT: If the coordinate escapes the 5x5 grid completely,
+    // immediately return a flat 0.0 height.
+    if (any(lessThan(gridUV, vec2(0.0))) || any(greaterThan(gridUV, vec2(1.0)))) {
+        return 0.0;
+    }
+
+    // 4. Proceed with normal tile resolving for anything safely inside the grid
+    int layer; vec2 texUV;
+    resolveTileSample(gridUV, layer, texUV);
+
+    if (u_terrainSliceValid[layer] == 0) {
+        return 0.0;
+    }
+    return textureLod(u_terrainHeightArray, vec3(texUV, float(layer)), 0.0).r;
+}
+
+// ================== NORMAL from tile array ==================
 vec3 computeNormal(vec2 xz) {
-    vec2 texSize = vec2(textureSize(topoTopdownTex, 0));
-    float eps = topdownWorldSize.x / texSize.x;
+    // Epsilon is the physical size of one heightmap texel in world units (meters)
+    float eps = u_terrainTileWorldSize / float(kTileResolution);
     
     float hL = sampleHeight(xz + vec2(-eps, 0.0));
     float hR = sampleHeight(xz + vec2( eps, 0.0));
