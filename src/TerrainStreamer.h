@@ -40,7 +40,7 @@ public:
 
     void update(const sf::Vector2f& cameraWorldPos);
 
-    const std::array<GLint, 25>& getActiveSliceUniforms() const;
+    const std::array<GLint, 81>& getActiveSliceUniforms() const;
     const TerrainManifest& getManifest() const { return m_manifest; }
     float sampleHeightAt(sf::Vector2f worldPos) const;
     const float* getTileData(TileCoord coord) const;
@@ -104,7 +104,7 @@ private:
     std::condition_variable  m_workerWakeCV;
     std::atomic<bool>        m_shutdownRequested{false};
 
-    std::array<GLint, 25> m_activeSliceUniforms{};
+    std::array<GLint, 81> m_activeSliceUniforms{};
     GLuint m_arrayTexture = 0;
     bool   m_subgridDirty = true;
 };

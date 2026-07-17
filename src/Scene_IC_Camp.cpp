@@ -1499,7 +1499,7 @@ void Scene_IC_Camp::runShadowPass() {
             WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
         glUniform1f(glGetUniformLocation(m_terrainShadowProgram, "u_terrainTileWorldSize"), kTileWorldSize);
 
-        glUniform1iv(glGetUniformLocation(m_terrainShadowProgram, "u_terrainSliceValid"), 25,
+        glUniform1iv(glGetUniformLocation(m_terrainShadowProgram, "u_terrainSliceValid"), 81,
                     m_terrainStreamer->getActiveSliceUniforms().data());
         glUniformMatrix4fv(glGetUniformLocation(m_terrainShadowProgram, "u_lightViewProj"),
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
@@ -1660,7 +1660,7 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
         WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_terrainTileWorldSize"), kTileWorldSize);
 
-    glUniform1iv(glGetUniformLocation(m_terrainProgram, "u_terrainSliceValid"), 25,
+    glUniform1iv(glGetUniformLocation(m_terrainProgram, "u_terrainSliceValid"), 81,
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_heightMax"), m_topdownMaxHeight);
@@ -1741,7 +1741,7 @@ void Scene_IC_Camp::updateMinimapTexture()
         WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
     glUniform1f(glGetUniformLocation(m_minimapProgram, "u_terrainTileWorldSize"), kTileWorldSize);
 
-    glUniform1iv(glGetUniformLocation(m_minimapProgram, "u_terrainSliceValid"), 25,
+    glUniform1iv(glGetUniformLocation(m_minimapProgram, "u_terrainSliceValid"), 81,
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
     // Draw fullscreen triangle using the zero-attribute VAO trick

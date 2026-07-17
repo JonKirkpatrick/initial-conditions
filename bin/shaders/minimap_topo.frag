@@ -4,7 +4,7 @@
 uniform sampler2DArray u_terrainHeightArray;
 uniform vec2           u_terrainGridWorldOrigin; // world-space origin of subgrid tile [0][0]
 uniform float          u_terrainTileWorldSize;   // meters per tile side (e.g., 256 * 4m)
-uniform int            u_terrainSliceValid[25];  // active slice validation flags
+uniform int            u_terrainSliceValid[81];  // active slice validation flags
 
 // == Minimap Parameters =====================================================
 uniform vec2  u_playerXZ;
@@ -15,7 +15,7 @@ in vec2 v_uv; // Spans [0, 1] in circular minimap quad space
 out vec4 fragColor;
 
 // == Constants matching terrain grid layout =================================
-const int  kVisibleGridDim = 5;
+const int  kVisibleGridDim = 9;
 const int  kTileResolution = 256;   // core texels/side
 const int  kTexSide        = 257;   // stored texels/side (with apron)
 

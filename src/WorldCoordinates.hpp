@@ -21,8 +21,8 @@ namespace WorldCoordinates {
         constexpr float kTexelSizeM      = 4.0f;   // == collision cell size
         constexpr int   kTileResolution  = 256;    // core texels/side
         constexpr int   kApronTexels     = 1;
-        constexpr int   kStreamerGridDim = 7;       // CPU-resident tiles/side
-        constexpr int   kVisibleGridDim  = 5;       // GPU-visible slice/side
+        constexpr int   kStreamerGridDim = 11;      // CPU-resident tiles/side
+        constexpr int   kVisibleGridDim  = 9;       // GPU-visible slice/side
 
         struct TileCoord
         {
@@ -40,7 +40,7 @@ namespace WorldCoordinates {
         };
 
         TileCoord   worldPosToTileCoord(sf::Vector2f worldPos);
-        int         slotIndexForTile(TileCoord coord); // toroidal %7 wrap
+        int         slotIndexForTile(TileCoord coord); // toroidal %11 wrap
         TileCoord   worldPosToAbsoluteTile(sf::Vector2f worldPos, TileCoord originTile);
     }
 

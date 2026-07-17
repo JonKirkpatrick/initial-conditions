@@ -5,10 +5,10 @@ layout(location = 0) in vec2 a_uv;
 uniform sampler2DArray  u_terrainHeightArray;
 uniform vec2            u_terrainGridWorldOrigin; // world-space origin of subgrid tile [0][0]
 uniform float           u_terrainTileWorldSize;   // meters per tile side (256 * 4m)
-uniform int             u_terrainSliceValid[25];  // from getActiveSliceUniforms()
+uniform int             u_terrainSliceValid[81];  // from getActiveSliceUniforms()
 uniform mat4            u_lightViewProj;
 
-const int  kVisibleGridDim = 5;
+const int  kVisibleGridDim = 9;
 const int  kTileResolution = 256;   // core texels/side
 const int  kTexSide        = 257;   // stored texels/side (with apron)
 

@@ -337,7 +337,7 @@ TerrainStreamer::ActiveSubgrid TerrainStreamer::getActiveSubgrid() const
     return subgrid;
 }
 
-const std::array<GLint, 25>& TerrainStreamer::getActiveSliceUniforms() const
+const std::array<GLint, 81>& TerrainStreamer::getActiveSliceUniforms() const
 {
     return m_activeSliceUniforms;
 }
