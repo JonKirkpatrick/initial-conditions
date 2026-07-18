@@ -141,16 +141,9 @@ namespace Camera {
 
         // Standalone Perspective Projection matrix (4x4 column-major)
         return {
-            // Column 0
             f / c.aspectRatio, 0.f,  0.f,  0.f,
-            
-            // Column 1
             0.f,               f,  0.f,  0.f,
-            
-            // Column 2
-            0.f,               0.f,  zFar / zRange,  -1.f, // Natively flips negative view Z to positive clip W
-            
-            // Column 3
+            0.f,               0.f,  zFar / zRange,  -1.f,
             0.f,               0.f,  (zNear * zFar) / zRange, 0.f
         };
     }

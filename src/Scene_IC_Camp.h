@@ -76,6 +76,8 @@ protected:
 
     GLuint              m_minimapProgram        = Assets::Instance().getGLProgram("MiniMap");
     GLuint              m_skyProgram            = Assets::Instance().getGLProgram("Sky");
+    GLuint              m_ssao                  = Assets::Instance().getGLProgram("SSAO");
+    GLuint              m_ssao_blur             = Assets::Instance().getGLProgram("SSAOBlur");
 
     // =========================================================================
     // Rendering — Render Textures and OpenGL Resources
@@ -108,6 +110,15 @@ protected:
 
     unsigned int        m_gBufferWidth          = 0;
     unsigned int        m_gBufferHeight         = 0;
+
+    // SSAO Textures and Framebuffers
+    GLuint              m_ssaoFBO               = 0;
+    GLuint              m_ssaoBlurFBO           = 0;
+    GLuint              m_ssaoColorTex          = 0;
+    GLuint              m_ssaoBlurTex           = 0;
+    GLuint              m_ssaoNoiseTex          = 0; // If using a random rotation noise texture
+    std::vector<sf::Glsl::Vec3> m_ssaoKernel;
+
 
     // =========================================================================
     // Rendering — Blit
@@ -204,6 +215,10 @@ protected:
     bool m_drawCollision    = false;
     bool m_showGUI          = false;
     bool m_cursorMode       = false;
+    bool m_debugShowSSAO     = false;
+    bool m_debugShowSSAOBlur = false;
+    float m_debugSSAOKernelRadius = 0.5f;
+    float m_debugSSAOBias         = 0.0025f;
 
     // =========================================================================
     // Performance Tracking
@@ -231,6 +246,9 @@ protected:
     void initializeSkyCubemap();
     void initializeOrbShaderStorage();
     void initializeGBuffer(unsigned int width, unsigned int height);
+    void initSSAONoiseTexture();
+    void initSSAOKernel();
+    void initSSAOFramebuffers();
     void destroyGBuffer();
     void initializeShadowMap(unsigned int size);
     void destroyShadowMap();
@@ -252,6 +270,7 @@ protected:
     glm::mat4 computeLightViewProjForMapBounds(float& lightDepthRange, float& texelWorldSize) const;
     float computeDistanceToMapFarCorner(const glm::vec3& cameraPos) const;
     void computeCascadeSplits(float camNear, float camFar);
+    void uploadViewRays(GLuint shaderProgram);
 
     // =========================================================================
     // Movement and Physics
@@ -270,6 +289,8 @@ protected:
     void runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
     void renderOrbCreature();
     void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
+    void runSSAOPass();
+    void runSSAOBlurPass();
     void deferredLighting();
     void blitToScreen(GLuint tex);
 

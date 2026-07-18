@@ -110,6 +110,9 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     initializeSkyCubemap();
     initializeShadowMap(m_shadowMapSize);
     initializeOrbShaderStorage();
+    initSSAONoiseTexture();
+    initSSAOKernel();
+    initSSAOFramebuffers();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -117,6 +120,11 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
 Scene_IC_Camp::~Scene_IC_Camp() {
     destroyGBuffer();
     destroyShadowMap();
+    glDeleteFramebuffers(1, &m_ssaoFBO);
+    glDeleteFramebuffers(1, &m_ssaoBlurFBO);
+    glDeleteTextures(1, &m_ssaoColorTex);
+    glDeleteTextures(1, &m_ssaoBlurTex);
+    if (m_ssaoNoiseTex) glDeleteTextures(1, &m_ssaoNoiseTex);
 }
 
 void Scene_IC_Camp::update() {
@@ -342,6 +350,15 @@ void Scene_IC_Camp::sGUI()
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("SSAO Debug"))
+        {
+            ImGui::Checkbox("Show SSAO Blur", &m_debugShowSSAOBlur);
+            ImGui::SliderFloat("SSAO Kernel Radius", &m_debugSSAOKernelRadius, 0.1f, 100.0f);
+            ImGui::SliderFloat("SSAO Bias", &m_debugSSAOBias, 0.0001f, 1.0f);
+            ImGui::Separator();
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Entity Manager"))
         {
             auto& m_entities = m_entityManager;
@@ -458,16 +475,17 @@ void Scene_IC_Camp::sRender() {
 
     runTerrainPass(rawWorldToCamMatrix);
     renderOrbCreature();
-    renderSky(worldToCamMatrix);
     runShadowPass();
-
+    runSSAOPass();
+    runSSAOBlurPass();
+    renderSky(worldToCamMatrix);
     window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
 
-    if (m_debugShowShadowMap) {
-        
+    if (m_debugShowSSAOBlur) {
+        blitToScreen(m_ssaoBlurTex);
     } else {
         deferredLighting();
     }
@@ -1525,6 +1543,210 @@ void Scene_IC_Camp::runShadowPass() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void Scene_IC_Camp::initSSAOKernel() {
+    std::uniform_real_distribution<float> randomFloats(0.0f, 1.0f);
+    std::default_random_engine generator;
+
+    m_ssaoKernel.clear();
+    for (unsigned int i = 0; i < 64; ++i) {
+        // 1. Generate random points in a hemisphere (z goes from 0.0 to 1.0)
+        sf::Glsl::Vec3 sample(
+            randomFloats(generator) * 2.0f - 1.0f,
+            randomFloats(generator) * 2.0f - 1.0f,
+            randomFloats(generator)
+        );
+        
+        // Normalize to push them to the edge of the hemisphere
+        // (Assuming a basic normalization helper, or do it manually)
+        float len = std::sqrt(sample.x * sample.x + sample.y * sample.y + sample.z * sample.z);
+        if (len > 0.0f) { sample.x /= len; sample.y /= len; sample.z /= len; }
+
+        // 2. Scale the samples so they bunch up closer to the origin 
+        // This gives better close-range occlusion details
+        float scale = (float)i / 64.0f;
+        // Accelerating interpolation math: lerp(0.1f, 1.0f, scale^2)
+        scale = 0.1f + (scale * scale) * (1.0f - 0.1f); 
+        
+        sample.x *= scale;
+        sample.y *= scale;
+        sample.z *= scale;
+
+        m_ssaoKernel.push_back(sample);
+    }
+}
+
+void Scene_IC_Camp::initSSAOFramebuffers() {
+    // -------------------------------------------------------------------------
+    // 1. RAW SSAO FRAMEBUFFER
+    // -------------------------------------------------------------------------
+    glGenFramebuffers(1, &m_ssaoFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoFBO);
+
+    glGenTextures(1, &m_ssaoColorTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoColorTex);
+    
+    // SSAO only needs a single grayscale channel. GL_RED or GL_R8 is perfect and fast.
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, m_gBufferWidth, m_gBufferHeight, 0, GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    
+    // Attach texture to the FBO
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ssaoColorTex, 0);
+
+    // Verify FBO is complete
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cout << "SSAO Framebuffer not complete!" << std::endl;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. SSAO BLUR FRAMEBUFFER
+    // -------------------------------------------------------------------------
+    glGenFramebuffers(1, &m_ssaoBlurFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoBlurFBO);
+
+    glGenTextures(1, &m_ssaoBlurTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoBlurTex);
+    
+    // Same single-channel setup for the blurred result
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, m_gBufferWidth, m_gBufferHeight, 0, GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ssaoBlurTex, 0);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cout << "SSAO Blur Framebuffer not complete!" << std::endl;
+    }
+
+    // Restore default framebuffer binding
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Scene_IC_Camp::initSSAONoiseTexture() {
+    std::uniform_real_distribution<float> randomFloats(0.0f, 1.0f);
+    std::default_random_engine generator;
+
+    std::vector<sf::Glsl::Vec3> ssaoNoise;
+    for (unsigned int i = 0; i < 16; ++i) {
+        // Rotate around the Z-axis (z is 0.0)
+        sf::Glsl::Vec3 noise(
+            randomFloats(generator) * 2.0f - 1.0f,
+            randomFloats(generator) * 2.0f - 1.0f,
+            0.0f
+        );
+        ssaoNoise.push_back(noise);
+    }
+
+    // Generate the OpenGL texture
+    glGenTextures(1, &m_ssaoNoiseTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoNoiseTex);
+    
+    // Upload raw float data (3 channels: RGB)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, 4, 4, 0, GL_RGB, GL_FLOAT, &ssaoNoise[0].x);
+    
+    // CRITICAL: Set wrapping to repeat so it tiles across the full screen dimensions
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void Scene_IC_Camp::uploadViewRays(GLuint shaderProgram) {
+    // Grab your camera properties
+    auto cameraData = m_entityManager.getCamera(m_camera);
+    float fov = cameraData.fovY; // in degrees
+    float aspect = cameraData.aspectRatio; // width / height
+    float farPlane = cameraData.farPlane;
+
+    // Calculate half-width and half-height of the frustum at the far plane
+    float tangent = std::tan(fov * 0.5f * (3.14159265f / 180.0f));
+    float farHeight = farPlane * tangent;
+    float farWidth = farHeight * aspect;
+
+    // View Space corners at the far plane (Remember: Camera looks down -Z!)
+    // Top-Right, Bottom-Left, etc.
+    glUniform3f(glGetUniformLocation(shaderProgram, "u_farTopRight"),   farWidth,  farHeight, -farPlane);
+    glUniform3f(glGetUniformLocation(shaderProgram, "u_farTopLeft"),   -farWidth,  farHeight, -farPlane);
+    glUniform3f(glGetUniformLocation(shaderProgram, "u_farBottomLeft"), -farWidth, -farHeight, -farPlane);
+    glUniform3f(glGetUniformLocation(shaderProgram, "u_farBottomRight"), farWidth, -farHeight, -farPlane);
+}
+
+void Scene_IC_Camp::runSSAOPass() {
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& camData = m_entityManager.getCamera(m_camera);
+    
+    auto projectionMatrix = Camera::getProjectionMatrix(camData);
+    auto viewMatrix = Camera::getViewMatrix(camTransform);
+
+    glm::mat4 glmP = glm::make_mat4(projectionMatrix.data());
+    glm::mat4 glmV = glm::make_mat4(viewMatrix.data());
+    glm::mat4 invViewProj = glm::inverse(glmP * glmV);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoFBO);
+    glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+
+    glUseProgram(m_ssao);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
+    glUniform1i(glGetUniformLocation(m_ssao, "u_gNormal"), 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
+    glUniform1i(glGetUniformLocation(m_ssao, "u_gDepth"), 1);
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoNoiseTex);
+    glUniform1i(glGetUniformLocation(m_ssao, "u_texNoise"), 2);
+
+    Scene_IC_Camp::uploadViewRays(m_ssao);
+
+    glUniformMatrix4fv(glGetUniformLocation(m_ssao, "u_projection"), 1, GL_FALSE, projectionMatrix.data());
+    glUniformMatrix4fv(glGetUniformLocation(m_ssao, "u_view"), 1, GL_FALSE, viewMatrix.data());
+    glUniformMatrix4fv(glGetUniformLocation(m_ssao, "u_invViewProj"), 1, GL_FALSE, &invViewProj[0][0]);
+
+    glUniform3fv(glGetUniformLocation(m_ssao, "u_samples"), static_cast<GLsizei>(m_ssaoKernel.size()), &m_ssaoKernel[0].x);
+    glUniform2f(glGetUniformLocation(m_ssao, "u_noiseScale"), 
+                (float)m_gBufferWidth / 4.0f, (float)m_gBufferHeight / 4.0f);
+    glUniform1f(glGetUniformLocation(m_ssao, "u_radius"), m_debugSSAOKernelRadius);
+    glUniform1f(glGetUniformLocation(m_ssao, "u_bias"), m_debugSSAOBias);
+    GLuint emptyVAO;
+    glGenVertexArrays(1, &emptyVAO);
+    glBindVertexArray(emptyVAO);
+
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteVertexArrays(1, &emptyVAO);
+}
+
+void Scene_IC_Camp::runSSAOBlurPass() {
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoBlurFBO);
+    glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glUseProgram(m_ssao_blur);
+
+    // Bind raw SSAO result to be filtered
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoColorTex);
+    glUniform1i(glGetUniformLocation(m_ssao_blur, "u_ssaoInput"), 0);
+
+    GLuint emptyVAO;
+    glGenVertexArrays(1, &emptyVAO);
+    glBindVertexArray(emptyVAO);
+
+    // Now you can safely draw without a VBO
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteVertexArrays(1, &emptyVAO);
+}
+
 void Scene_IC_Camp::initializeGBuffer(unsigned int width, unsigned int height) {
     m_gBufferWidth = width;
     m_gBufferHeight = height;
@@ -1641,8 +1863,11 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     auto& transform  = m_entityManager.getTransform(m_camera);
     auto& cameraData = m_entityManager.getCamera(m_camera);
     auto vpMatrix   = Camera::getVPMatrix(transform, cameraData);
-    sf::Vector3f worldPos = screenToWorld(m_cachedMousePos);
-    sf::Vector2i hex = WCH::worldToHex(worldPos.x, worldPos.z);
+    sf::Vector2i hex(-1, -1);
+    if (m_cursorMode) {
+        sf::Vector3f worldPos = screenToWorld(m_cachedMousePos);
+        sf::Vector2i hex = WCH::worldToHex(worldPos.x, worldPos.z);
+    }
 
     sf::Vector2u windowSize = m_game.window().getSize();
 
@@ -1894,6 +2119,11 @@ void Scene_IC_Camp::deferredLighting()
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_shadowMap"), 5);
+
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoBlurTex);
+    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_ssaoTex"), 6);
+
     glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_lightViewProj"),
                         NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
     glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_lightDepthRange"), NUM_CASCADES, m_lightDepthRange);
@@ -1950,7 +2180,7 @@ void Scene_IC_Camp::deferredLighting()
     glBindVertexArray(0);
     glUseProgram(0);
     
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
         glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
