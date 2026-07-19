@@ -1,30 +1,76 @@
 #version 460 core
 
-uniform float fovY;
-uniform float aspectRatio;
-uniform vec3  sunDir;
-uniform vec4  sunColor;
-uniform mat3  worldToCamMatrix;
+// ==============================================================================
+// == Uniform Buffer Binding 0 (Camera Data) ====================================
+// ==============================================================================
+layout (std140, binding = 0) uniform CameraData {
+    mat4 u_view;
+    mat4 u_proj;
+    mat4 u_viewProj;
+    mat4 u_invViewProj;
+    vec3 u_cameraPos;
+    float fovY;
+    vec3 u_cameraForward;
+    float aspectRatio;
+    vec3 u_cameraRight;
+    float u_cameraHeight;
+    vec3 u_cameraUp;
+    float u_farPlane;
+    vec2 u_viewportSize;
+    float u_nearPlane;
+};
 
+// ==============================================================================
+// == Uniform Buffer Binding 1 (Environment Data) ===============================
+// ==============================================================================
+layout (std140, binding = 1) uniform EnvironmentData {
+    vec4  u_sunColor;
+    vec3  u_sunDir;
+    float u_ambientStrength;
+    vec3  u_moonDir;
+    float u_skyExposure;
+};
+
+#define sunDir u_sunDir
+#define sunColor u_sunColor
+#define moonDir u_moonDir
+#define skyExposure u_skyExposure
+
+// ==============================================================================
+// == Uniform Buffer Binding 2 (Atmosphere / Fog Data) ==========================
+// ==============================================================================
+layout (std140, binding = 2) uniform AtmosphereData {
+    vec4  u_fogColorDay;
+    vec4  u_fogColorNight;
+    float u_fogDensity;
+    float u_fogBaseHeight;
+    float u_fogHeightFalloff;
+};
+
+// Aliases so your current internal fog calculations continue working seamlessly:
+#define u_fogColorDay      u_fogColorDay.xyz
+#define u_fogColorNight    u_fogColorNight.xyz
+#define u_fogDensity       u_fogDensity
+#define u_fogBaseHeight    u_fogBaseHeight
+#define u_fogHeightFalloff u_fogHeightFalloff
+
+// ==============================================================================
+// == Remaining Loose Uniforms ==================================================
+// ==============================================================================
 uniform samplerCube skyCubemap;
 uniform mat3        starRotationMatrix;
 uniform bool        useSkyCubemap;
-uniform float       skyExposure;
-
-uniform vec3        moonDir;
 uniform sampler2D   moonTexture;
-
-uniform vec3  u_cameraPos;
-uniform vec3  u_fogColorDay;
-uniform vec3  u_fogColorNight;
-uniform float u_fogDensity;
-uniform float u_fogBaseHeight;
-uniform float u_fogHeightFalloff;
 
 in vec2 v_ndc;
 out vec4 fragColor;
 
 void main() {
+    mat3 worldToCamMatrix = mat3(
+        u_cameraRight,
+        u_cameraUp,
+        -u_cameraForward
+    );
     float f = tan(fovY * 0.5);
     vec3 rayDir = normalize(worldToCamMatrix * vec3(v_ndc.x * f * aspectRatio, v_ndc.y * f, -1.0));
 

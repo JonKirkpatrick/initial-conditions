@@ -6,29 +6,40 @@
 #include "orb/orbCompound.glsl"
 
 // ==============================================================================
+// == Uniform Buffer Binding 0 (Camera Data) ====================================
+// ==============================================================================
+layout (std140, binding = 0) uniform CameraData {
+    mat4 u_view;
+    mat4 u_proj;
+    mat4 u_viewProj;
+    mat4 u_invViewProj;
+    
+    vec3 u_cameraPos;
+    float u_fovY;
+    
+    vec3 u_cameraForward;
+    float u_aspectRatio;
+    
+    vec3 u_cameraRight;
+    float u_cameraHeight;
+    
+    vec3 u_cameraUp;
+    float u_farPlane;
+    
+    vec2 u_viewportSize;
+    float u_nearPlane;
+};
+
+// ==============================================================================
 // == Varyings ===================================================================
 // ==============================================================================
-
 flat in int v_instanceID;
 
 // ==============================================================================
-// == Uniforms ==================================================================
+// == Remaining Uniforms ========================================================
 // ==============================================================================
-
-// View/Projection matrix
-uniform mat4 u_viewProj;
-
-// Texture samples
 uniform sampler2DArray u_charDiffuseTex;
 uniform sampler2DArray u_charNormalTex;
-
-// Camera uniforms
-uniform vec2      u_viewportSize;
-uniform float     u_fovY;
-uniform vec3      u_cameraPos;
-uniform vec3      u_cameraRight;
-uniform vec3      u_cameraUp;
-uniform vec3      u_cameraForward;
 
 // G-Buffer Slots
 layout (location = 0) out vec4 outAlbedo;

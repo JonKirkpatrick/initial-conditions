@@ -4,11 +4,22 @@
 #include "orb/orbData.glsl"
 #include "orb/orbCompound.glsl"
 
+// ==============================================================================
+// == Uniform Buffer Binding 1 (Environment Data) ===============================
+// ==============================================================================
+layout (std140, binding = 1) uniform EnvironmentData {
+    vec4  u_sunColor;
+    vec3  u_sunDir;
+    float u_ambientStrength;
+    
+    vec3  u_moonDir;
+    float u_skyExposure;
+};
+
 flat in int v_instanceID;
 in vec3 v_worldPos;
 
 uniform mat4 u_lightViewProj;
-uniform vec3 u_lightDir; // Vector pointing TOWARD the sun
 
 void main()
 {
@@ -22,7 +33,7 @@ void main()
     OrbEyeGeometry eyes = deriveOrbEyeGeometry(centre, forward, right, up, radius);
 
     Ray ray;
-    ray.dir    = -normalize(u_lightDir); // Facing downstream away from the light source
+    ray.dir    = -normalize(u_sunDir); // Using the UBO sun direction variable now!
     ray.origin = v_worldPos + ray.dir * 0.01;
 
     OrbCompoundHit compound = intersectOrbCompound(ray, centre, radius, eyes);

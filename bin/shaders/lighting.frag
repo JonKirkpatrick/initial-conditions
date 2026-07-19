@@ -1,37 +1,99 @@
 #version 460 core
 
-struct SpeciesData {
-    vec4 irisColourAndRadius;               // xyz = irisColour,    w = irisRadius
-    vec4 scleraColour;                      // xyz = scleraColour,  w = spare
-    vec4 tapetumColourAndPresence;          // xyz = tepetumColour, w = presence (0 or 1)
+// ==============================================================================
+// == Global Macro Aliases =====================================================
+// ==============================================================================
+#define u_invViewProj      u_invViewProj_Block
+#define u_cameraPos        u_cameraPos_Block
+#define u_cameraForward    u_cameraForward_Block
+#define u_sunDir           u_sunDir_Block
+#define u_sunColor         u_sunColor_Block
+#define u_fogColorDay      u_fogColorDay_Block.xyz
+#define u_fogColorNight    u_fogColorNight_Block.xyz
+#define u_fogDensity       u_fogDensity_Block
+#define u_fogBaseHeight    u_fogBaseHeight_Block
+#define u_fogHeightFalloff u_fogHeightFalloff_Block
+
+// ==============================================================================
+// == Uniform Buffer Blocks (Bound safely to 0, 1, and 2) =======================
+// ==============================================================================
+layout (std140, binding = 0) uniform CameraData {
+    mat4 u_view;
+    mat4 u_proj;
+    mat4 u_viewProj;
+    mat4 u_invViewProj_Block;
+    
+    vec3 u_cameraPos_Block;
+    float fovY;
+    
+    vec3 u_cameraForward_Block;
+    float aspectRatio;
+    
+    vec3 u_cameraRight;
+    float u_cameraHeight;
+    
+    vec3 u_cameraUp;
+    float u_farPlane;
+    
+    vec2 u_viewportSize;
+    float u_nearPlane;
+    float cameraData_padding;
 };
 
-layout(std430, binding = 1) readonly buffer SpeciesBuffer {
+layout (std140, binding = 1) uniform EnvironmentData {
+    vec4  u_sunColor_Block;
+    vec3  u_sunDir_Block;
+    float u_ambientStrength;
+    vec3  u_moonDir;
+    float u_skyExposure;
+};
+
+layout (std140, binding = 2) uniform AtmosphereData {
+    vec4  u_fogColorDay_Block;       
+    vec4  u_fogColorNight_Block;     
+    float u_fogDensity_Block;
+    float u_fogBaseHeight_Block;
+    float u_fogHeightFalloff_Block;
+    float atmoData_padding;
+};
+
+// ==============================================================================
+// == Shader Storage Buffer Objects (SSBOs - Shifted to 5 & 6) ==================
+// ==============================================================================
+struct SpeciesData {
+    vec4 irisColourAndRadius;
+    vec4 scleraColour;
+    vec4 tapetumColourAndPresence;
+};
+
+layout(std430, binding = 5) readonly buffer SpeciesBuffer {
     SpeciesData species[];
 };
 
 struct MaterialData {
-    vec4 albedoTint;
+    vec4  albedoTint;
     float roughness;
     float metallic;
     float emissiveIntensity;
     float specularReflectance;
-    vec2 uvScale;
-    vec2 uvOffset;
+    vec2  uvScale;
+    vec2  uvOffset;
     uint  materialFlags;
     float spare0;
     float spare1;
     float spare2;
 };
 
-layout(std430, binding = 2) readonly buffer MaterialBuffer {
+layout(std430, binding = 6) readonly buffer MaterialBuffer {
     MaterialData material[];
 };
 
+// ==============================================================================
+// == Input / Output Context & Samplers =========================================
+// ==============================================================================
 in vec2 v_uv;
 out vec4 FragColor;
 
-// G-Buffer Uniform Samplers
 uniform sampler2D u_gAlbedo;
 uniform sampler2D u_gNormal;
 uniform sampler2D u_gIndices;
@@ -39,32 +101,15 @@ uniform sampler2D u_gRetro;
 uniform sampler2D u_gDepth;
 uniform sampler2D u_ssaoTex;
 
-// World Reconstruction
-uniform mat4 u_invViewProj;
-uniform vec3 u_cameraPos;
-uniform vec3 u_cameraForward;
-
-// Lighting Uniforms
-uniform vec3 u_sunDir;
-uniform vec4 u_sunColor;
-uniform vec3 u_nightAmbientFloor; // small minimum ambient (moonlight/starlight), e.g. vec3(0.002, 0.003, 0.006)
+uniform vec3  u_nightAmbientFloor;
 uniform float u_headlampIntensity;
 uniform float u_headlampRange;
 uniform float u_headlampEnabled;
 
-// Fog Uniforms
-uniform vec3  u_fogColorDay;    // fog tint in full daylight
-uniform vec3  u_fogColorNight;  // fog tint at night - keep this DARK, not just a dimmer version
-                                 // of the day colour, or fog will relight the night scene
-uniform float u_fogDensity;     // higher = thicker fog overall
-uniform float u_fogBaseHeight;  // world Y where fog is at full density (the "sea level" of the blanket)
-uniform float u_fogHeightFalloff; // higher = fog thins out faster as you gain altitude
-
-// Shadow Uniforms
 uniform sampler2DArrayShadow u_shadowMap;
-uniform mat4      u_lightViewProj[5];
-uniform float     u_cascadeSplitDepths[5];
-uniform float     u_texelWorldSize[5];
+uniform mat4  u_lightViewProj[5];
+uniform float u_cascadeSplitDepths[5];
+uniform float u_texelWorldSize[5];
 
 int selectCascade(vec3 worldPos) {
     float viewDepth = dot(worldPos - u_cameraPos, u_cameraForward);
@@ -149,7 +194,7 @@ void main()
 
     float ssao = texture(u_ssaoTex, v_uv).r;
     vec3 dayFloor        = vec3(0.04, 0.06, 0.09);
-    vec3 nightFloor       = u_nightAmbientFloor; // e.g. vec3(0.002, 0.003, 0.006)
+    vec3 nightFloor       = u_nightAmbientFloor; 
     vec3 ambientFloor    = mix(nightFloor, dayFloor, dayLightingFactor);
     vec3 skyColor        = u_sunColor.rgb * 0.15 * dayLightingFactor + ambientFloor;
     vec3 ambientLight    = skyColor * albedo * mat.albedoTint.rgb * ssao;

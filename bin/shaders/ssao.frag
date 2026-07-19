@@ -1,25 +1,50 @@
 #version 460 core
+
 out float FragColor;
 in vec2 v_uv;
 
+// ==============================================================================
+// == Uniform Buffer Binding 0 (Camera Data) ====================================
+// ==============================================================================
+layout (std140, binding = 0) uniform CameraData {
+    mat4 u_view;
+    mat4 u_proj;
+    mat4 u_viewProj;
+    mat4 u_invViewProj;
+    vec3 u_cameraPos;
+    float fovY;
+    vec3 u_cameraForward;
+    float aspectRatio;
+    vec3 u_cameraRight;
+    float u_cameraHeight;
+    vec3 u_cameraUp;
+    float u_farPlane;
+    vec2 u_viewportSize;
+    float u_nearPlane;
+};
+
+// Aliases to bridge standard SSAO variable names seamlessly
+#define u_projection u_proj
+#define u_view       u_view
+#define u_near       u_nearPlane
+#define u_far        u_farPlane
+
+// ==============================================================================
+// == Texture Samplers ==========================================================
+// ==============================================================================
 uniform sampler2D u_gNormal;
 uniform sampler2D u_gDepth;
 uniform sampler2D u_texNoise;
 
-uniform vec3      u_samples[64];
-uniform mat4      u_projection;
-uniform mat4      u_view;        
+// ==============================================================================
+// == Remaining Loose Uniforms ==================================================
+// ==============================================================================
+uniform vec3  u_samples[64];
+uniform float u_radius = 4.0;     
+uniform float u_bias = 0.05;       
+uniform vec2  u_noiseScale;  
+uniform int   u_sampleCount = 64;
 
-uniform float     u_radius = 4.0;     
-uniform float     u_bias = 0.05;       
-uniform vec2      u_noiseScale;  
-
-uniform float     u_near = 1.0;       
-uniform float     u_far  = 5000.0;  
-
-uniform int       u_sampleCount = 64;
-
-// MATHEMATICALLY PURIFIED VIEW POSITION
 vec3 getPositionInViewSpace(vec2 uv) {
     float depth = texture(u_gDepth, uv).r;
     

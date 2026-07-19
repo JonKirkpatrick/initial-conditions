@@ -1,21 +1,52 @@
 #version 460 core
 
 // ==============================================================================
-// == Uniforms ==================================================================
+// == Uniform Buffer Binding 0 (Camera Data) ====================================
 // ==============================================================================
+layout (std140, binding = 0) uniform CameraData {
+    mat4 u_view;
+    mat4 u_proj;
+    mat4 u_viewProj;
+    mat4 u_invViewProj;
+    
+    vec3 u_cameraPos;
+    float u_fovY;
+    
+    vec3 u_cameraForward;
+    float u_aspectRatio;
+    
+    vec3 u_cameraRight;
+    float u_cameraHeight;
+    
+    vec3 u_cameraUp;
+    float u_farPlane;
+    
+    vec2 u_viewportSize;
+    float u_nearPlane;
+};
 
-uniform vec3    u_cameraPos;
-uniform float   u_cameraHeight;
-uniform float   u_farPlane;
-uniform float   u_heightMax;
-uniform mat3    u_worldToCamMatrix;
+// ==============================================================================
+// == Uniform Buffer Binding 1 (Environment Data) ===============================
+// ==============================================================================
+layout (std140, binding = 1) uniform EnvironmentData {
+    vec4  u_sunColor;
+    vec3  u_sunDir;
+    float u_ambientStrength;
+    
+    vec3  u_moonDir;
+    float u_skyExposure;
+};
 
-uniform bool    u_cursorMode;
-uniform float   u_hexSize;
-uniform vec2    u_hoveredHex;
-uniform vec3    u_gridColour;
+// ==============================================================================
+// == Remaining Loose Uniforms ==================================================
+// ==============================================================================
+uniform float u_heightMax;
+uniform float u_reliefExaggeration;
 
-uniform float   u_reliefExaggeration;
+uniform bool  u_cursorMode;
+uniform float u_hexSize;
+uniform vec2  u_hoveredHex;
+uniform vec3  u_gridColour;
 
 in vec2 v_worldXZ;
 in vec2 v_normalXZ;

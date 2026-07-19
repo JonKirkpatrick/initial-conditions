@@ -1,11 +1,41 @@
 #version 460 core
+
+// ==============================================================================
+// == Uniform Buffer Binding 0 (Camera Data) ====================================
+// ==============================================================================
+layout (std140, binding = 0) uniform CameraData {
+    mat4 u_view;
+    mat4 u_proj;
+    mat4 u_viewProj;        // We will grab this directly now!
+    mat4 u_invViewProj;
+    
+    vec3 u_cameraPos;
+    float u_fovY;
+    
+    vec3 u_cameraForward;
+    float u_aspectRatio;
+    
+    vec3 u_cameraRight;
+    float u_cameraHeight;
+    
+    vec3 u_cameraUp;
+    float u_farPlane;
+    
+    vec2 u_viewportSize;
+    float u_nearPlane;
+};
+
+// ==============================================================================
+// == Remaining Vertex Uniforms =================================================
+// ==============================================================================
 layout(location = 0) in vec2 a_uv; // spans [0,1] across the FULL 5x5 visible grid
 
 uniform sampler2DArray u_terrainHeightArray;
 uniform vec2           u_terrainGridWorldOrigin; // world-space origin of subgrid tile [0][0]
 uniform float          u_terrainTileWorldSize;   // meters per tile side (256 * 4m)
 uniform int            u_terrainSliceValid[81];  // from getActiveSliceUniforms()
-uniform mat4           u_viewProj;
+
+// REMOVED: uniform mat4 u_viewProj; (Handled by UBO)
 
 out vec2  v_worldXZ;
 out vec2  v_normalXZ;

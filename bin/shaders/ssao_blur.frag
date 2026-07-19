@@ -1,13 +1,38 @@
 #version 460 core
+
 out float FragColor;
 in vec2 v_uv;
 
+// ==============================================================================
+// == Uniform Buffer Binding 0 (Camera Data) ====================================
+// ==============================================================================
+layout (std140, binding = 0) uniform CameraData {
+    mat4 u_view;
+    mat4 u_proj;
+    mat4 u_viewProj;
+    mat4 u_invViewProj;
+    vec3 u_cameraPos;
+    float fovY;
+    vec3 u_cameraForward;
+    float aspectRatio;
+    vec3 u_cameraRight;
+    float u_cameraHeight;
+    vec3 u_cameraUp;
+    float u_farPlane;
+    vec2 u_viewportSize;
+    float u_nearPlane;
+};
+
+// Map old loose uniform names to the automated UBO context
+#define u_near u_nearPlane
+#define u_far  u_farPlane
+
+// ==============================================================================
+// == Texture Samplers ==========================================================
+// ==============================================================================
 uniform sampler2D u_ssaoInput; 
 uniform sampler2D u_gNormal;    
-uniform sampler2D u_gDepth;     
-
-uniform float     u_near = 1.0;       // Match your engine settings
-uniform float     u_far  = 5000.0;    
+uniform sampler2D u_gDepth;
 
 // Linearize the raw depth so we are working with actual world units (meters)
 float getLinearDepth(vec2 uv) {

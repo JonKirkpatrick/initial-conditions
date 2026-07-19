@@ -114,6 +114,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     initSSAONoiseTexture();
     initSSAOKernel();
     initSSAOFramebuffers();
+    initUBOs();
     m_game.setMouseCaptured(true);
     m_cursorMode = false;
 }
@@ -126,6 +127,9 @@ Scene_IC_Camp::~Scene_IC_Camp() {
     glDeleteTextures(1, &m_ssaoColorTex);
     glDeleteTextures(1, &m_ssaoBlurTex);
     if (m_ssaoNoiseTex) glDeleteTextures(1, &m_ssaoNoiseTex);
+    if (m_cameraUBO != 0) {
+        glDeleteBuffers(1, &m_cameraUBO);
+    }
 }
 
 void Scene_IC_Camp::update() {
@@ -277,11 +281,17 @@ void Scene_IC_Camp::onEnter() {
 void Scene_IC_Camp::onExit() {
     destroyGBuffer();
     destroyShadowMap();
+    if (m_cameraUBO != 0) {
+        glDeleteBuffers(1, &m_cameraUBO);
+    }
 }
 
 void Scene_IC_Camp::onEnd() {
     destroyGBuffer();
     destroyShadowMap();
+    if (m_cameraUBO != 0) {
+        glDeleteBuffers(1, &m_cameraUBO);
+    }
 }
 
 HUD* Scene_IC_Camp::getHUD() const
@@ -461,9 +471,61 @@ void Scene_IC_Camp::sGUI()
 void Scene_IC_Camp::sRender() {
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
-    auto rawWorldToCamMatrix = Camera::getWorldToCamMatrix(transform);
-    auto worldToCamMatrix = toGlslMat3(rawWorldToCamMatrix);
+    auto& camData = m_entityManager.getCamera(m_camera);
 
+    // 1. Collect and calculate all the CPU matrix math into our packed layout
+    CameraBlock cb;
+    cb.view         = glm::make_mat4(Camera::getViewMatrix(transform).data());
+    cb.proj         = glm::make_mat4(Camera::getProjectionMatrix(camData).data());
+    cb.viewProj     = cb.proj * cb.view;
+    cb.invViewProj  = glm::inverse(cb.viewProj);
+    
+    cb.cameraPos    = toGLMVec3(transform.pos);
+    cb.fovY         = camData.fovY;
+    
+    cb.cameraForward = toGLMVec3(Camera::getForward(transform));
+    cb.aspectRatio   = camData.aspectRatio;
+    
+    cb.cameraRight   = toGLMVec3(Camera::getRight(transform));
+    cb.cameraHeight  = getCameraHeightAboveGround(transform.pos);
+    
+    cb.cameraUp      = toGLMVec3(Camera::getUp(transform));
+    cb.farPlane      = camData.farPlane;
+    
+    cb.viewportSize  = glm::vec2(camData.viewportSize.x, camData.viewportSize.y);
+    cb.nearPlane     = camData.nearPlane;
+    cb.padding       = 0.0f; // explicitly clearing out the tracking buffer garbage
+
+    EnvironmentBlock eb;
+    eb.sunColor        = toGLMVec4(m_astroState.sunColor);
+    eb.sunDirection    = toGLMVec3(m_astroState.sunDirection);
+    eb.ambientStrength = m_sunIntensity;
+    eb.moonDirection   = toGLMVec3(m_astroState.moonDirection);
+    eb.skyExposure     = 5.0f;
+
+    AtmosphereBlock ab;
+    ab.fogColorDay       = glm::vec4(0.7f, 0.8f, 1.0f, 1.0f);
+    ab.fogColorNight     = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f);
+    ab.fogDensity        = 0.001f;
+    ab.fogBaseHeight     = 8.0f;
+    ab.fogHeightFalloff  = 0.01f;
+    ab._padding          = 0.0f;
+
+    glBindBuffer(GL_UNIFORM_BUFFER, m_atmoUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(AtmosphereBlock), &ab);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    glBindBuffer(GL_UNIFORM_BUFFER, m_envUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(EnvironmentBlock), &eb);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    glBindBuffer(GL_UNIFORM_BUFFER, m_cameraUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraBlock), &cb);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0); // safe unbind
+
+    // ==========================================
+    // 3. EXECUTE YOUR RENDERING PASSES
+    // ==========================================
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_gBufferFBO);
     glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
@@ -475,12 +537,12 @@ void Scene_IC_Camp::sRender() {
     glDepthFunc(GL_LEQUAL);
     glDisable(GL_BLEND);
 
-    runTerrainPass(rawWorldToCamMatrix);
+    runTerrainPass();
     renderOrbCreature();
     runShadowPass();
     runSSAOPass();
     runSSAOBlurPass();
-    renderSky(worldToCamMatrix);
+    renderSky();
     window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
@@ -1358,14 +1420,9 @@ void Scene_IC_Camp::computeCascadeSplits(float camNear, float camFar) {
                            + (1.0f - m_cascadeSplitLambda) * uniformSplit;
     }
 
-    // Override the last split: instead of following the log/uniform scheme,
-    // extend it all the way to the farthest corner of the currently loaded map.
     auto& camTransform = m_entityManager.getTransform(m_camera);
     float mapEdgeDist  = computeDistanceToMapFarCorner(toGLMVec3(camTransform.pos));
 
-    // Guard against the map-edge distance ever being smaller than the
-    // previous split (e.g. camera standing right at the map boundary) --
-    // runShadowPass depends on splits being strictly increasing.
     m_cascadeSplits[NUM_CASCADES - 1] =
         std::max(mapEdgeDist, m_cascadeSplits[NUM_CASCADES - 2] + 1.0f);
 }
@@ -1474,20 +1531,25 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForMapBounds(float& lightDepthRange
 
 void Scene_IC_Camp::runShadowPass() {
     auto& camData = m_entityManager.getCamera(m_camera);
+    
+    // 1. Calculate cascade distributions based on our camera properties
     float clampedFar = std::min(camData.farPlane, m_shadowMaxDistance);
     computeCascadeSplits(camData.nearPlane, clampedFar);
 
+    // 2. Setup Render State for Shadow Maps
     glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFBO);
     glViewport(0, 0, m_shadowMapSize, m_shadowMapSize);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE); // Shared by both terrain and orbs here
 
     float splitNear = camData.nearPlane;
 
     for (int cascade = 0; cascade < NUM_CASCADES; ++cascade) {
         float splitFar = m_cascadeSplits[cascade];
 
+        // Compute the light space matrices for this slice
         if (cascade == NUM_CASCADES - 1) {
             m_lightViewProjCascades[cascade] = computeLightViewProjForMapBounds(
                 m_lightDepthRange[cascade], m_texelWorldSize[cascade]);
@@ -1495,16 +1557,16 @@ void Scene_IC_Camp::runShadowPass() {
             m_lightViewProjCascades[cascade] = computeLightViewProjForRange(
                 splitNear, splitFar, m_lightDepthRange[cascade], m_texelWorldSize[cascade]);
         }
-        splitNear = splitFar; // next cascade picks up where this one left off
+        splitNear = splitFar; // Next cascade picks up where this one left off
 
+        // Target the specific layer array slice on the FBO
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                                    m_shadowDepthTexArray, 0, cascade);
         glClear(GL_DEPTH_BUFFER_BIT);
 
-        // --- terrain ---
-        glDisable(GL_CULL_FACE);
+        // --- 1. TERRAIN SHADOWS ---
         glUseProgram(m_terrainShadowProgram);
-        // Fetch the raw float height array asset
+        
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
         glUniform1i(glGetUniformLocation(m_terrainShadowProgram, "u_terrainHeightArray"), 0);
@@ -1519,22 +1581,24 @@ void Scene_IC_Camp::runShadowPass() {
 
         glUniform1iv(glGetUniformLocation(m_terrainShadowProgram, "u_terrainSliceValid"), 81,
                     m_terrainStreamer->getActiveSliceUniforms().data());
+        
         glUniformMatrix4fv(glGetUniformLocation(m_terrainShadowProgram, "u_lightViewProj"),
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
+        
         glBindVertexArray(m_gridVAO);
         glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
 
-        // --- orbs ---
+        // --- 2. ORB SHADOWS (Skip stable far bounds map layer if configured) ---
         if (cascade != NUM_CASCADES - 1)
         {
-            glDisable(GL_CULL_FACE);
             glUseProgram(m_orbShadowProgram);
-            glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
+            
             glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
                             1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
-            glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"),
-                        1, glm::value_ptr(sunDir));
+            
+            // REMOVED: u_lightDir uniform dispatch (Going to be read natively via Environment/Astro state)
+            
             m_orbSSBO.bind(0);
             glBindVertexArray(m_cubeVAO);
             glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
@@ -1542,6 +1606,7 @@ void Scene_IC_Camp::runShadowPass() {
         }
     }
 
+    // 3. Reset Global Pipeline State
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -1625,6 +1690,38 @@ void Scene_IC_Camp::initSSAOFramebuffers() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void Scene_IC_Camp::initUBOs() {
+    // 1. Generate the buffer object
+    glGenBuffers(1, &m_cameraUBO);
+    
+    // 2. Bind it as a Uniform Buffer
+    glBindBuffer(GL_UNIFORM_BUFFER, m_cameraUBO);
+    
+    // 3. Allocate memory space for the struct (null pointer means allocate space but don't copy yet)
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(CameraBlock), nullptr, GL_DYNAMIC_DRAW);
+    
+    // 4. Unbind to keep state clean
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    // 5. Explicitly link this buffer handle to global Uniform Binding Slot 0
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, m_cameraUBO);
+
+    glGenBuffers(1, &m_envUBO);
+    glBindBuffer(GL_UNIFORM_BUFFER, m_envUBO);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(EnvironmentBlock), nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    // Link to Slot 1
+    glBindBufferBase(GL_UNIFORM_BUFFER, 1, m_envUBO);
+
+    glGenBuffers(1, &m_atmoUBO);
+    glBindBuffer(GL_UNIFORM_BUFFER, m_atmoUBO);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(AtmosphereBlock), nullptr, GL_STATIC_DRAW); // Or GL_DYNAMIC_DRAW if you update dynamically
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, m_atmoUBO);
+}
+
 void Scene_IC_Camp::initSSAONoiseTexture() {
     std::uniform_real_distribution<float> randomFloats(0.0f, 1.0f);
     std::default_random_engine generator;
@@ -1677,16 +1774,6 @@ void Scene_IC_Camp::uploadViewRays(GLuint shaderProgram) {
 }
 
 void Scene_IC_Camp::runSSAOPass() {
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    auto& camData = m_entityManager.getCamera(m_camera);
-    
-    auto projectionMatrix = Camera::getProjectionMatrix(camData);
-    auto viewMatrix = Camera::getViewMatrix(camTransform);
-
-    glm::mat4 glmP = glm::make_mat4(projectionMatrix.data());
-    glm::mat4 glmV = glm::make_mat4(viewMatrix.data());
-    glm::mat4 invViewProj = glm::inverse(glmP * glmV);
-
     glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoFBO);
     glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -1694,6 +1781,7 @@ void Scene_IC_Camp::runSSAOPass() {
 
     glUseProgram(m_ssao);
 
+    // 1. Bind G-Buffer Texture Contexts
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
     glUniform1i(glGetUniformLocation(m_ssao, "u_gNormal"), 0);
@@ -1706,27 +1794,20 @@ void Scene_IC_Camp::runSSAOPass() {
     glBindTexture(GL_TEXTURE_2D, m_ssaoNoiseTex);
     glUniform1i(glGetUniformLocation(m_ssao, "u_texNoise"), 2);
 
-    Scene_IC_Camp::uploadViewRays(m_ssao);
-
-    glUniformMatrix4fv(glGetUniformLocation(m_ssao, "u_projection"), 1, GL_FALSE, projectionMatrix.data());
-    glUniformMatrix4fv(glGetUniformLocation(m_ssao, "u_view"), 1, GL_FALSE, viewMatrix.data());
-    glUniformMatrix4fv(glGetUniformLocation(m_ssao, "u_invViewProj"), 1, GL_FALSE, &invViewProj[0][0]);
-
+    // 2. Upload Kernel & Structural Parameters
     glUniform3fv(glGetUniformLocation(m_ssao, "u_samples"), static_cast<GLsizei>(m_ssaoKernel.size()), &m_ssaoKernel[0].x);
-    glUniform2f(glGetUniformLocation(m_ssao, "u_noiseScale"), 
-                (float)m_gBufferWidth / 4.0f, (float)m_gBufferHeight / 4.0f);
+    glUniform2f(glGetUniformLocation(m_ssao, "u_noiseScale"), (float)m_gBufferWidth / 4.0f, (float)m_gBufferHeight / 4.0f);
     glUniform1f(glGetUniformLocation(m_ssao, "u_radius"), m_debugSSAOKernelRadius);
     glUniform1f(glGetUniformLocation(m_ssao, "u_bias"), m_debugSSAOBias);
     glUniform1i(glGetUniformLocation(m_ssao, "u_sampleCount"), static_cast<GLint>(m_sampleCount));
-    GLuint emptyVAO;
-    glGenVertexArrays(1, &emptyVAO);
-    glBindVertexArray(emptyVAO);
 
+    // 3. Procedural Screen-Space Triangle Draw Call (Zero allocation overhead)
+    glBindVertexArray(m_gridVAO); // Reusing your existing valid VAO
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
     
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glDeleteVertexArrays(1, &emptyVAO);
 }
 
 void Scene_IC_Camp::runSSAOBlurPass() {
@@ -1736,6 +1817,7 @@ void Scene_IC_Camp::runSSAOBlurPass() {
 
     glUseProgram(m_ssao_blur);
 
+    // 1. Bind Input Texture Contexts
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_ssaoColorTex);
     glUniform1i(glGetUniformLocation(m_ssao_blur, "u_ssaoInput"), 0);
@@ -1748,16 +1830,13 @@ void Scene_IC_Camp::runSSAOBlurPass() {
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
     glUniform1i(glGetUniformLocation(m_ssao_blur, "u_gDepth"), 2);
 
-    glUniform1f(glGetUniformLocation(m_ssao_blur, "u_near"), 1.0f);
-    glUniform1f(glGetUniformLocation(m_ssao_blur, "u_far"), 5000.0f);
-
-    GLuint emptyVAO;
-    glGenVertexArrays(1, &emptyVAO);
-    glBindVertexArray(emptyVAO);
-
+    // 2. Procedural Fullscreen Draw Call (Zero allocation overhead)
+    glBindVertexArray(m_gridVAO); 
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glDeleteVertexArrays(1, &emptyVAO);
 }
 
 void Scene_IC_Camp::initializeGBuffer(unsigned int width, unsigned int height) {
@@ -1872,20 +1951,16 @@ void Scene_IC_Camp::updateOrbShaderStorage()
         m_orbSSBO.update(orbData);
 }
 
-void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix) {
-    auto& transform  = m_entityManager.getTransform(m_camera);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    auto vpMatrix   = Camera::getVPMatrix(transform, cameraData);
+void Scene_IC_Camp::runTerrainPass() {
     sf::Vector2i hex(-1, -1);
     if (m_cursorMode) {
         sf::Vector3f worldPos = screenToWorld(m_cachedMousePos);
-        sf::Vector2i hex = WCH::worldToHex(worldPos.x, worldPos.z);
+        hex = WCH::worldToHex(worldPos.x, worldPos.z);
     }
-
-    sf::Vector2u windowSize = m_game.window().getSize();
 
     glUseProgram(m_terrainProgram);
 
+    // 1. Bind Textures and Terrain Streaming Arrays
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
     glUniform1i(glGetUniformLocation(m_terrainProgram, "u_terrainHeightArray"), 0);
@@ -1901,40 +1976,24 @@ void Scene_IC_Camp::runTerrainPass(const std::array<std::array<float, 3>, 3>& wo
     glUniform1iv(glGetUniformLocation(m_terrainProgram, "u_terrainSliceValid"), 81,
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
+    // 2. Structural & Geometry Tweak Uniforms
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_heightMax"), m_topdownMaxHeight);
-    glUniformMatrix4fv(glGetUniformLocation(m_terrainProgram, "u_viewProj"), 1, GL_FALSE, vpMatrix.data());
-
-    // Uniforms for the Fragment Portion of the Shader
-    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_cameraPos"), transform.pos.x, transform.pos.y, transform.pos.z);
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_cameraHeight"), getCameraHeightAboveGround(transform.pos));
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_farPlane"), cameraData.farPlane);
-    glUniformMatrix3fv(glGetUniformLocation(m_terrainProgram, "u_worldToCamMatrix"), 1, GL_FALSE, &worldToCamMatrix[0][0]);
-
-    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_sunDir"), m_astroState.sunDirection.x, m_astroState.sunDirection.y, m_astroState.sunDirection.z);
-    glUniform4f(glGetUniformLocation(m_terrainProgram, "u_sunColor"), m_astroState.sunColor.x, m_astroState.sunColor.y, m_astroState.sunColor.z, m_astroState.sunColor.w);
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_ambientStrength"), m_sunIntensity);
-
-    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_headlampOn"), shouldHeadlightsBeOn() ? 1.0f : 0.0f);
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_headlampIntensity"), 4.0f);
-    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_headlampColour"), 255.f / 255.f, 244.f / 255.f, 214.f / 255.f);
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_headlampRange"), 200.0f);
-    
-    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_cursorMode"), static_cast<int>(m_cursorMode));
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_hexSize"), m_hexSize);
-    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_hoveredHex"), hex.x, hex.y);
-    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_gridColour"), m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
-    
     glUniform1f(glGetUniformLocation(m_terrainProgram, "u_reliefExaggeration"), 1.0f);
 
+    // 3. Cursor & Selection Grid Uniforms
+    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_cursorMode"), static_cast<int>(m_cursorMode));
+    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_hexSize"), m_hexSize);
+    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_hoveredHex"), static_cast<float>(hex.x), static_cast<float>(hex.y));
+    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_gridColour"), m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
+    
+    // 4. Render
     glBindVertexArray(m_gridVAO);
     glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-
     glUseProgram(0);
-    sf::Shader::bind(nullptr);
 }
 
 void Scene_IC_Camp::updateMinimapTexture()
@@ -2028,17 +2087,6 @@ void Scene_IC_Camp::updateMinimapTexture()
 
 void Scene_IC_Camp::renderOrbCreature()
 {
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    auto& camData      = m_entityManager.getCamera(m_camera);
-
-    glm::vec3 camPos   = toGLMVec3(camTransform.pos);
-    glm::vec3 camFwd   = toGLMVec3(Camera::getForward(camTransform));
-    glm::vec3 camRight = toGLMVec3(Camera::getRight(camTransform));
-    glm::vec3 camUp    = toGLMVec3(Camera::getUp(camTransform));
-    glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);
-    glm::vec4 sunColor = toGLMVec4(m_astroState.sunColor);
-    auto      vp       = Camera::getVPMatrix(camTransform, camData);
-
     // ==================== LAZY INIT ====================
     if (m_cubeVAO == 0)
         buildVertexCube();
@@ -2054,18 +2102,6 @@ void Scene_IC_Camp::renderOrbCreature()
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getSpeciesNormalArray());
     glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_charNormalTex"), 1);
-
-    // ==================== UNIFORMS ====================
-    glUniform2f(glGetUniformLocation(m_OrbCreatureProgram, "u_viewportSize"),
-        static_cast<float>(camData.viewportSize.x),
-        static_cast<float>(camData.viewportSize.y));
-    glUniform1f(glGetUniformLocation(m_OrbCreatureProgram,  "u_fovY"),          camData.fovY);
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraPos"),     1, glm::value_ptr(camPos));
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraForward"), 1, glm::value_ptr(camFwd));
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraRight"),   1, glm::value_ptr(camRight));
-    glUniform3fv(glGetUniformLocation(m_OrbCreatureProgram, "u_cameraUp"),      1, glm::value_ptr(camUp));
-    glUniformMatrix4fv(glGetUniformLocation(m_OrbCreatureProgram, "u_viewProj"),
-        1, GL_FALSE, vp.data());
 
     // ==================== DRAW ====================
     m_orbSSBO.bind(0);
@@ -2137,6 +2173,9 @@ void Scene_IC_Camp::deferredLighting()
     glBindTexture(GL_TEXTURE_2D, m_ssaoBlurTex);
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_ssaoTex"), 6);
 
+    // =========================================================================
+    // Forward Light Projection & Cascade Specifics (Still Loose Uniforms)
+    // =========================================================================
     glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_lightViewProj"),
                         NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
     glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_lightDepthRange"), NUM_CASCADES, m_lightDepthRange);
@@ -2145,55 +2184,22 @@ void Scene_IC_Camp::deferredLighting()
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_debugShowCascadeColors"), m_debugShowCascadeColors ? 1 : 0);
 
     // =========================================================================
-    // Bind SSBOs
+    // Bind SSBOs (Safely living up on non-conflicting slots 5 & 6)
     // =========================================================================
-    Assets::Instance().getSpeciesSSBO().bind(1);
-    Assets::Instance().getMaterialSSBO().bind(2);
-
-    // =========================================================================
-    // Fetch Camera, Spatial, and Astro Math Vectors
-    // =========================================================================
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    auto& camData      = m_entityManager.getCamera(m_camera);
-
-    glm::vec3 camPos   = toGLMVec3(camTransform.pos);
-    glm::vec3 camFwd   = toGLMVec3(Camera::getForward(camTransform));
-    glm::vec3 sunDir   = toGLMVec3(m_astroState.sunDirection);
-    glm::vec4 sunColor = toGLMVec4(m_astroState.sunColor);
-
-    auto vp = Camera::getVPMatrix(camTransform, camData);
-
-    glm::mat4 glmVP = glm::make_mat4(vp.data());
-
-    glm::mat4 invVP = glm::inverse(glmVP);
-
-    glm::vec3 fogColorDay = glm::vec3(0.7f, 0.8f, 1.0f);
-    glm::vec3 fogColorNight = glm::vec3(0.02f, 0.02f, 0.05f);
+    Assets::Instance().getSpeciesSSBO().bind(5);
+    Assets::Instance().getMaterialSSBO().bind(6);
 
     // =========================================================================
-    // Forward Uniform State to Deferred Lighting Program
+    // Forward Player Specific Context State
     // =========================================================================
-    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_cameraPos"),     1, &camPos[0]);
-    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_cameraForward"), 1, &camFwd[0]);
-    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_sunDir"),        1, &sunDir[0]);
-    glUniform4fv(glGetUniformLocation(m_lightingProgram, "u_sunColor"),      1, &sunColor[0]);
     glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_nightAmbientFloor"), 1, &m_nightAmbientFloor[0]);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_fogDensity"), 0.001f);
-    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_fogColorDay"), 1, &fogColorDay[0]);
-    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_fogColorNight"), 1, &fogColorNight[0]);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_fogBaseHeight"), 3.0f);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_fogHeightFalloff"), 0.01f);
-    
-    glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_invViewProj"), 1, GL_FALSE, &invVP[0][0]);
-
-    // Headlamp Configuration (matches your orb configuration schema)
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampIntensity"), 2.0f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampRange"),     200.0f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampConeCos"),   1.0f);
     glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampEnabled"),   shouldHeadlightsBeOn() ? 1.0f : 0.0f);
 
     // =========================================================================
-    // Draw
+    // Draw Fullscreen Composition Quad
     // =========================================================================
     glBindVertexArray(m_lightingVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -2254,56 +2260,28 @@ void Scene_IC_Camp::blitToScreen(GLuint tex)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    glm::vec3 camPos   = toGLMVec3(camTransform.pos);
-    glm::vec3 fogColorDay = glm::vec3(0.7f, 0.8f, 1.0f);
-    glm::vec3 fogColorNight = glm::vec3(0.02f, 0.02f, 0.05f);
-    
+void Scene_IC_Camp::renderSky() {
     m_skyTexture.clear(sf::Color::Transparent);
-    m_skyTexture.setActive(true); // Gain off-screen FBO focus
+    m_skyTexture.setActive(true); 
 
-    // Match output viewport to target
     glViewport(0, 0, m_skyTexture.getSize().x, m_skyTexture.getSize().y);
-
     glUseProgram(m_skyProgram);
 
-    // 1. Send mathematical uniforms
-    glUniform3fv(glGetUniformLocation(m_skyProgram, "u_cameraPos"),     1, &camPos[0]);
-    glUniform1f(glGetUniformLocation(m_skyProgram, "fovY"), cameraData.fovY);
-    glUniform1f(glGetUniformLocation(m_skyProgram, "aspectRatio"), cameraData.aspectRatio);
-    glUniformMatrix3fv(glGetUniformLocation(m_skyProgram, "worldToCamMatrix"), 1, GL_FALSE, &worldToCamMatrix.array[0]);
-    glUniform3f(glGetUniformLocation(m_skyProgram, "sunDir"), m_astroState.sunDirection.x, m_astroState.sunDirection.y, m_astroState.sunDirection.z);
-    glUniform4f(glGetUniformLocation(m_skyProgram, "sunColor"), 1.0f, 1.0f, 1.0f, 1.0f); // Default sunColor fallback
+    // 1. Send Remaining Celestial Structural Data
     glUniform1i(glGetUniformLocation(m_skyProgram, "useSkyCubemap"), m_skyCubemapReady);
     glUniformMatrix3fv(glGetUniformLocation(m_skyProgram, "starRotationMatrix"), 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
-    glUniform1f(glGetUniformLocation(m_skyProgram, "skyExposure"), 5.0f);
-    glUniform3f(glGetUniformLocation(m_skyProgram, "moonDir"), m_astroState.moonDirection.x, m_astroState.moonDirection.y, m_astroState.moonDirection.z);
-    glUniform1f(glGetUniformLocation(m_skyProgram, "u_fogDensity"), 0.001f);
-    glUniform3fv(glGetUniformLocation(m_skyProgram, "u_fogColorDay"), 1, &fogColorDay[0]);
-    glUniform3fv(glGetUniformLocation(m_skyProgram, "u_fogColorNight"), 1, &fogColorNight[0]);
-    glUniform1f(glGetUniformLocation(m_skyProgram, "u_fogBaseHeight"), 8.0f);
-    glUniform1f(glGetUniformLocation(m_skyProgram, "u_fogHeightFalloff"), 0.01f);
-
-
-    // 2. Bind Texture Units Determenistically
-    // Texture Unit 0: Cubemap Stars
+    
+    // 2. Bind Texture Units Deterministically
     glActiveTexture(GL_TEXTURE0);
-    if (m_skyCubemapReady && m_skyCubemapHandle != 0) {
-        glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
-    } else {
-        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-    }
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapReady ? m_skyCubemapHandle : 0);
     glUniform1i(glGetUniformLocation(m_skyProgram, "skyCubemap"), 0);
 
-    // Texture Unit 1: Moon Texture (Utilizing the SFML native texture handle)
     glActiveTexture(GL_TEXTURE1);
-    sf::Texture::bind(&m_moonTexture); // Safely grabs the SFML image context handle
+    sf::Texture::bind(&m_moonTexture);
     glUniform1i(glGetUniformLocation(m_skyProgram, "moonTexture"), 1);
 
-    // 3. Procedural Draw Call (Zero-buffer Overhead)
-    glBindVertexArray(m_gridVAO); // Any valid VAO is fine to satisfy Core Profile drawing
+    // 3. Procedural Draw Call
+    glBindVertexArray(m_gridVAO); 
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
 
@@ -2314,7 +2292,6 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
     glUseProgram(0);
 
-    // Wrap up SFML texture sequence
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
 }

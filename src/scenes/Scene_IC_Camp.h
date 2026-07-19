@@ -2,6 +2,7 @@
 #include <GL/glew.h>
 #include "scenes/Scene.h"
 #include "renderer/OrbSSBO.h"
+#include "renderer/RenderTypes.h"
 #include "ui/HUD.h"
 #include "environment/Topography.h"
 #include "ecs/SoAEntityManager.hpp"
@@ -118,6 +119,11 @@ protected:
     GLuint              m_ssaoBlurTex           = 0;
     GLuint              m_ssaoNoiseTex          = 0; // If using a random rotation noise texture
     std::vector<sf::Glsl::Vec3> m_ssaoKernel;
+
+    // Uniform Buffer Objects (UBOs) for camera and lighting data
+    GLuint              m_cameraUBO             = 0;
+    GLuint              m_envUBO                = 0;
+    GLuint              m_atmoUBO               = 0;
 
 
     // =========================================================================
@@ -255,6 +261,7 @@ protected:
     void destroyGBuffer();
     void initializeShadowMap(unsigned int size);
     void destroyShadowMap();
+    void initUBOs();
 
     // =========================================================================
     // Per-Frame Updates
@@ -289,9 +296,9 @@ protected:
     // =========================================================================
 
     void runShadowPass();
-    void runTerrainPass(const std::array<std::array<float, 3>, 3>& worldToCamMatrix);
+    void runTerrainPass();
     void renderOrbCreature();
-    void renderSky(const sf::Glsl::Mat3& worldToCamMatrix);
+    void renderSky();
     void runSSAOPass();
     void runSSAOBlurPass();
     void deferredLighting();
