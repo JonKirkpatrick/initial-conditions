@@ -1,7 +1,7 @@
 #pragma once
 
-#include "SoAEntityManager.hpp"
-#include "ComponentTypes.hpp"
+#include "ecs/SoAEntityManager.hpp"
+#include "ecs/ComponentTypes.hpp"
 
 #include <array>
 #include <vector>

@@ -4,9 +4,9 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <SFML/OpenGL.hpp>
-#include "AudioManager.h"
-#include "SpeciesSSBO.h"
-#include "MaterialSSBO.h"
+#include "audio/AudioManager.h"
+#include "renderer/SpeciesSSBO.h"
+#include "renderer/MaterialSSBO.h"
            
 #include <map>
 #include <cassert>

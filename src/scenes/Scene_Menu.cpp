@@ -1,13 +1,13 @@
 #include <GL/glew.h>
-#include "Scene_Menu.h"
-#include "Scene_IC_Camp.h"
-#include "Assets.h"
-#include "GameEngine.h"
-#include "ComponentTypes.hpp"
-#include "Action.hpp"
-#include "InputBindings.h"
+#include "scenes/Scene_Menu.h"
+#include "scenes/Scene_IC_Camp.h"
+#include "core/Assets.h"
+#include "core/GameEngine.h"
+#include "ecs/ComponentTypes.hpp"
+#include "core/Action.hpp"
+#include "core/InputBindings.h"
 #include <SFML/Graphics.hpp>
-#include "Theme.h"
+#include "ui/Theme.h"
 #include <cmath>
            
 Scene_Menu::Scene_Menu(GameEngine& gameEngine)

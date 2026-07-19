@@ -4,8 +4,8 @@
 #include <string>
 #include <array>
 #include <memory>
-#include "Assets.h"
-#include "Theme.h"
+#include "core/Assets.h"
+#include "ui/Theme.h"
 
 struct HUD_Data
 {

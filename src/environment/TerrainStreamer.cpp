@@ -1,5 +1,5 @@
-#include "TerrainStreamer.h"
-#include "WorldCoordinates.hpp"
+#include "environment/TerrainStreamer.h"
+#include "core/WorldCoordinates.hpp"
 
 #include <cstring>
 #include <fstream>

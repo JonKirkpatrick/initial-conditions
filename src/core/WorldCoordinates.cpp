@@ -1,4 +1,4 @@
-#include "WorldCoordinates.hpp"
+#include "core/WorldCoordinates.hpp"
 
 namespace WorldCoordinates::Square {
 

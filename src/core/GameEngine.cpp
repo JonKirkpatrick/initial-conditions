@@ -1,11 +1,11 @@
 #include <GL/glew.h>
-#include "GameEngine.h"
-#include "Assets.h"
-#include "Scene_Menu.h"
-#include "InputBindings.h"
+#include "core/GameEngine.h"
+#include "core/Assets.h"
+#include "scenes/Scene_Menu.h"
+#include "core/InputBindings.h"
 
-#include "imgui.h"
-#include "imgui-SFML.h"
+#include "thirdparty/imgui/imgui.h"
+#include "thirdparty/imgui/imgui-SFML.h"
 
 GameEngine::GameEngine(const std::string & path)
 {

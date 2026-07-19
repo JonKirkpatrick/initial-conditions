@@ -47,9 +47,18 @@ uniform vec3 u_cameraForward;
 // Lighting Uniforms
 uniform vec3 u_sunDir;
 uniform vec4 u_sunColor;
+uniform vec3 u_nightAmbientFloor; // small minimum ambient (moonlight/starlight), e.g. vec3(0.002, 0.003, 0.006)
 uniform float u_headlampIntensity;
 uniform float u_headlampRange;
 uniform float u_headlampEnabled;
+
+// Fog Uniforms
+uniform vec3  u_fogColorDay;    // fog tint in full daylight
+uniform vec3  u_fogColorNight;  // fog tint at night - keep this DARK, not just a dimmer version
+                                 // of the day colour, or fog will relight the night scene
+uniform float u_fogDensity;     // higher = thicker fog overall
+uniform float u_fogBaseHeight;  // world Y where fog is at full density (the "sea level" of the blanket)
+uniform float u_fogHeightFalloff; // higher = fog thins out faster as you gain altitude
 
 // Shadow Uniforms
 uniform sampler2DArrayShadow u_shadowMap;
@@ -132,10 +141,18 @@ void main()
     vec3 worldPos      = reconstructWorldPos(v_uv, depth);
     vec3 viewDir       = normalize(u_cameraPos - worldPos);
 
-    // 1. Core Ambient Base (Constant target for SSAO)
+    vec3 sunDirNorm = normalize(u_sunDir);
+    float sunElevation = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;
+    
+    // Smoothly transition ambient from -8.0° (night) up to 12.0° (full day)
+    float dayLightingFactor = smoothstep(-8.0, 12.0, sunElevation);
+
     float ssao = texture(u_ssaoTex, v_uv).r;
-    vec3 skyColor       = u_sunColor.rgb * 0.15 + vec3(0.04, 0.06, 0.09); 
-    vec3 ambientLight   = skyColor * albedo * mat.albedoTint.rgb * ssao;
+    vec3 dayFloor        = vec3(0.04, 0.06, 0.09);
+    vec3 nightFloor       = u_nightAmbientFloor; // e.g. vec3(0.002, 0.003, 0.006)
+    vec3 ambientFloor    = mix(nightFloor, dayFloor, dayLightingFactor);
+    vec3 skyColor        = u_sunColor.rgb * 0.15 * dayLightingFactor + ambientFloor;
+    vec3 ambientLight    = skyColor * albedo * mat.albedoTint.rgb * ssao;
     
 
     // 2. Diffuse Sun Light Calculation
@@ -144,9 +161,8 @@ void main()
     
     int cascade                 = selectCascade(worldPos);
     float shadowContribution    = computeShadow(worldPos, normal, sunDirection, cascade);
-    float sunHorizonMask        = smoothstep(-0.05, 0.05, u_sunDir.y);
     
-    vec3 diffuseLight = u_sunColor.rgb * sunLambert * albedo * mat.albedoTint.rgb * shadowContribution * sunHorizonMask;
+    vec3 diffuseLight = u_sunColor.rgb * sunLambert * albedo * mat.albedoTint.rgb * shadowContribution * dayLightingFactor;
 
     // 3. Player Headlamp Light
     float lampIntensityMask = 0.0;
@@ -193,8 +209,24 @@ void main()
         }
     }
 
+    vec3  rayDir            = normalize(worldPos - u_cameraPos);
+    float rayLen            = length(worldPos - u_cameraPos);
+    float camHeightAboveBase = u_cameraPos.y - u_fogBaseHeight;
+    float b                 = u_fogHeightFalloff;
+
+    float verticalTerm;
+    if (abs(rayDir.y) > 0.001) {
+        verticalTerm = (1.0 - exp(-rayLen * rayDir.y * b)) / (rayDir.y * b);
+    } else {
+        verticalTerm = rayLen;
+    }
+
+    float fogAmount = u_fogDensity * exp(-camHeightAboveBase * b) * verticalTerm;
+    fogAmount       = clamp(fogAmount, 0.0, 1.0);
+
+    vec3 fogColor   = mix(u_fogColorNight, u_fogColorDay, dayLightingFactor);
+
     vec3 finalColor = ambientLight + diffuseLight + retroContribution;
+    finalColor      = mix(finalColor, fogColor, fogAmount);
     FragColor       = vec4(finalColor, 1.0);
-    // Temporary Debug Override (Put at the end of main)
-    // FragColor = vec4(vec3(ssao), 1.0);
 }

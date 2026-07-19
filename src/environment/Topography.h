@@ -2,7 +2,7 @@
 
 #include <SFML/System.hpp>
 #include <SFML/Graphics.hpp>
-#include "TerrainStreamer.h"
+#include "environment/TerrainStreamer.h"
 #include <algorithm>
 #include <array>
 #include <cmath>

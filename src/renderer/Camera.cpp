@@ -1,5 +1,5 @@
-#include "Camera.h"
-#include "ComponentTypes.hpp"
+#include "renderer/Camera.h"
+#include "ecs/ComponentTypes.hpp"
 #include <cmath>
 
 namespace Camera {

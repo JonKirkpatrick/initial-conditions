@@ -1,9 +1,9 @@
-#include "HUD.h"
+#include "ui/HUD.h"
 #include <SFML/System.hpp>
 #include <cmath>
-#include "Assets.h"
-#include "Action.hpp"
-#include "Theme.h"
+#include "core/Assets.h"
+#include "core/Action.hpp"
+#include "ui/Theme.h"
 
 HUD::HUD(const sf::Vector2u& windowSize)
 {

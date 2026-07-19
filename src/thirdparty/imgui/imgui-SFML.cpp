@@ -1,5 +1,5 @@
-#include "imgui-SFML.h"
-#include <imgui.h>
+#include "thirdparty/imgui/imgui-SFML.h"
+#include "thirdparty/imgui/imgui.h"
 
 #include <SFML/Config.hpp>
 #include <SFML/Graphics/Color.hpp>

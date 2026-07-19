@@ -15,7 +15,9 @@ uniform float     u_bias = 0.05;
 uniform vec2      u_noiseScale;  
 
 uniform float     u_near = 1.0;       
-uniform float     u_far  = 5000.0;    
+uniform float     u_far  = 5000.0;  
+
+uniform int       u_sampleCount = 64;
 
 // MATHEMATICALLY PURIFIED VIEW POSITION
 vec3 getPositionInViewSpace(vec2 uv) {
@@ -50,7 +52,7 @@ void main() {
     mat3 TBN       = mat3(tangent, bitangent, normal);
 
     float occlusion = 0.0;
-    for(int i = 0; i < 64; ++i) {
+    for(int i = 0; i < u_sampleCount; ++i) {
         vec3 samplePos = TBN * u_samples[i]; 
         samplePos = fragPos + samplePos * u_radius; 
         
@@ -71,7 +73,7 @@ void main() {
         // Check depth delta occlusion
         occlusion += (sampleActualPos.z >= samplePos.z + u_bias ? 1.0 : 0.0) * rangeCheck;           
     }
-    
-    occlusion = 1.0 - (occlusion / 64.0);
+    float samples = float(u_sampleCount);
+    occlusion = 1.0 - (occlusion / samples);
     FragColor = occlusion;
 }

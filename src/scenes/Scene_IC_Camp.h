@@ -1,11 +1,11 @@
 #pragma once
 #include <GL/glew.h>
-#include "Scene.h"
-#include "OrbSSBO.h"
-#include "HUD.h"
-#include "Topography.h"
-#include "SoAEntityManager.hpp"
-#include "Astro.hpp"
+#include "scenes/Scene.h"
+#include "renderer/OrbSSBO.h"
+#include "ui/HUD.h"
+#include "environment/Topography.h"
+#include "ecs/SoAEntityManager.hpp"
+#include "environment/Astro.hpp"
 #include <SFML/System.hpp>
 
 class TerrainStreamer;
@@ -149,8 +149,8 @@ protected:
     glm::mat4               m_lightViewProjCascades[NUM_CASCADES] = {};
     float                   m_lightDepthRange[NUM_CASCADES] = {};
     float                   m_texelWorldSize[NUM_CASCADES] = {};
-    float                   m_cascadeSplitLambda    = 0.0f; // 0 = uniform, 1 = logarithmic
-    float                   m_shadowFrustumPadding  = 45.0f;
+    float                   m_cascadeSplitLambda    = 0.25f; // 0 = uniform, 1 = logarithmic
+    float                   m_shadowFrustumPadding  = 30.0f;
     float                   m_shadowMaxDistance     = 500.0f;
 
     GLuint                  m_terrainShadowProgram  = Assets::Instance().getGLProgram("TerrainShadow");
@@ -215,10 +215,13 @@ protected:
     bool m_drawCollision    = false;
     bool m_showGUI          = false;
     bool m_cursorMode       = false;
+    glm::vec3 m_nightAmbientFloor = glm::vec3(0.002f, 0.003f, 0.006f);
     bool m_debugShowSSAO     = false;
     bool m_debugShowSSAOBlur = false;
-    float m_debugSSAOKernelRadius = 0.5f;
-    float m_debugSSAOBias         = 0.0025f;
+    float m_debugSSAOKernelRadius = 0.25f;
+    float m_debugSSAOBias         = 0.005f;
+    int m_sampleCount = 16;
+    int m_ssaoKernelSize = 16;
 
     // =========================================================================
     // Performance Tracking

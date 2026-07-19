@@ -1,8 +1,9 @@
 #include <GL/glew.h>
-#include "Scene_IC_Camp.h"
-#include "WorldCoordinates.hpp"
-#include "GameEngine.h"
-#include "OrbSSBO.h"
+#include "scenes/Scene_IC_Camp.h"
+#include "core/WorldCoordinates.hpp"
+#include "core/GameEngine.h"
+#include "core/Assets.h"
+#include "renderer/OrbSSBO.h"
 #include <SFML/Graphics.hpp>
 #include <SFML/OpenGL.hpp>
 #include <SFML/Graphics/CoordinateType.hpp>
@@ -10,11 +11,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <cmath>
-#include "imgui.h"
-#include "imgui-SFML.h"
-#include "Camera.h"
-#include "Astro.hpp"
-#include "TerrainStreamer.h"
+#include "thirdparty/imgui/imgui.h"
+#include "thirdparty/imgui/imgui-SFML.h"
+#include "renderer/Camera.h"
+#include "environment/Astro.hpp"
+#include "environment/TerrainStreamer.h"
 #include <random>
 #include <array>
 #include <filesystem>
@@ -98,7 +99,7 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(32000);
+    spawnDebugOrbs(8000);
     m_entityManager.update();
     buildTerrainGrid();
     buildHud();
@@ -355,6 +356,7 @@ void Scene_IC_Camp::sGUI()
             ImGui::Checkbox("Show SSAO Blur", &m_debugShowSSAOBlur);
             ImGui::SliderFloat("SSAO Kernel Radius", &m_debugSSAOKernelRadius, 0.1f, 100.0f);
             ImGui::SliderFloat("SSAO Bias", &m_debugSSAOBias, 0.0001f, 1.0f);
+            ImGui::SliderInt("SSAO Sample Count", &m_sampleCount, 1, m_ssaoKernelSize);
             ImGui::Separator();
             ImGui::EndTabItem();
         }
@@ -1487,8 +1489,6 @@ void Scene_IC_Camp::runShadowPass() {
         float splitFar = m_cascadeSplits[cascade];
 
         if (cascade == NUM_CASCADES - 1) {
-            // Fill cascade: fit to the loaded map's world bounds instead of
-            // the camera sub-frustum for this range.
             m_lightViewProjCascades[cascade] = computeLightViewProjForMapBounds(
                 m_lightDepthRange[cascade], m_texelWorldSize[cascade]);
         } else {
@@ -1526,17 +1526,20 @@ void Scene_IC_Camp::runShadowPass() {
         glBindVertexArray(0);
 
         // --- orbs ---
-        glDisable(GL_CULL_FACE);
-        glUseProgram(m_orbShadowProgram);
-        glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
-        glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
-                           1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
-        glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"),
-                    1, glm::value_ptr(sunDir));
-        m_orbSSBO.bind(0);
-        glBindVertexArray(m_cubeVAO);
-        glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
-        glBindVertexArray(0);
+        if (cascade != NUM_CASCADES - 1)
+        {
+            glDisable(GL_CULL_FACE);
+            glUseProgram(m_orbShadowProgram);
+            glm::vec3 sunDir = toGLMVec3(m_astroState.sunDirection);
+            glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
+                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
+            glUniform3fv(glGetUniformLocation(m_orbShadowProgram, "u_lightDir"),
+                        1, glm::value_ptr(sunDir));
+            m_orbSSBO.bind(0);
+            glBindVertexArray(m_cubeVAO);
+            glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
+            glBindVertexArray(0);
+        }
     }
 
     glUseProgram(0);
@@ -1548,7 +1551,7 @@ void Scene_IC_Camp::initSSAOKernel() {
     std::default_random_engine generator;
 
     m_ssaoKernel.clear();
-    for (unsigned int i = 0; i < 64; ++i) {
+    for (unsigned int i = 0; i < m_ssaoKernelSize; ++i) {
         // 1. Generate random points in a hemisphere (z goes from 0.0 to 1.0)
         sf::Glsl::Vec3 sample(
             randomFloats(generator) * 2.0f - 1.0f,
@@ -1563,7 +1566,7 @@ void Scene_IC_Camp::initSSAOKernel() {
 
         // 2. Scale the samples so they bunch up closer to the origin 
         // This gives better close-range occlusion details
-        float scale = (float)i / 64.0f;
+        float scale = (float)i / (float)m_ssaoKernelSize;
         // Accelerating interpolation math: lerp(0.1f, 1.0f, scale^2)
         scale = 0.1f + (scale * scale) * (1.0f - 0.1f); 
         
@@ -1714,6 +1717,7 @@ void Scene_IC_Camp::runSSAOPass() {
                 (float)m_gBufferWidth / 4.0f, (float)m_gBufferHeight / 4.0f);
     glUniform1f(glGetUniformLocation(m_ssao, "u_radius"), m_debugSSAOKernelRadius);
     glUniform1f(glGetUniformLocation(m_ssao, "u_bias"), m_debugSSAOBias);
+    glUniform1i(glGetUniformLocation(m_ssao, "u_sampleCount"), static_cast<GLint>(m_sampleCount));
     GLuint emptyVAO;
     glGenVertexArrays(1, &emptyVAO);
     glBindVertexArray(emptyVAO);
@@ -1732,16 +1736,25 @@ void Scene_IC_Camp::runSSAOBlurPass() {
 
     glUseProgram(m_ssao_blur);
 
-    // Bind raw SSAO result to be filtered
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_ssaoColorTex);
     glUniform1i(glGetUniformLocation(m_ssao_blur, "u_ssaoInput"), 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
+    glUniform1i(glGetUniformLocation(m_ssao_blur, "u_gNormal"), 1);
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
+    glUniform1i(glGetUniformLocation(m_ssao_blur, "u_gDepth"), 2);
+
+    glUniform1f(glGetUniformLocation(m_ssao_blur, "u_near"), 1.0f);
+    glUniform1f(glGetUniformLocation(m_ssao_blur, "u_far"), 5000.0f);
 
     GLuint emptyVAO;
     glGenVertexArrays(1, &emptyVAO);
     glBindVertexArray(emptyVAO);
 
-    // Now you can safely draw without a VBO
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDeleteVertexArrays(1, &emptyVAO);
@@ -2154,6 +2167,9 @@ void Scene_IC_Camp::deferredLighting()
 
     glm::mat4 invVP = glm::inverse(glmVP);
 
+    glm::vec3 fogColorDay = glm::vec3(0.7f, 0.8f, 1.0f);
+    glm::vec3 fogColorNight = glm::vec3(0.02f, 0.02f, 0.05f);
+
     // =========================================================================
     // Forward Uniform State to Deferred Lighting Program
     // =========================================================================
@@ -2161,6 +2177,12 @@ void Scene_IC_Camp::deferredLighting()
     glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_cameraForward"), 1, &camFwd[0]);
     glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_sunDir"),        1, &sunDir[0]);
     glUniform4fv(glGetUniformLocation(m_lightingProgram, "u_sunColor"),      1, &sunColor[0]);
+    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_nightAmbientFloor"), 1, &m_nightAmbientFloor[0]);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_fogDensity"), 0.001f);
+    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_fogColorDay"), 1, &fogColorDay[0]);
+    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_fogColorNight"), 1, &fogColorNight[0]);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_fogBaseHeight"), 3.0f);
+    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_fogHeightFalloff"), 0.01f);
     
     glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_invViewProj"), 1, GL_FALSE, &invVP[0][0]);
 
@@ -2234,6 +2256,10 @@ void Scene_IC_Camp::blitToScreen(GLuint tex)
 
 void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     auto& cameraData = m_entityManager.getCamera(m_camera);
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    glm::vec3 camPos   = toGLMVec3(camTransform.pos);
+    glm::vec3 fogColorDay = glm::vec3(0.7f, 0.8f, 1.0f);
+    glm::vec3 fogColorNight = glm::vec3(0.02f, 0.02f, 0.05f);
     
     m_skyTexture.clear(sf::Color::Transparent);
     m_skyTexture.setActive(true); // Gain off-screen FBO focus
@@ -2244,6 +2270,7 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     glUseProgram(m_skyProgram);
 
     // 1. Send mathematical uniforms
+    glUniform3fv(glGetUniformLocation(m_skyProgram, "u_cameraPos"),     1, &camPos[0]);
     glUniform1f(glGetUniformLocation(m_skyProgram, "fovY"), cameraData.fovY);
     glUniform1f(glGetUniformLocation(m_skyProgram, "aspectRatio"), cameraData.aspectRatio);
     glUniformMatrix3fv(glGetUniformLocation(m_skyProgram, "worldToCamMatrix"), 1, GL_FALSE, &worldToCamMatrix.array[0]);
@@ -2253,6 +2280,12 @@ void Scene_IC_Camp::renderSky(const sf::Glsl::Mat3& worldToCamMatrix) {
     glUniformMatrix3fv(glGetUniformLocation(m_skyProgram, "starRotationMatrix"), 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
     glUniform1f(glGetUniformLocation(m_skyProgram, "skyExposure"), 5.0f);
     glUniform3f(glGetUniformLocation(m_skyProgram, "moonDir"), m_astroState.moonDirection.x, m_astroState.moonDirection.y, m_astroState.moonDirection.z);
+    glUniform1f(glGetUniformLocation(m_skyProgram, "u_fogDensity"), 0.001f);
+    glUniform3fv(glGetUniformLocation(m_skyProgram, "u_fogColorDay"), 1, &fogColorDay[0]);
+    glUniform3fv(glGetUniformLocation(m_skyProgram, "u_fogColorNight"), 1, &fogColorNight[0]);
+    glUniform1f(glGetUniformLocation(m_skyProgram, "u_fogBaseHeight"), 8.0f);
+    glUniform1f(glGetUniformLocation(m_skyProgram, "u_fogHeightFalloff"), 0.01f);
+
 
     // 2. Bind Texture Units Determenistically
     // Texture Unit 0: Cubemap Stars

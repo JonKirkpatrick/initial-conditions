@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Action.hpp"
-#include "InputBindings.h"
-#include "EntityManager.hpp"
-#include "HUD.h"
+#include "core/Action.hpp"
+#include "core/InputBindings.h"
+#include "ecs/EntityManager.hpp"
+#include "ui/HUD.h"
 
 #include <memory>
 

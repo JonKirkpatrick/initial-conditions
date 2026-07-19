@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Assets.h"
-#include "Theme.h"
+#include "core/Assets.h"
+#include "ui/Theme.h"
 #include <array>
 #include <SFML/Graphics.hpp>
 #include <glm/gtc/quaternion.hpp>

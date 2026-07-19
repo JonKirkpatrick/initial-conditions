@@ -1,6 +1,6 @@
-#include "Topography.h"
-#include "Assets.h"
-#include "WorldCoordinates.hpp"
+#include "environment/Topography.h"
+#include "core/Assets.h"
+#include "core/WorldCoordinates.hpp"
 
 namespace Topography {
 

@@ -2,7 +2,7 @@
 
 #include <GL/glew.h>
 #include <SFML/System.hpp>
-#include "WorldCoordinates.hpp"
+#include "core/WorldCoordinates.hpp"
 
 #include <atomic>
 #include <condition_variable>

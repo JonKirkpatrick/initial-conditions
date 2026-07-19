@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Scene.h"
-#include "Assets.h"
-#include "InputBindings.h"
+#include "scenes/Scene.h"
+#include "core/Assets.h"
+#include "core/InputBindings.h"
            
 #include <memory>
 

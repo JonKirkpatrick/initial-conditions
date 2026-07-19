@@ -1,5 +1,5 @@
 #include <GL/glew.h>
-#include "Assets.h"
+#include "core/Assets.h"
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <SFML/OpenGL.hpp>

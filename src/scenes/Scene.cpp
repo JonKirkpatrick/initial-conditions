@@ -1,5 +1,5 @@
-#include "Scene.h"
-#include "GameEngine.h"
+#include "scenes/Scene.h"
+#include "core/GameEngine.h"
 
 Scene::Scene(GameEngine& gameEngine)
     : m_game(gameEngine)

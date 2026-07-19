@@ -6,11 +6,13 @@ CXX     := g++
 OUTPUT  := sfmlgame
 OS      := $(shell uname)
 SRC_DIR := ./src
+OBJ_DIR := ./build
+BIN_DIR := ./bin
 
 # linux compiler / linker flags
 ifeq ($(OS), Linux)
     CXX_FLAGS := -O3 -g -std=c++23 -Wno-unused-result -Wno-deprecated-declarations -DGLEW_STATIC -fno-omit-frame-pointer
-    INCLUDES  := -I$(SRC_DIR) -I$(SRC_DIR)/imgui
+    INCLUDES  := -I$(SRC_DIR) -I$(SRC_DIR)/thirdparty
     LDFLAGS   := -L/usr/local/lib -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio -lGLEW -lGL
 endif
 
@@ -18,38 +20,47 @@ endif
 ifeq ($(OS), Darwin)
     SFML_DIR  := /opt/homebrew/Cellar/sfml/3.0.1
     CXX_FLAGS := -O3 -std=c++23 -Wno-unused-result -Wno-deprecated-declarations -DGLEW_STATIC
-    INCLUDES  := -I$(SRC_DIR) -I$(SRC_DIR)/imgui -I$(SFML_DIR)/include
+    INCLUDES  := -I$(SRC_DIR) -I$(SRC_DIR)/thirdparty -I$(SFML_DIR)/include
     LDFLAGS   := -O3 -lsfml-graphics -lsfml-window -lsfml-system -lsfml-audio -L$(SFML_DIR)/lib -framework OpenGL
 endif
 
-# the source files for the ecs game engine
-SRC_FILES := $(wildcard $(SRC_DIR)/*.cpp $(SRC_DIR)/imgui/*.cpp) \
-             $(wildcard $(SRC_DIR)/*.c)
-OBJ_FILES := $(SRC_FILES:.cpp=.o)
+# 1. FIND ALL SOURCE FILES RECURSIVELY
+# Using rwildcard lets GNU Make search all nested folders automatically
+rwildcard = $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 
-# Include dependency files
+SRC_FILES_CPP := $(call rwildcard,$(SRC_DIR)/,*.cpp)
+SRC_FILES_C   := $(call rwildcard,$(SRC_DIR)/,*.c)
+
+# 2. MAP SOURCE FILES TO THE BUILD DIRECTORY
+# This transforms src/renderer/Camera.cpp into build/renderer/Camera.o
+OBJ_FILES := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRC_FILES_CPP)) \
+             $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC_FILES_C))
+
+# Include dependency files automatically
 DEP_FILES := $(OBJ_FILES:.o=.d)
 -include $(DEP_FILES)
 
-# all of these targets will be made if you just type make
 all: $(OUTPUT)
 
-# define the main executable requirements / command
+# Link the final executable into the /bin folder
 $(OUTPUT): $(OBJ_FILES) Makefile
-	$(CXX) $(OBJ_FILES) $(LDFLAGS) -o ./bin/$@
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(OBJ_FILES) $(LDFLAGS) -o $(BIN_DIR)/$@
 
-# specifies how the object files are compiled from cpp files
-%.o: %.cpp
+# Compile C++ files and mirror the directory structure inside /build
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
 	$(CXX) -MMD -MP -c $(CXX_FLAGS) $(INCLUDES) $< -o $@
 
-%.o: %.c
+# Compile C files and mirror the directory structure inside /build
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
 	$(CXX) -MMD -MP -c $(CXX_FLAGS) $(INCLUDES) $< -o $@
 
-# typing 'make clean' will remove all intermediate build files
+# Clean now safely wipes the dedicated build and bin directories
 clean:
-	rm -f $(OBJ_FILES) $(DEP_FILES) ./bin/$(OUTPUT)
+	rm -rf $(OBJ_DIR)
+	rm -f $(BIN_DIR)/$(OUTPUT)
 
-# typing 'make run' will compile and run the program
 run: $(OUTPUT)
-	cd bin && ./$(OUTPUT) && cd ..
-
+	cd $(BIN_DIR) && ./$(OUTPUT)

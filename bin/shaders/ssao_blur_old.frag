@@ -30,12 +30,6 @@ void main() {
     // Indices [0, 1, 2] map to offsets of [0, 1, 2] pixels away from center
     float gaussian[3] = float[](0.3989, 0.2419, 0.0539);
 
-    // Depth tolerance scales with distance from the camera, just like u_radius does
-    // in ssao.frag. A fixed "2.0 meters" cutoff zeroes out almost every neighbor at
-    // grazing angles or on distant/sloped geometry, since a couple of screen pixels
-    // there can represent many meters of depth change on a single continuous surface.
-    float depthTolerance = max(0.15, centerDepth * 0.02);
-
     for (int x = -2; x <= 2; ++x) {
         for (int y = -2; y <= 2; ++y) {
             vec2 offset = vec2(float(x), float(y)) * texelSize;
@@ -48,19 +42,25 @@ void main() {
             // A. Calculate true Spatial Gaussian Weight
             float spatialWeight = gaussian[abs(x)] * gaussian[abs(y)];
 
-            // B. Normal weight, softened. An exponent of 16 required near-perfectly
-            // matching normals to contribute any weight at all - on terrain with
-            // detail/normal maps this zeroed out nearly every neighbor, so the "blur"
-            // was collapsing to just the center sample (i.e. no visible blur).
+            // B. Calculate Normal Weight (unchanged, works well)
             float normalWeight = max(dot(neighborNormal, centerNormal), 0.0);
-            normalWeight = pow(normalWeight, 4.0);
+            normalWeight = pow(normalWeight, 16.0); 
 
-            // C. Smooth depth weight with a distance-scaled tolerance instead of a
-            // hard cutoff. Falls off for anything far from centerDepth, but no longer
-            // discontinuous, and no longer over-eager to reject legitimate
-            // same-surface samples on sloped ground.
-            float depthDelta = neighborDepth - centerDepth;
-            float depthWeight = exp(-(depthDelta * depthDelta) / (2.0 * depthTolerance * depthTolerance));
+            // C. Fixed Asymmetric Depth Weight: Using linear world meters!
+            float depthDelta = neighborDepth - centerDepth; // No abs() here initially
+
+            float depthWeight;
+            if (depthDelta > 2.0) {
+                // The neighbor is more than 2 meters BEHIND the center pixel.
+                // This means we are sampling across a silhouette gap onto background geometry.
+                // Drop the weight to 0 to completely kill background white bleeding forward.
+                depthWeight = 0.0;
+            } else {
+                // The neighbor is either on the same surface or in FRONT of the center pixel.
+                // Use the standard smooth Gaussian falloff curve.
+                float absDelta = abs(depthDelta);
+                depthWeight = exp(-absDelta * absDelta * 2.0); 
+            }
 
             // Combine weights safely
             float weight = spatialWeight * normalWeight * depthWeight;
