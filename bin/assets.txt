@@ -30,3 +30,4 @@ GLProgram   OrbShadow       shaders/orbShadow.vert shaders/orbShadow.frag
 GLProgram   Lighting        shaders/lighting.vert shaders/lighting.frag
 GLProgram   SSAO            shaders/ssao.vert shaders/ssao.frag
 GLProgram   SSAOBlur        shaders/ssao_blur.vert shaders/ssao_blur.frag
+GLProgram   Ocean           shaders/ocean.vert shaders/ocean.frag

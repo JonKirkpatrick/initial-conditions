@@ -11,7 +11,7 @@
 
 namespace soa {
 
-    static constexpr std::size_t MAX_ENTITIES = 131072;
+    static constexpr std::size_t MAX_ENTITIES = 262144;
 
     struct EntityHandle {
         uint32_t index = std::numeric_limits<uint32_t>::max();

@@ -89,6 +89,13 @@ protected:
     sf::Vector2f        m_topdownWorldSize{1.f, 1.f};
 
     // =========================================================================
+    // Ocean
+    // =========================================================================
+
+    float m_oceanSize = 10000.0f;
+    float m_oceanResolution = 200.0f;
+    
+    // =========================================================================
     // Rendering — OpenGL Programs
     // =========================================================================
 
@@ -96,6 +103,14 @@ protected:
     GLuint              m_skyProgram            = Assets::Instance().getGLProgram("Sky");
     GLuint              m_ssao                  = Assets::Instance().getGLProgram("SSAO");
     GLuint              m_ssao_blur             = Assets::Instance().getGLProgram("SSAOBlur");
+    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("Terrain");
+    GLuint              m_OrbCreatureProgram    = Assets::Instance().getGLProgram("OrbCreature");
+    GLuint              m_blitProgram           = Assets::Instance().getGLProgram("Blit");
+    GLuint              m_lightingProgram       = Assets::Instance().getGLProgram("Lighting");
+    GLuint              m_terrainShadowProgram  = Assets::Instance().getGLProgram("TerrainShadow");
+    GLuint              m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
+    GLuint              m_oceanProgram          = Assets::Instance().getGLProgram("Ocean");
+
 
     // =========================================================================
     // Rendering — Render Textures and OpenGL Resources
@@ -105,18 +120,22 @@ protected:
     sf::RenderTexture   m_minimapTexture;
     unsigned int        m_minimapTextureSize    = 256;
 
+    // ocean pipeline
+    GLuint              m_oceanVAO              = 0;
+    GLuint              m_oceanVBO              = 0;
+    GLuint              m_oceanEBO              = 0;
+    GLuint              m_oceanIndexCount       = 0;
+
     // terrain pipeline
     GLuint              m_gridVAO               = 0;
     GLuint              m_gridVBO               = 0;
     GLuint              m_gridEBO               = 0;
     GLuint              m_gridIndexCount        = 0;
-    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("Terrain");
 
     // sphere impostor pipeline
     GLuint              m_cubeVAO               = 0;
     GLuint              m_cubeVBO               = 0;
     GLuint              m_cubeEBO               = 0;
-    GLuint              m_OrbCreatureProgram    = Assets::Instance().getGLProgram("OrbCreature");
 
     // G-Buffer for deferred lighting
     GLuint              m_gBufferFBO            = 0;
@@ -143,7 +162,6 @@ protected:
     // Rendering — Blit
     // =========================================================================
 
-    GLuint              m_blitProgram           = Assets::Instance().getGLProgram("Blit");
     GLuint              m_blitVAO               = 0;
     GLuint              m_blitVBO               = 0;
 
@@ -151,7 +169,6 @@ protected:
     // Rendering — Deferred Lighting
     // =========================================================================
 
-    GLuint              m_lightingProgram           = Assets::Instance().getGLProgram("Lighting");
     GLuint              m_lightingVAO               = 0;
     GLuint              m_lightingVBO               = 0;
 
@@ -171,9 +188,6 @@ protected:
     float                   m_cascadeSplitLambda    = 0.25f; // 0 = uniform, 1 = logarithmic
     float                   m_shadowFrustumPadding  = 30.0f;
     float                   m_shadowMaxDistance     = 500.0f;
-
-    GLuint                  m_terrainShadowProgram  = Assets::Instance().getGLProgram("TerrainShadow");
-    GLuint                  m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");
 
     bool                    m_debugShowShadowMap     = false;
     bool                    m_debugDisableTexelSnap  = false;
@@ -265,6 +279,7 @@ protected:
     void buildHud();
     void buildTerrainGrid();
     void buildVertexCube();
+    void generateOceanMesh(float size, int resolution, unsigned int& vao, unsigned int& vbo, unsigned int& ebo, unsigned int& indexCount);
     void initializeSkyCubemap();
     void initializeOrbShaderStorage();
     void initializeGBuffer(unsigned int width, unsigned int height);
@@ -317,6 +332,7 @@ protected:
     void runSSAOBlurPass();
     void deferredLighting();
     void blitToScreen(GLuint tex);
+    void renderOceanGrid();
 
     // =========================================================================
     // Shader Uniform Upload

@@ -262,6 +262,7 @@ void Scene_IC_Camp::initGraphicsPipelines()
 {
     initializeGBuffer(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT);
     initializeSkyCubemap();
+    generateOceanMesh(m_oceanSize, m_oceanResolution, m_oceanVAO, m_oceanVBO, m_oceanEBO, m_oceanIndexCount);
     initializeShadowMap(m_shadowMapSize);
     initSSAONoiseTexture();
     initSSAOKernel();
@@ -278,7 +279,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(8000);
+    spawnDebugOrbs(256000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -359,6 +360,19 @@ void Scene_IC_Camp::cleanUpGraphicsResources()
         glDeleteBuffers(1, &m_lightingVBO);
         m_lightingVBO = 0;
     }
+
+    if (m_oceanVAO != 0) {
+        glDeleteVertexArrays(1, &m_oceanVAO);
+        m_oceanVAO = 0;
+    }
+    if (m_oceanVBO != 0) {
+        glDeleteBuffers(1, &m_oceanVBO);
+        m_oceanVBO = 0;
+    }
+    if (m_oceanEBO != 0) {
+        glDeleteBuffers(1, &m_oceanEBO);
+        m_oceanEBO = 0;
+    }
 }
 
 void Scene_IC_Camp::sRender() 
@@ -394,9 +408,9 @@ void Scene_IC_Camp::sRender()
     AtmosphereBlock ab;
     ab.fogColorDay      = glm::vec4(0.7f, 0.8f, 1.0f, 1.0f);
     ab.fogColorNight    = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f);
-    ab.fogDensity       = 0.001f;
-    ab.fogBaseHeight    = 8.0f;
-    ab.fogHeightFalloff = 0.01f;
+    ab.fogDensity       = 0.0002f;
+    ab.fogBaseHeight    = 1.0f;
+    ab.fogHeightFalloff = 0.005f;
     ab._padding         = 0.0f;
 
     glBindBuffer(GL_UNIFORM_BUFFER, m_atmoUBO);
@@ -435,13 +449,9 @@ void Scene_IC_Camp::sRender()
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
-
-    if (m_debugShowSSAOBlur) {
-        blitToScreen(m_ssaoPipeline.blurTex);
-    } else {
-        deferredLighting();
-    }
-
+    deferredLighting();
+    renderOceanGrid();
+    window.resetGLStates();
     m_hud->render(window, false);
 }
 
@@ -830,6 +840,7 @@ void Scene_IC_Camp::loadLevel(const std::string& filename)
     std::srand(std::time(0));
     m_homeLocationXZ = WCH::hexToWorld(m_playerConfig.POSITION_X, m_playerConfig.POSITION_Z);
     m_homeLocation3D = sf::Vector3f(m_homeLocationXZ.x, heightAt(m_homeLocationXZ.x, m_homeLocationXZ.y), m_homeLocationXZ.y);
+    m_terrainStreamer->update({m_homeLocation3D.x, m_homeLocation3D.z});
 }
 
 void Scene_IC_Camp::spawnPlayer()
@@ -891,59 +902,82 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
 
 void Scene_IC_Camp::spawnDebugOrbs(int count)
 {
+    if (count <= 0) return;
+
     std::mt19937 rng(1337);
-    
-    // Extents are -3000 to 3000 tiles. 
-    std::uniform_int_distribution<int> hexDist(-3000, 3000);
-    
-    std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
-    std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
-    std::uniform_real_distribution<float> bobMagDist(0.05f, 0.5f);
-    std::uniform_real_distribution<float> gazeDist(-1.0f, 1.0f);
-    std::uniform_real_distribution<float> dilationDist(0.5f, 1.0f);
-    std::uniform_real_distribution<float> closureDist(0.0f, 0.0f);
-    std::uniform_real_distribution<float> yawDist(0.0f, 2.0f * 3.141592f); // Generates in Radians
-    std::uniform_int_distribution<int> speciesDist(0, 6);
 
-    // 2. Spatial Coalescing & Hashing
-    struct PairHash {
-        std::size_t operator()(const std::pair<int,int>& p) const noexcept {
-            return std::hash<int>{}(p.first) ^ (std::hash<int>{}(p.second) << 16);
-        }
+    // Fast 64-bit key for hex positions
+    auto posToKey = [](int q, int r) -> uint64_t {
+        constexpr int64_t OFFSET = 32768LL;
+        return (static_cast<uint64_t>(q + OFFSET) << 32) |
+               static_cast<uint64_t>(r + OFFSET);
     };
-    std::unordered_set<std::pair<int,int>, PairHash> usedCoords;
 
-    const int minHexDistance = 3; 
+    std::unordered_set<uint64_t> occupied;
 
-    auto IsTooClose = [&](int q, int r) {
-        for (const auto& [uq, ur] : usedCoords) {
-            int dist = (std::abs(q - uq) + std::abs(q + r - uq - ur) + std::abs(r - ur)) / 2;
-            if (dist < minHexDistance) {
+    // Hex cells within distance < 3
+    const std::vector<std::pair<int, int>> neighborOffsets = {
+        { 0,  0},
+        { 1,  0}, { 1, -1}, { 0, -1}, {-1,  0}, {-1,  1}, { 0,  1},
+        { 2,  0}, { 2, -1}, { 2, -2}, { 1, -2}, { 0, -2},
+        {-1, -1}, {-2,  0}, {-2,  1}, {-2,  2}, {-1,  2}, { 0,  2}, { 1,  1}
+    };
+
+    auto isTooClose = [&](int q, int r) -> bool {
+        for (const auto& [dq, dr] : neighborOffsets) {
+            uint64_t key = posToKey(q + dq, r + dr);
+            if (occupied.contains(key)) {
                 return true;
             }
         }
         return false;
     };
 
-    int spawned     = 0;
-    int maxAttempts = count * 50; 
-    int attempts    = 0;
+    // Original distributions
+    std::uniform_int_distribution<int> hexDist(-4500, 4500);
+    std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
+    std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
+    std::uniform_real_distribution<float> bobMagDist(0.05f, 0.5f);
+    std::uniform_real_distribution<float> gazeDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> dilationDist(0.5f, 1.0f);
+    std::uniform_real_distribution<float> closureDist(0.0f, 0.0f);
+    std::uniform_real_distribution<float> yawDist(0.0f, 2.0f * 3.141592f);
+    std::uniform_int_distribution<int> speciesDist(0, 6);
+
+    const int centerQ = m_playerConfig.POSITION_X;
+    const int centerR = m_playerConfig.POSITION_Z;
+
+    int spawned = 0;
+    int attempts = 0;
+    const int maxAttempts = count * 50;   // Increased a bit due to new height constraint
 
     while (spawned < count && attempts < maxAttempts)
     {
         ++attempts;
-        int hexQ = hexDist(rng) + m_playerConfig.POSITION_X;
-        int hexR = hexDist(rng) + m_playerConfig.POSITION_Z;
 
-        if (IsTooClose(hexQ, hexR)) continue;
+        int hexQ = hexDist(rng) + centerQ;
+        int hexR = hexDist(rng) + centerR;
 
-        usedCoords.insert({hexQ, hexR});
+        // === NEW: Height filter ===
+        sf::Vector2f worldPos = WCH::hexToWorld(hexQ, hexR);
+        float height = heightAt(worldPos.x, worldPos.y);  // assuming y = z in your coord system
 
-        float radius           = radiusDist(rng);
-        float bobRate          = bobRateDist(rng);
-        float bobMag           = bobMagDist(rng);
-        float yaw              = yawDist(rng);
-        int species            = speciesDist(rng);
+        if (height <= 5.0f) {
+            continue;
+        }
+
+        // Spatial check
+        if (isTooClose(hexQ, hexR)) continue;
+
+        // Accept position
+        occupied.insert(posToKey(hexQ, hexR));
+
+        // Spawn parameters (unchanged)
+        float radius = radiusDist(rng);
+        float bobRate = bobRateDist(rng);
+        float bobMag = bobMagDist(rng);
+        float yaw = yawDist(rng);
+        int species = speciesDist(rng);
 
         sf::Vector2f gazeDirection = { gazeDist(rng), gazeDist(rng) };
         float length = std::sqrt(gazeDirection.x * gazeDirection.x + gazeDirection.y * gazeDirection.y);
@@ -1058,6 +1092,91 @@ void Scene_IC_Camp::buildVertexCube()
     // Index buffer
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_cubeEBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+}
+
+void Scene_IC_Camp::generateOceanMesh(float size, int resolution, unsigned int& vao, unsigned int& vbo, unsigned int& ebo, unsigned int& indexCount)
+{
+    std::vector<float> vertices;
+    std::vector<unsigned int> indices;
+
+    float halfSize = size / 2.0f;
+    float step = size / (float)resolution;
+
+    // 1. Generate vertices (Positions, Normals, TexCoords)
+    for (int z = 0; z <= resolution; z++)
+    {
+        for (int x = 0; x <= resolution; x++)
+        {
+            float posX = -halfSize + (float)x * step;
+            float posZ = -halfSize + (float)z * step;
+            float posY = 0.0f; // Flat to begin with
+
+            // Position
+            vertices.push_back(posX);
+            vertices.push_back(posY);
+            vertices.push_back(posZ);
+
+            // Normal (pointing straight up initially)
+            vertices.push_back(0.0f);
+            vertices.push_back(1.0f);
+            vertices.push_back(0.0f);
+
+            // TexCoords
+            vertices.push_back((float)x / (float)resolution);
+            vertices.push_back((float)z / (float)resolution);
+        }
+    }
+
+    // 2. Generate indices for triangles
+    for (int z = 0; z < resolution; z++)
+    {
+        for (int x = 0; x < resolution; x++)
+        {
+            unsigned int topLeft     = z * (resolution + 1) + x;
+            unsigned int topRight    = topLeft + 1;
+            unsigned int bottomLeft  = (z + 1) * (resolution + 1) + x;
+            unsigned int bottomRight = bottomLeft + 1;
+
+            // Triangle 1
+            indices.push_back(topLeft);
+            indices.push_back(bottomLeft);
+            indices.push_back(topRight);
+
+            // Triangle 2
+            indices.push_back(topRight);
+            indices.push_back(bottomLeft);
+            indices.push_back(bottomRight);
+        }
+    }
+
+    indexCount = static_cast<unsigned int>(indices.size());
+
+    // 3. Bind buffers to OpenGL
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glGenBuffers(1, &ebo);
+
+    glBindVertexArray(vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+    // Vertex Positions (location = 0)
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+
+    // Vertex Normals (location = 1)
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+
+    // Vertex Texture Coordinates (location = 2)
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
 
     glBindVertexArray(0);
 }
@@ -1747,9 +1866,9 @@ std::vector<OrbData> Scene_IC_Camp::buildOrbData() const
         auto& t    = m_entityManager.getTransform(orb);
         auto& c    = m_entityManager.getOrb(orb);
         auto& eyes = m_entityManager.getEyes(orb);
-        auto f = Camera::getForward(t);
-        auto r = Camera::getRight(t);
-        auto u = Camera::getUp(t);
+        const auto& f = t.forward();
+        const auto& r = t.right();
+        const auto& u = t.up();
 
         OrbData data;
         data.centreAndSpeciesIdx                = { t.pos.x, t.pos.y, t.pos.z, static_cast<float>(c.speciesIdx) };
@@ -2121,6 +2240,92 @@ void Scene_IC_Camp::renderSky()
 
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
+}
+
+void Scene_IC_Camp::renderOceanGrid()
+{
+    // Save previous polygon mode state just to be completely safe
+    GLint previousPolygonMode[2];
+    glGetIntegerv(GL_POLYGON_MODE, previousPolygonMode);
+
+    // 1. Setup specific forward-rendering conditions
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    // Switch to manual G-Buffer depth sampling: disable hardware depth discard
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE); 
+
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+    // 2. Safely activate program
+    glUseProgram(m_oceanProgram);
+    
+    // Calculate the exact world space distance between any two vertices
+    float vertexSpacing = m_oceanSize / static_cast<float>(m_oceanResolution);
+
+    // Pull your camera's position out of its transform component
+    auto& cameraTransform = m_entityManager.getTransform(m_camera);
+    glm::vec3 camPos = toGLMVec3(cameraTransform.pos);
+
+    // Snap the mesh's world translation to perfectly line up with your vertex intervals
+    float snappedX = std::floor(camPos.x / vertexSpacing) * vertexSpacing;
+    float snappedZ = std::floor(camPos.z / vertexSpacing) * vertexSpacing;
+    float seaLevel  = 5.0f; // Kept your baseline's height displacement
+
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(snappedX, seaLevel, snappedZ));
+    
+    glUniformMatrix4fv(glGetUniformLocation(m_oceanProgram, "model"), 1, GL_FALSE, &model[0][0]);
+    glUniform1f(glGetUniformLocation(m_oceanProgram, "time"), m_game.getElapsedClock().getElapsedTime().asSeconds());
+
+    // =========================================================================
+    // Bind Textures for Ocean Pass
+    // =========================================================================
+    // Bind G-buffer depth to unit 0
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
+    glUniform1i(glGetUniformLocation(m_oceanProgram, "u_gDepth"), 0);
+
+    // Bind Cascaded Shadow Depth Array to unit 1
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
+    glUniform1i(glGetUniformLocation(m_oceanProgram, "u_shadowMap"), 1);
+
+    // =========================================================================
+    // Feed Cascade Uniform Matrices and Configurations
+    // =========================================================================
+    glUniformMatrix4fv(glGetUniformLocation(m_oceanProgram, "u_lightViewProj"),
+                        NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
+    glUniform1fv(glGetUniformLocation(m_oceanProgram, "u_texelWorldSize"), NUM_CASCADES, m_texelWorldSize);
+    glUniform1fv(glGetUniformLocation(m_oceanProgram, "u_cascadeSplitDepths"), NUM_CASCADES, m_cascadeSplits);
+
+    glUniform3fv(glGetUniformLocation(m_oceanProgram, "u_nightAmbientFloor"), 1, &m_nightAmbientFloor[0]);
+
+    GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
+    glDisable(GL_CULL_FACE);
+
+    // 3. Draw Mesh
+    glBindVertexArray(m_oceanVAO);
+    glDrawElements(GL_TRIANGLES, m_oceanIndexCount, GL_UNSIGNED_INT, 0);
+    
+    // ==================== CLEANUP ====================
+    glBindVertexArray(0);
+    glUseProgram(0);
+    if (cullWasEnabled) {
+        glEnable(GL_CULL_FACE);
+    }
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    
+    // Reset states back to what SFML/HUD expects
+    glPolygonMode(GL_FRONT, previousPolygonMode[0]);
+    glPolygonMode(GL_BACK, previousPolygonMode[1]);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
 }
 
 // =========================================================================
