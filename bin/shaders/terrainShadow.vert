@@ -12,8 +12,6 @@ const int  kVisibleGridDim = 9;
 const int  kTileResolution = 256;   // core texels/side
 const int  kTexSide        = 257;   // stored texels/side (with apron)
 
-// gridUV: position across the whole 5x5 extent, in [0,1]
-// Returns the tile-local texel coordinate needed to sample this array's storage.
 void resolveTileSample(vec2 gridUV, out int layer, out vec2 texUV)
 {
     vec2 tileF   = clamp(gridUV, 0.0, 1.0) * float(kVisibleGridDim);
@@ -21,16 +19,11 @@ void resolveTileSample(vec2 gridUV, out int layer, out vec2 texUV)
     layer = tileXY.y * kVisibleGridDim + tileXY.x;
 
     vec2 localUV = fract(tileF); // 0..1 across this tile's 256 core texels
-    // Map onto the 257-texel storage so texel 256 (the apron) is reachable
-    // for the *forward* neighbor sample, matching the file format's
-    // one-directional apron (row/col 256 == neighbor's row/col 0).
     texUV = (localUV * float(kTileResolution) + 0.5) / float(kTexSide);
 }
 
 float decodeHeightVertex(vec2 gridUV)
 {
-    // Inclusive edge check: Catch vertices sitting exactly at 1.0 (or slightly beyond due to normal offsets)
-    // using a tiny epsilon safety margin (1.0 - 0.00001 = 0.99999)
     if (any(lessThan(gridUV, vec2(0.0))) || any(greaterThanEqual(gridUV, vec2(0.99999)))) 
     {
         return 0.0;

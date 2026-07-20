@@ -1,61 +1,8 @@
 #version 460 core
 
-// ==============================================================================
-// == Global Macro Aliases =====================================================
-// ==============================================================================
-#define u_invViewProj      u_invViewProj_Block
-#define u_cameraPos        u_cameraPos_Block
-#define u_cameraForward    u_cameraForward_Block
-#define u_sunDir           u_sunDir_Block
-#define u_sunColor         u_sunColor_Block
-#define u_fogColorDay      u_fogColorDay_Block.xyz
-#define u_fogColorNight    u_fogColorNight_Block.xyz
-#define u_fogDensity       u_fogDensity_Block
-#define u_fogBaseHeight    u_fogBaseHeight_Block
-#define u_fogHeightFalloff u_fogHeightFalloff_Block
-
-// ==============================================================================
-// == Uniform Buffer Blocks (Bound safely to 0, 1, and 2) =======================
-// ==============================================================================
-layout (std140, binding = 0) uniform CameraData {
-    mat4 u_view;
-    mat4 u_proj;
-    mat4 u_viewProj;
-    mat4 u_invViewProj_Block;
-    
-    vec3 u_cameraPos_Block;
-    float fovY;
-    
-    vec3 u_cameraForward_Block;
-    float aspectRatio;
-    
-    vec3 u_cameraRight;
-    float u_cameraHeight;
-    
-    vec3 u_cameraUp;
-    float u_farPlane;
-    
-    vec2 u_viewportSize;
-    float u_nearPlane;
-    float cameraData_padding;
-};
-
-layout (std140, binding = 1) uniform EnvironmentData {
-    vec4  u_sunColor_Block;
-    vec3  u_sunDir_Block;
-    float u_ambientStrength;
-    vec3  u_moonDir;
-    float u_skyExposure;
-};
-
-layout (std140, binding = 2) uniform AtmosphereData {
-    vec4  u_fogColorDay_Block;       
-    vec4  u_fogColorNight_Block;     
-    float u_fogDensity_Block;
-    float u_fogBaseHeight_Block;
-    float u_fogHeightFalloff_Block;
-    float atmoData_padding;
-};
+#include "ubos/camera.glsl"
+#include "ubos/environment.glsl"
+#include "ubos/atmosphere.glsl"
 
 // ==============================================================================
 // == Shader Storage Buffer Objects (SSBOs - Shifted to 5 & 6) ==================

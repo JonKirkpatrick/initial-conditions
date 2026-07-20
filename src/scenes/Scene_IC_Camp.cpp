@@ -473,43 +473,37 @@ void Scene_IC_Camp::sRender() {
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& camData = m_entityManager.getCamera(m_camera);
 
-    // 1. Collect and calculate all the CPU matrix math into our packed layout
     CameraBlock cb;
-    cb.view         = glm::make_mat4(Camera::getViewMatrix(transform).data());
-    cb.proj         = glm::make_mat4(Camera::getProjectionMatrix(camData).data());
-    cb.viewProj     = cb.proj * cb.view;
-    cb.invViewProj  = glm::inverse(cb.viewProj);
+    cb.view             = glm::make_mat4(Camera::getViewMatrix(transform).data());
+    cb.proj             = glm::make_mat4(Camera::getProjectionMatrix(camData).data());
+    cb.viewProj         = cb.proj * cb.view;
+    cb.invViewProj      = glm::inverse(cb.viewProj);
+    cb.cameraPos        = toGLMVec3(transform.pos);
+    cb.fovY             = camData.fovY;
+    cb.cameraForward    = toGLMVec3(Camera::getForward(transform));
+    cb.aspectRatio      = camData.aspectRatio;    
+    cb.cameraRight      = toGLMVec3(Camera::getRight(transform));
+    cb.cameraHeight     = getCameraHeightAboveGround(transform.pos);
+    cb.cameraUp         = toGLMVec3(Camera::getUp(transform));
+    cb.farPlane         = camData.farPlane;
+    cb.viewportSize     = glm::vec2(camData.viewportSize.x, camData.viewportSize.y);
+    cb.nearPlane        = camData.nearPlane;
+    cb._padding         = 0.0f;
     
-    cb.cameraPos    = toGLMVec3(transform.pos);
-    cb.fovY         = camData.fovY;
-    
-    cb.cameraForward = toGLMVec3(Camera::getForward(transform));
-    cb.aspectRatio   = camData.aspectRatio;
-    
-    cb.cameraRight   = toGLMVec3(Camera::getRight(transform));
-    cb.cameraHeight  = getCameraHeightAboveGround(transform.pos);
-    
-    cb.cameraUp      = toGLMVec3(Camera::getUp(transform));
-    cb.farPlane      = camData.farPlane;
-    
-    cb.viewportSize  = glm::vec2(camData.viewportSize.x, camData.viewportSize.y);
-    cb.nearPlane     = camData.nearPlane;
-    cb.padding       = 0.0f; // explicitly clearing out the tracking buffer garbage
-
     EnvironmentBlock eb;
-    eb.sunColor        = toGLMVec4(m_astroState.sunColor);
-    eb.sunDirection    = toGLMVec3(m_astroState.sunDirection);
-    eb.ambientStrength = m_sunIntensity;
-    eb.moonDirection   = toGLMVec3(m_astroState.moonDirection);
-    eb.skyExposure     = 5.0f;
+    eb.sunColor         = toGLMVec4(m_astroState.sunColor);
+    eb.sunDirection     = toGLMVec3(m_astroState.sunDirection);
+    eb.ambientStrength  = m_sunIntensity;
+    eb.moonDirection    = toGLMVec3(m_astroState.moonDirection);
+    eb.skyExposure      = 5.0f;
 
     AtmosphereBlock ab;
-    ab.fogColorDay       = glm::vec4(0.7f, 0.8f, 1.0f, 1.0f);
-    ab.fogColorNight     = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f);
-    ab.fogDensity        = 0.001f;
-    ab.fogBaseHeight     = 8.0f;
-    ab.fogHeightFalloff  = 0.01f;
-    ab._padding          = 0.0f;
+    ab.fogColorDay      = glm::vec4(0.7f, 0.8f, 1.0f, 1.0f);
+    ab.fogColorNight    = glm::vec4(0.02f, 0.02f, 0.05f, 1.0f);
+    ab.fogDensity       = 0.001f;
+    ab.fogBaseHeight    = 8.0f;
+    ab.fogHeightFalloff = 0.01f;
+    ab._padding         = 0.0f;
 
     glBindBuffer(GL_UNIFORM_BUFFER, m_atmoUBO);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(AtmosphereBlock), &ab);
@@ -2310,8 +2304,6 @@ void Scene_IC_Camp::updateOrbBobbing(SoAEntityHandle e, float dt)
 
     updateBob(e, dt);
 
-    // World convention: Y is vertical. XZ is the ground plane.
-    // Orb hovers at bobMagnitude above ground, oscillating downward from there.
     const float groundY   = heightAt(t.pos.x, t.pos.z);
     const float bobOffset = std::sin(bob.accumulator * 6.2831853f) * bob.magnitude;
 

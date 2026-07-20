@@ -1,33 +1,8 @@
 #version 460 core
+#include "ubos/camera.glsl"
 
 out float FragColor;
 in vec2 v_uv;
-
-// ==============================================================================
-// == Uniform Buffer Binding 0 (Camera Data) ====================================
-// ==============================================================================
-layout (std140, binding = 0) uniform CameraData {
-    mat4 u_view;
-    mat4 u_proj;
-    mat4 u_viewProj;
-    mat4 u_invViewProj;
-    vec3 u_cameraPos;
-    float fovY;
-    vec3 u_cameraForward;
-    float aspectRatio;
-    vec3 u_cameraRight;
-    float u_cameraHeight;
-    vec3 u_cameraUp;
-    float u_farPlane;
-    vec2 u_viewportSize;
-    float u_nearPlane;
-};
-
-// Aliases to bridge standard SSAO variable names seamlessly
-#define u_projection u_proj
-#define u_view       u_view
-#define u_near       u_nearPlane
-#define u_far        u_farPlane
 
 // ==============================================================================
 // == Texture Samplers ==========================================================
@@ -50,12 +25,12 @@ vec3 getPositionInViewSpace(vec2 uv) {
     
     // 1. Get standard linear view-space depth (Z)
     float zNDC = depth * 2.0 - 1.0; 
-    float linearDepth = (2.0 * u_near * u_far) / (u_far + u_near - zNDC * (u_far - u_near));
+    float linearDepth = (2.0 * u_nearPlane * u_farPlane) / (u_farPlane + u_nearPlane - zNDC * (u_farPlane - u_nearPlane));
     
     // 2. Reconstruct X and Y directly from the Projection Matrix components
     // This turns screen UVs into a pristine View-Space Ray completely independent of world rotation!
-    float x = (uv.x * 2.0 - 1.0) / u_projection[0][0];
-    float y = (uv.y * 2.0 - 1.0) / u_projection[1][1];
+    float x = (uv.x * 2.0 - 1.0) / u_proj[0][0];
+    float y = (uv.y * 2.0 - 1.0) / u_proj[1][1];
     
     // Remember: In OpenGL view space, objects in front of the camera have negative Z,
     // so we multiply our projection scalars by the linear depth distance.
@@ -83,7 +58,7 @@ void main() {
         
         // Project sample space back to screen coordinates
         vec4 offset = vec4(samplePos, 1.0);
-        offset      = u_projection * offset;    
+        offset      = u_proj * offset;    
         offset.xyz /= offset.w;               
         offset.xyz  = offset.xyz * 0.5 + 0.5; 
         

@@ -1,31 +1,8 @@
 #version 460 core
+#include "ubos/camera.glsl"
 
 out float FragColor;
 in vec2 v_uv;
-
-// ==============================================================================
-// == Uniform Buffer Binding 0 (Camera Data) ====================================
-// ==============================================================================
-layout (std140, binding = 0) uniform CameraData {
-    mat4 u_view;
-    mat4 u_proj;
-    mat4 u_viewProj;
-    mat4 u_invViewProj;
-    vec3 u_cameraPos;
-    float fovY;
-    vec3 u_cameraForward;
-    float aspectRatio;
-    vec3 u_cameraRight;
-    float u_cameraHeight;
-    vec3 u_cameraUp;
-    float u_farPlane;
-    vec2 u_viewportSize;
-    float u_nearPlane;
-};
-
-// Map old loose uniform names to the automated UBO context
-#define u_near u_nearPlane
-#define u_far  u_farPlane
 
 // ==============================================================================
 // == Texture Samplers ==========================================================
@@ -38,7 +15,7 @@ uniform sampler2D u_gDepth;
 float getLinearDepth(vec2 uv) {
     float depth = texture(u_gDepth, uv).r;
     float zNDC = depth * 2.0 - 1.0; 
-    return (2.0 * u_near * u_far) / (u_far + u_near - zNDC * (u_far - u_near));
+    return (2.0 * u_nearPlane * u_farPlane) / (u_farPlane + u_nearPlane - zNDC * (u_farPlane - u_nearPlane));
 }
 
 void main() {

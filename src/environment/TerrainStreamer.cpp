@@ -149,7 +149,6 @@ TileCoord TerrainStreamer::worldPosToAbsoluteTileCoord(const sf::Vector2f& camer
 
 void TerrainStreamer::initializeGrid(const sf::Vector2f& cameraWorldPos)
 {
-    // Use the offset helper!
     m_centerTileCoord = clampToWorldBounds(worldPosToAbsoluteTileCoord(cameraWorldPos));
 
     for (int row = m_centerTileCoord.row - kHalfWindow;
@@ -183,7 +182,6 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
     float gridDim = WorldCoordinates::Square::kStreamerGridDim;
     tilesToLoad.reserve(gridDim * gridDim);
 
-    // 1. Determine what we need to load BEFORE we change the center
     for (int row = newCenter.row - kHalfWindow; row <= newCenter.row + kHalfWindow; ++row)
     {
         for (int col = newCenter.col - kHalfWindow; col <= newCenter.col + kHalfWindow; ++col)
@@ -196,17 +194,13 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
         }
     }
 
-    // 2. CRITICAL: Update the center coordinate FIRST.
-    // This ensures all slot mapping math correctly targets the new layout.
     m_centerTileCoord = newCenter;
 
-    // 3. Now load the new tiles into their newly designated slots
     for (const auto& tile : tilesToLoad)
     {
         loadTileIntoSlot(tile);
     }
 
-    // 4. Finalize uniforms and mark dirty
     refreshActiveSliceUniforms();
     m_subgridDirty = true;
     
@@ -221,8 +215,6 @@ void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
 
     m_slotWorldCoord[slot] = coord;
     m_slotValid[slot]      = ok;
-    std::cout << "[TerrainStreamer] Loaded tile [" << coord.row << ", " << coord.col
-              << "] into slot " << slot << " (valid: " << std::boolalpha << ok << ")\n";
 }
 
 bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,

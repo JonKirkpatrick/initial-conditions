@@ -3,18 +3,7 @@
 #include "common/raySphere.glsl"
 #include "orb/orbData.glsl"
 #include "orb/orbCompound.glsl"
-
-// ==============================================================================
-// == Uniform Buffer Binding 1 (Environment Data) ===============================
-// ==============================================================================
-layout (std140, binding = 1) uniform EnvironmentData {
-    vec4  u_sunColor;
-    vec3  u_sunDir;
-    float u_ambientStrength;
-    
-    vec3  u_moonDir;
-    float u_skyExposure;
-};
+#include "ubos/environment.glsl"
 
 flat in int v_instanceID;
 in vec3 v_worldPos;

@@ -1,58 +1,8 @@
 #version 460 core
 
-// ==============================================================================
-// == Uniform Buffer Binding 0 (Camera Data) ====================================
-// ==============================================================================
-layout (std140, binding = 0) uniform CameraData {
-    mat4 u_view;
-    mat4 u_proj;
-    mat4 u_viewProj;
-    mat4 u_invViewProj;
-    vec3 u_cameraPos;
-    float fovY;
-    vec3 u_cameraForward;
-    float aspectRatio;
-    vec3 u_cameraRight;
-    float u_cameraHeight;
-    vec3 u_cameraUp;
-    float u_farPlane;
-    vec2 u_viewportSize;
-    float u_nearPlane;
-};
-
-// ==============================================================================
-// == Uniform Buffer Binding 1 (Environment Data) ===============================
-// ==============================================================================
-layout (std140, binding = 1) uniform EnvironmentData {
-    vec4  u_sunColor;
-    vec3  u_sunDir;
-    float u_ambientStrength;
-    vec3  u_moonDir;
-    float u_skyExposure;
-};
-
-#define sunDir u_sunDir
-#define sunColor u_sunColor
-#define moonDir u_moonDir
-#define skyExposure u_skyExposure
-
-// ==============================================================================
-// == Uniform Buffer Binding 2 (Atmosphere / Fog Data) ==========================
-// ==============================================================================
-layout (std140, binding = 2) uniform AtmosphereData {
-    vec4  u_fogColorDay;
-    vec4  u_fogColorNight;
-    float u_fogDensity;
-    float u_fogBaseHeight;
-    float u_fogHeightFalloff;
-};
-
-// Aliases so your current internal fog calculations continue working seamlessly:
-#define u_fogColorDay      u_fogColorDay.xyz
-#define u_fogColorNight    u_fogColorNight.xyz
-#define u_fogDensity       u_fogDensity
-#define u_fogBaseHeight    u_fogBaseHeight
-#define u_fogHeightFalloff u_fogHeightFalloff
+#include "ubos/environment.glsl"
+#include "ubos/atmosphere.glsl"
+#include "ubos/camera.glsl"
 
 // ==============================================================================
 // == Remaining Loose Uniforms ==================================================
@@ -74,13 +24,13 @@ void main() {
     float f = tan(fovY * 0.5);
     vec3 rayDir = normalize(worldToCamMatrix * vec3(v_ndc.x * f * aspectRatio, v_ndc.y * f, -1.0));
 
-    vec3 sunDirNorm = normalize(sunDir);
+    vec3 sunDirNorm = normalize(u_sunDir);
     float sunDot = max(dot(rayDir, sunDirNorm), 0.0);
     float height = rayDir.y;
     float sunElevation = asin(clamp(sunDirNorm.y, -1.0, 1.0)) * 180.0 / 3.14159265;
 
     // ================== ECLIPSE CALCULATION ==================
-    vec3 moonDirNorm = normalize(moonDir);
+    vec3 moonDirNorm = normalize(u_moonDir);
     
     // Angular distance between sun and moon centers
     float sunMoonDot = dot(sunDirNorm, moonDirNorm);
@@ -136,7 +86,7 @@ void main() {
     // but the pixel itself gets blocked if it's looking directly at the moon body.
     float sunGlow = pow(sunDot, 800.0) * 1.5;
     sunGlow *= mix(0.15, 1.0, rayIsInsideMoon); // Keeps a faint corona glow on the moon face
-    skyColor += sunGlow * sunColor.rgb * sunColor.a;
+    skyColor += sunGlow * u_sunColor.rgb * u_sunColor.a;
 
     // ================== GOLDEN HOUR / TWILIGHT GLOW ==================
     float golden = pow(sunDot, 6.0) * 1.8 * twilightFactor;
@@ -148,7 +98,7 @@ void main() {
         float cubemapFactor = 1.0 - smoothstep(-12.0, -3.0, sunElevation);
         vec3 starDir = starRotationMatrix * rayDir;
         // Updated legacy textureCube -> texture
-        vec3 stars = texture(skyCubemap, starDir).rgb * skyExposure;
+        vec3 stars = texture(skyCubemap, starDir).rgb * u_skyExposure;
         
         // Horizon extinction
         float extinction = exp(-0.22 * (1.0 - height));
