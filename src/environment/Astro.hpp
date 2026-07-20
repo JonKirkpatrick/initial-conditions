@@ -145,8 +145,6 @@ namespace Astro {
         outMatrix[8] = -std::cos(lon) * std::cos(lat);
     }
 
-    // Add this inside namespace Astro
-
     inline sf::Glsl::Vec3 computeMoonDirection(const Time& astroTime, float latitude)
     {
         double T = astroTime.julianCenturies;
@@ -221,5 +219,70 @@ namespace Astro {
 
         // == Convert to World Vector ==============================================
         return altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
+    }
+
+    inline State calculateState(int year, int month, int dayOfMonth, double timeOfDay, float latitude, float longitude)
+    {
+        State state;
+
+        // 1. Sidereal Time calculations
+        auto timeResult = computeSiderealTime(year, month, dayOfMonth, static_cast<float>(timeOfDay), longitude);
+        state.astroTime   = timeResult.astroTime;
+        state.epochOffset = timeResult.epochOffset;
+
+        // 2. Sun Direction & Intensity calculations
+        float declination = solarDeclination(month, dayOfMonth);
+        float haDeg       = (static_cast<float>(timeOfDay) / 24.0f - 0.5f) * 360.0f;
+
+        AltAz sunAltAz = computeAltAz(
+            static_cast<float>(toRad(haDeg)),
+            static_cast<float>(toRad(declination)),
+            static_cast<float>(toRad(latitude))
+        );
+
+        state.sunDirection = altAzToDirection(sunAltAz.elevationRad, sunAltAz.azimuthRad);
+
+        // Sun Color & Warming curve
+        float elevationDeg    = static_cast<float>(toDeg(sunAltAz.elevationRad));
+        float sunHeightFactor = std::clamp((elevationDeg + 12.0f) / 90.0f, 0.0f, 1.0f);
+        float warmth          = 1.0f - sunHeightFactor * 0.75f;
+
+        state.sunColor = sf::Glsl::Vec4(
+            1.00f,
+            0.90f + warmth * 0.10f,
+            0.65f + warmth * 0.30f,
+            sunHeightFactor * 1.25f + 0.25f
+        );
+
+        // 3. Starfield Background Orientation matrix
+        computeStarRotationMatrix(latitude, longitude, state.epochOffset, state.starRotationMatrix);
+
+        // 4. Analytical Lunar Positioning
+        state.moonDirection = computeMoonDirection(state.astroTime, latitude);
+
+        return state;
+    }
+
+    inline void advanceCalendar(double dt, double realSecondsPerHour, 
+                                double& gameTime, int& day, int& month, int& year) 
+    {
+        gameTime += dt * (1.0 / realSecondsPerHour);
+        if (gameTime >= 24.0) {
+            gameTime -= 24.0;
+            day++;
+            
+            static const int daysInMonth[] = { 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+            bool leapYear = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+            int daysThisMonth = daysInMonth[month] + ((leapYear && month == 2) ? 1 : 0);
+
+            if (day > daysThisMonth) {
+                day = 1;
+                month++;
+                if (month > 12) {
+                    month = 1;
+                    year++;
+                }
+            }
+        }
     }
 } // namespace Astro

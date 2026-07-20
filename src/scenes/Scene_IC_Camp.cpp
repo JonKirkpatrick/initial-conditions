@@ -24,16 +24,6 @@
 // =========================================================================
 // File-Local Static Helper Utilities
 // =========================================================================
-static sf::Glsl::Mat3 toGlslMat3(const std::array<std::array<float, 3>, 3>& matrix) {
-    const float flattened[9] = {
-        matrix[0][0], matrix[1][0], matrix[2][0],
-        matrix[0][1], matrix[1][1], matrix[2][1],
-        matrix[0][2], matrix[1][2], matrix[2][2]
-    };
-
-    return sf::Glsl::Mat3(flattened);
-}
-
 static glm::vec3 toGLMVec3(const sf::Vector3f& v) {
     return glm::vec3(v.x, v.y, v.z);
 }
@@ -81,123 +71,61 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     : Scene(game)
     , m_levelPath(levelPath)
 {
-    m_topdownMaxHeight = 1000.f;
-    float worldSize = Topography::BASE_SIZE;
-    float worldMinCoord = 0.f;
-    m_topdownWorldMin = { worldMinCoord, worldMinCoord };
-    m_topdownWorldSize = { worldSize, worldSize };
-    sf::ContextSettings settings;
-    settings.antiAliasingLevel = 8;
-    sf::Vector2u windowSize = game.window().getSize();
-    m_moonTexture = Assets::Instance().getTexture("Moon");
-    m_skyTexture = sf::RenderTexture({windowSize.x, windowSize.y});
-    m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
-    m_gridColour = Theme::color("cerulean");
-    m_cameraConfig.VIEWPORT_WIDTH = windowSize.x;
-    m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
-    initializeGBuffer(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT);
-    loadLevel(m_levelPath);
-    spawnPlayer();
-    spawnCamera();
-    spawnDebugOrbs(8000);
-    m_entityManager.update();
-    buildTerrainGrid();
-    buildHud();
-    updateHUDData();
-    updateSiderealTime();
-    updateSunPosition();
-    updateStarRotation();
-    updateMoonPosition();
-    initializeSkyCubemap();
-    initializeShadowMap(m_shadowMapSize);
-    initializeOrbShaderStorage();
-    initSSAONoiseTexture();
-    initSSAOKernel();
-    initSSAOFramebuffers();
-    initUBOs();
-    m_game.setMouseCaptured(true);
-    m_cursorMode = false;
+    initSceneConfiguration();
+    initGraphicsPipelines();
+    initLevelState();
 }
 
 Scene_IC_Camp::~Scene_IC_Camp() {
-    destroyGBuffer();
-    destroyShadowMap();
-    glDeleteFramebuffers(1, &m_ssaoFBO);
-    glDeleteFramebuffers(1, &m_ssaoBlurFBO);
-    glDeleteTextures(1, &m_ssaoColorTex);
-    glDeleteTextures(1, &m_ssaoBlurTex);
-    if (m_ssaoNoiseTex) glDeleteTextures(1, &m_ssaoNoiseTex);
-    if (m_cameraUBO != 0) {
-        glDeleteBuffers(1, &m_cameraUBO);
-    }
+    cleanUpGraphicsResources();
 }
 
 void Scene_IC_Camp::update() {
-    m_entityManager.update();
-    if (m_cursorMode) {
-        m_cachedMousePos = sf::Mouse::getPosition(m_game.window());
-        m_leftMousePressed = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
-    }
-    // Compute delta-time using the game's elapsed clock (wall time)
+    // 1. Core Framework Timing Updates
     float currentTime = m_game.getElapsedClock().getElapsedTime().asSeconds();
     float dt = 1.0f / 60.0f;
     if (m_lastFrameTime > 0.0f) {
-        dt = currentTime - m_lastFrameTime;
-        // clamp to avoid huge jumps after pauses
-        dt = std::clamp(dt, 0.0001f, 0.5f);
+        dt = std::clamp(currentTime - m_lastFrameTime, 0.0001f, 0.5f);
     }
     m_lastFrameTime = currentTime;
-    // Time advancement — debug rate: 1 in-game hour per 4 real seconds
-    // To slow later: replace 1.0f / 4.0f with 1.0f / (4.0f * desiredSlowdown)
-    const float realSecondsPerGameHour = 3600.0f;
-    m_gameTimeOfDay += static_cast<double>(dt) * (1.0f / realSecondsPerGameHour);
-    if (m_gameTimeOfDay >= 24.0f)
-    {
-        m_gameTimeOfDay -= 24.0f;
-        m_gameDayOfMonth++;
 
-        // Days per month, accounting for leap year
-        const int daysInMonth[] = { 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-        bool leapYear = (m_gameYear % 4 == 0 && m_gameYear % 100 != 0) || (m_gameYear % 400 == 0);
-        int daysThisMonth = daysInMonth[m_gameMonth] + (leapYear && m_gameMonth == 2 ? 1 : 0);
-
-        if (m_gameDayOfMonth > daysThisMonth)
-        {
-            m_gameDayOfMonth = 1;
-            m_gameMonth++;
-
-            if (m_gameMonth > 12)
-            {
-                m_gameMonth = 1;
-                m_gameYear++;
-            }
-        }
+    // 2. Cursor State Bookkeeping
+    if (m_cursorMode) {
+        m_cachedMousePos   = sf::Mouse::getPosition(m_game.window());
+        m_leftMousePressed = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
     }
 
+    // 3. Delegate Astronomical Clock Progress Outward
+    constexpr float kRealSecondsPerGameHour = 3600.0f;
+    Astro::advanceCalendar(dt, kRealSecondsPerGameHour, m_gameTimeOfDay, 
+                           m_gameDayOfMonth, m_gameMonth, m_gameYear);
+
+    // 4. Systems Phase Updates
     sMovement(dt);
+    
     sf::Vector3f playerPos = m_entityManager.getTransform(m_player).pos;
-    sf::Vector2f playerPos2D(playerPos.x, playerPos.z);
-    m_terrainStreamer->update(playerPos2D);
+    m_terrainStreamer->update({playerPos.x, playerPos.z});
+    
     m_entityManager.sUpdateTransformVectors();
     updateCamera(dt);
     updateHUDData();
-    updateSiderealTime();
-    updateSunPosition();
-    updateStarRotation();
-    updateMoonPosition();
+    updateAstronomySystem();
     updateOrbShaderStorage();
-
+    
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
         sGUI();
     }
+
+    // 5. Diagnostics Meter Trackers
     m_fpsFrameCount++;
-    float elapsed = m_fpsClock.getElapsedTime().asSeconds();
-    if (elapsed >= 0.5f) {
-        m_fps = float(m_fpsFrameCount) / elapsed;
+    if (m_fpsClock.getElapsedTime().asSeconds() >= 0.5f) {
+        m_fps = float(m_fpsFrameCount) / m_fpsClock.restart().asSeconds();
         m_fpsFrameCount = 0;
-        m_fpsClock.restart();
     }
+
+    // 6. Terminal Entity Pipeline Update (Synchronize creation/deletions at the frame boundary)
+    m_entityManager.update();
 }
 
 void Scene_IC_Camp::sDoAction(const Action& action) {
@@ -276,22 +204,24 @@ void Scene_IC_Camp::onEnter() {
     );
     m_game.setMouseCaptured(true);
     m_lastStepPhase = 0.0f;
+
+    m_game.window().setActive(true); 
+    
+    m_cameraConfig.VIEWPORT_WIDTH  = size.x;
+    m_cameraConfig.VIEWPORT_HEIGHT = size.y;
+    
+    m_gBufferWidth  = size.x;
+    m_gBufferHeight = size.y;
+    
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+    cameraData.aspectRatio = float(size.x) / float(size.y);
+    cameraData.viewportSize = size;
 }
 
 void Scene_IC_Camp::onExit() {
-    destroyGBuffer();
-    destroyShadowMap();
-    if (m_cameraUBO != 0) {
-        glDeleteBuffers(1, &m_cameraUBO);
-    }
 }
 
 void Scene_IC_Camp::onEnd() {
-    destroyGBuffer();
-    destroyShadowMap();
-    if (m_cameraUBO != 0) {
-        glDeleteBuffers(1, &m_cameraUBO);
-    }
 }
 
 HUD* Scene_IC_Camp::getHUD() const
@@ -307,165 +237,115 @@ Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const {
     };
 }
 
-void Scene_IC_Camp::sGUI()
-{
-    ImGui::Begin("Scene Properties##IC_Camp");
+void Scene_IC_Camp::initSceneConfiguration() {
+    m_topdownMaxHeight = 1000.f;
+    m_topdownWorldMin   = { 0.f, 0.f };
+    m_topdownWorldSize  = { Topography::BASE_SIZE, Topography::BASE_SIZE };
+    m_gridColour        = Theme::color("cerulean");
 
-    ImGui::Text("FPS: %.1f", m_fps);
+    sf::Vector2u windowSize        = m_game.window().getSize();
+    m_cameraConfig.VIEWPORT_WIDTH  = windowSize.x;
+    m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
+}
 
-    if (ImGui::BeginTabBar("MyTabBar"))
-    {
-        if (ImGui::BeginTabItem("Debug"))
-        {
-            ImGui::Checkbox("Draw Grid", &m_drawGrid);
-            ImGui::Checkbox("Draw Textures", &m_drawTextures);
-            ImGui::Checkbox("Draw Debug", &m_drawCollision);
-            ImGui::Checkbox("Draw Shadows", &m_debugShowShadowMap);
-            ImGui::Checkbox("Disable Texel Snap", &m_debugDisableTexelSnap);
-            ImGui::Checkbox("Show Cascade Colors", &m_debugShowCascadeColors);
-            sf::Vector2i mousePos = m_cachedMousePos;
-            sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
+void Scene_IC_Camp::initGraphicsPipelines() {
+    initializeGBuffer(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT);
+    initializeSkyCubemap();
+    initializeShadowMap(m_shadowMapSize);
+    initSSAONoiseTexture();
+    initSSAOKernel();
+    initSSAOFramebuffers();
+    initUBOs();
+}
 
-            sf::Vector3f worldPos = screenToWorld(mousePos);
-            sf::Vector2i hexCoords = WCH::worldToHex(worldPos.x, worldPos.z);
+void Scene_IC_Camp::initLevelState() {
+    m_moonTexture    = Assets::Instance().getTexture("Moon");
+    m_skyTexture     = sf::RenderTexture({m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT});
+    m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
 
-            auto& playerTransform = m_entityManager.getTransform(m_player);
-            sf::Vector3f rel = m_homeLocation3D - playerTransform.pos;
-            float dist = std::sqrt(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
+    loadLevel(m_levelPath);
+    spawnPlayer();
+    spawnCamera();
+    spawnDebugOrbs(8000);
+    m_entityManager.update();
+    initializeOrbShaderStorage();
 
-            ImGui::Text("Mouse screen: (%.1f, %.1f)", mouseScreen.x, mouseScreen.y);
-            ImGui::Text("World pos: (%.1f, %.1f, %.1f)", worldPos.x, worldPos.y, worldPos.z);
-            ImGui::Text("Hex coords: (%d, %d)", hexCoords.x, hexCoords.y);
-            ImGui::Text("Distance: %.1f", dist);
-            ImGui::Text("Camera Forward: (%.2f, %.2f, %.2f)", 
-                m_entityManager.getTransform(m_camera).forward().x,
-                m_entityManager.getTransform(m_camera).forward().y,
-                m_entityManager.getTransform(m_camera).forward().z
-            );
-            ImGui::Text("Camera Right: (%.2f, %.2f, %.2f)", 
-                m_entityManager.getTransform(m_camera).right().x,
-                m_entityManager.getTransform(m_camera).right().y,
-                m_entityManager.getTransform(m_camera).right().z
-            );
-            ImGui::Text("Camera Up: (%.2f, %.2f, %.2f)", 
-                m_entityManager.getTransform(m_camera).up().x,
-                m_entityManager.getTransform(m_camera).up().y,
-                m_entityManager.getTransform(m_camera).up().z
-            );
-            if (ImGui::Button("Reset Orientation", ImVec2(-1.0f, 0.0f))) // -1.0f spans full width of panel
-            {
-                m_entityManager.getTransform(m_player).setRotation(0.0f, 0.0f, 0.0f);
-            }
-            ImGui::Separator();
+    buildTerrainGrid();
+    buildHud();
+    
+    updateHUDData();
+    updateAstronomySystem();
 
-            ImGui::EndTabItem();
-        }
+    m_game.setMouseCaptured(true);
+    m_cursorMode = false;
+}
 
-        if (ImGui::BeginTabItem("SSAO Debug"))
-        {
-            ImGui::Checkbox("Show SSAO Blur", &m_debugShowSSAOBlur);
-            ImGui::SliderFloat("SSAO Kernel Radius", &m_debugSSAOKernelRadius, 0.1f, 100.0f);
-            ImGui::SliderFloat("SSAO Bias", &m_debugSSAOBias, 0.0001f, 1.0f);
-            ImGui::SliderInt("SSAO Sample Count", &m_sampleCount, 1, m_ssaoKernelSize);
-            ImGui::Separator();
-            ImGui::EndTabItem();
-        }
+void Scene_IC_Camp::cleanUpGraphicsResources() {
+    destroyGBuffer();
+    destroyShadowMap();
+    m_ssaoPipeline.destroy();
 
-        if (ImGui::BeginTabItem("Entity Manager"))
-        {
-            auto& m_entities = m_entityManager;
-            static std::vector<std::string> tags;
-            if (tags.size() != m_entities.getEntityMap().size() + 1)
-            {
-                tags.clear();
-                tags.push_back("ALL");
-                for (auto& [tag, entities] : m_entities.getEntityMap())
-                {
-                    tags.push_back(tag);
-                }
-            }
-            static int currentTagIndex = 0;
-            static int currentEntityIndex = 0;
-
-            const char* currentTag = tags[currentTagIndex].c_str();
-            if (ImGui::BeginCombo("Tags", currentTag))
-            {
-                for (int n = 0; n < tags.size(); n++)
-                {
-                    bool isSelected = (currentTagIndex == n);
-                    if (ImGui::Selectable(tags[n].c_str(), isSelected))
-                    {
-                        currentTagIndex = n;
-                        currentEntityIndex = 0;
-                    }
-                    if (isSelected)
-                        ImGui::SetItemDefaultFocus();
-                }
-                ImGui::EndCombo();
-            }
-            std::vector<SoAEntityHandle> entities;
-            if (tags[currentTagIndex] == "ALL") entities = m_entityManager.getEntities();
-            else entities = m_entityManager.getEntities(tags[currentTagIndex]);
-            if (!entities.empty())
-            {
-                std::vector<std::string> entityLabels;
-                for (auto e : entities)
-                {
-                    entityLabels.push_back(m_entityManager.getTag(e) + " " + std::to_string(int(e.index)) + " " + std::to_string(int(1)) + "," + std::to_string(int(0)));
-                }
-                const char* currentEntity = entityLabels[currentEntityIndex].c_str();
-                if (ImGui::BeginCombo("Entities", currentEntity))
-                {
-                    for (int n = 0; n < entityLabels.size(); n++)
-                    {
-                        bool isSelected = (currentEntityIndex == n);
-                        if (ImGui::Selectable(entityLabels[n].c_str(), isSelected))
-                            currentEntityIndex = n;
-                        if (isSelected)
-                            ImGui::SetItemDefaultFocus();
-                    }
-                    ImGui::EndCombo();
-                }
-                if (!entities.empty())
-                {
-                    auto entity = entities[currentEntityIndex];
-                    ImGui::Text("ID: %d", int(entity.index));
-                    ImGui::Text("Tag: %s", m_entityManager.getTag(entity).c_str());
-                    ImGui::Button("Destroy Entity");
-                    if (ImGui::IsItemClicked())
-                    {
-                        if (m_entityManager.getTag(entity) != "player")
-                        {
-                            m_entityManager.destroyEntity(entity);
-                            currentEntityIndex = 0;
-                        }
-                    }
-                }
-            }
-            ImGui::Separator();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Time and Date"))
-        {
-            bool changed = false;
-            float timeOfDayF = static_cast<float>(m_gameTimeOfDay);
-            if (ImGui::SliderFloat("Time of Day (hours)", &timeOfDayF, 0.0f, 24.0f))
-            {
-                m_gameTimeOfDay = static_cast<double>(timeOfDayF);
-                changed = true;
-            }
-            changed |= ImGui::SliderFloat("Latitude", &m_latitude, -90.0f, 90.0f);
-            if (changed) {
-                updateSiderealTime();
-                updateSunPosition();
-                updateStarRotation();
-                updateMoonPosition();
-            }
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
+    if (m_skyCubemapHandle != 0) {
+        glDeleteTextures(1, &m_skyCubemapHandle);
+        m_skyCubemapHandle = 0;
     }
-    ImGui::End();
+
+    if (m_cameraUBO != 0) {
+        glDeleteBuffers(1, &m_cameraUBO);
+        m_cameraUBO = 0;
+    }
+    if (m_envUBO != 0) {
+        glDeleteBuffers(1, &m_envUBO);
+        m_envUBO = 0;
+    }
+    if (m_atmoUBO != 0) {
+        glDeleteBuffers(1, &m_atmoUBO);
+        m_atmoUBO = 0;
+    }
+
+    if (m_gridVAO != 0) {
+        glDeleteVertexArrays(1, &m_gridVAO);
+        m_gridVAO = 0;
+    }
+    if (m_gridVBO != 0) {
+        glDeleteBuffers(1, &m_gridVBO);
+        m_gridVBO = 0;
+    }
+    if (m_gridEBO != 0) {
+        glDeleteBuffers(1, &m_gridEBO);
+        m_gridEBO = 0;
+    }
+
+    if (m_cubeVAO != 0) {
+        glDeleteVertexArrays(1, &m_cubeVAO);
+        m_cubeVAO = 0;
+    }
+    if (m_cubeVBO != 0) {
+        glDeleteBuffers(1, &m_cubeVBO);
+        m_cubeVBO = 0;
+    }
+    if (m_cubeEBO != 0) {
+        glDeleteBuffers(1, &m_cubeEBO);
+        m_cubeEBO = 0;
+    }
+
+    if (m_blitVAO != 0) {
+        glDeleteVertexArrays(1, &m_blitVAO);
+        m_blitVAO = 0;
+    }
+    if (m_blitVBO != 0) {
+        glDeleteBuffers(1, &m_blitVBO);
+        m_blitVBO = 0;
+    }
+
+    if (m_lightingVAO != 0) {
+        glDeleteVertexArrays(1, &m_lightingVAO);
+        m_lightingVAO = 0;
+    }
+    if (m_lightingVBO != 0) {
+        glDeleteBuffers(1, &m_lightingVBO);
+        m_lightingVBO = 0;
+    }
 }
 
 void Scene_IC_Camp::sRender() {
@@ -543,7 +423,7 @@ void Scene_IC_Camp::sRender() {
     window.setActive(true);
 
     if (m_debugShowSSAOBlur) {
-        blitToScreen(m_ssaoBlurTex);
+        blitToScreen(m_ssaoPipeline.blurTex);
     } else {
         deferredLighting();
     }
@@ -869,61 +749,17 @@ void Scene_IC_Camp::updateBob(SoAEntityHandle e, float dt, float horizSpeed=0.0f
 // Astronomy & Time Systems
 // =========================================================================
 
-void Scene_IC_Camp::updateSiderealTime()
+void Scene_IC_Camp::updateAstronomySystem()
 {
-    auto result = Astro::computeSiderealTime(
-        m_gameYear,
-        m_gameMonth,
-        m_gameDayOfMonth,
-        m_gameTimeOfDay,
+    // The scene remains the master of its data variables, 
+    // but the Astro domain handles the heavy lifting instantly.
+    m_astroState = Astro::calculateState(
+        m_gameYear, 
+        m_gameMonth, 
+        m_gameDayOfMonth, 
+        m_gameTimeOfDay, 
+        m_latitude, 
         m_longitude
-    );
-
-    m_astroState.astroTime   = result.astroTime;
-    m_astroState.epochOffset = result.epochOffset;
-}
-
-void Scene_IC_Camp::updateSunPosition()
-{
-    float declination  = Astro::solarDeclination(m_gameMonth, m_gameDayOfMonth);
-    float haDeg        = (m_gameTimeOfDay / 24.0f - 0.5f) * 360.0f;
-
-    auto altaz = Astro::computeAltAz(
-        Astro::toRad(haDeg),
-        Astro::toRad(declination),
-        Astro::toRad(m_latitude)
-    );
-
-    m_astroState.sunDirection = Astro::altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
-
-    // === Sun Color & Intensity ===
-    float elevationDeg    = Astro::toDeg(altaz.elevationRad);
-    float sunHeightFactor = std::clamp((elevationDeg + 12.0f) / 90.0f, 0.0f, 1.0f);
-    float warmth          = 1.0f - sunHeightFactor * 0.75f;
-
-    m_astroState.sunColor = sf::Glsl::Vec4(
-        1.00f,
-        0.90f + warmth * 0.10f,
-        0.65f + warmth * 0.30f,
-        sunHeightFactor * 1.25f + 0.25f
-    );
-}
-
-void Scene_IC_Camp::updateStarRotation()
-{
-    Astro::computeStarRotationMatrix(
-        m_latitude,
-        m_longitude,
-        m_astroState.epochOffset,
-        m_astroState.starRotationMatrix
-    );
-}
-
-void Scene_IC_Camp::updateMoonPosition()
-{
-    m_astroState.moonDirection = Astro::computeMoonDirection(
-        m_astroState.astroTime,
-        m_latitude
     );
 }
 
@@ -1020,24 +856,17 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
                                    const CEyes& eyes,
                                    float yawRad, int species)
 {
-    // 1. Calculate the spatial data right now (no change here)
     const sf::Vector2f groundXZ = WCH::hexToWorld(hexQ, hexR);
     const float        groundY  = heightAt(groundXZ.x, groundXZ.y);
     const float        hoverY   = groundY + radius;
 
     CTransform3D t(sf::Vector3f(groundXZ.x, hoverY, groundXZ.y));
     
-    // =========================================================================
-    // UPGRADE: Convert the initial yaw from radians to your quaternion orientation.
-    // (Pitch = 0.0f, Yaw = converted to degrees, Roll = 0.0f)
-    // =========================================================================
     float yawDeg = yawRad * (180.f / 3.14159265f);
     t.setRotation(0.0f, yawDeg, 0.0f);
 
-    // 2. Queue the spawn and pass a lambda to handle the lazy initialization
     m_entityManager.queueSpawn("orb", [=](SoAEntityHandle orb, EntityManager& em) 
     {
-        // This code executes safely during the main thread sync phase!
         em.addTransform(orb, t);
         em.addOrb(orb, COrb(radius));
         em.addBob(orb, CBob(bobRate, bobMagnitude, 0.0f));
@@ -1048,8 +877,7 @@ void Scene_IC_Camp::spawnOrbFauna(int hexQ, int hexR, float radius,
 
 void Scene_IC_Camp::spawnDebugOrbs(int count)
 {
-    // 1. Random Number Engine Setup
-    std::mt19937 rng(1337); // Seeded for consistency
+    std::mt19937 rng(1337);
     
     // Extents are -3000 to 3000 tiles. 
     std::uniform_int_distribution<int> hexDist(-3000, 3000);
@@ -1090,7 +918,6 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     while (spawned < count && attempts < maxAttempts)
     {
         ++attempts;
-        // Generate a random hex coordinate
         int hexQ = hexDist(rng) + m_playerConfig.POSITION_X;
         int hexR = hexDist(rng) + m_playerConfig.POSITION_Z;
 
@@ -1101,7 +928,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         float radius           = radiusDist(rng);
         float bobRate          = bobRateDist(rng);
         float bobMag           = bobMagDist(rng);
-        float yaw              = yawDist(rng); // Radians match perfectly
+        float yaw              = yawDist(rng);
         int species            = speciesDist(rng);
 
         sf::Vector2f gazeDirection = { gazeDist(rng), gazeDist(rng) };
@@ -1116,13 +943,13 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         eyes.pupilDilation = dilationDist(rng);
         eyes.eyelidClosure = closureDist(rng);
 
-        // Passed safely over to be handled inside spawnOrbFauna
         spawnOrbFauna(hexQ, hexR, radius, bobRate, bobMag, eyes, yaw, species);
         ++spawned;
     }
 }
 
-void Scene_IC_Camp::buildTerrainGrid() {
+void Scene_IC_Camp::buildTerrainGrid() 
+{
     const int W = Topography::GRID_RESOLUTION;
     const int H = Topography::GRID_RESOLUTION;
 
@@ -1131,7 +958,6 @@ void Scene_IC_Camp::buildTerrainGrid() {
 
     for (int row = 0; row < H; ++row) {
         for (int col = 0; col < W; ++col) {
-            // Generate a normalized coordinate mapping from 0.0 to 1.0
             float u = col / float(W - 1);
             float v = row / float(H - 1);
             
@@ -1347,7 +1173,8 @@ void Scene_IC_Camp::initializeSkyCubemap()
         std::cerr << "Sky cubemap 'NightSky' not found in Assets; falling back to procedural sky." << std::endl;
 }
 
-void Scene_IC_Camp::initializeShadowMap(unsigned int size) {
+void Scene_IC_Camp::initializeShadowMap(unsigned int size) 
+{
     m_shadowMapSize = size;
 
     glGenTextures(1, &m_shadowDepthTexArray);
@@ -1355,15 +1182,9 @@ void Scene_IC_Camp::initializeShadowMap(unsigned int size) {
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F,
                  size, size, NUM_CASCADES, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
 
-    // --- 1. CHANGE TO LINEAR FILTERS ---
-    // Hardware PCF requires linear filtering parameters so the GPU knows it 
-    // is allowed to interpolate between neighboring depth comparison results.
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    // --- 2. ENABLE SHADOW COMPARISON MODE ---
-    // This tells the texture unit to treat this texture as a shadow map, changing
-    // its behavior from returning raw depth to returning a PCF-blended visibility factor.
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 
@@ -1379,7 +1200,8 @@ void Scene_IC_Camp::initializeShadowMap(unsigned int size) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::destroyShadowMap() {
+void Scene_IC_Camp::destroyShadowMap() 
+{
     if (m_shadowFBO) {
         glDeleteFramebuffers(1, &m_shadowFBO);
         glDeleteTextures(1, &m_shadowDepthTexArray);
@@ -1388,7 +1210,8 @@ void Scene_IC_Camp::destroyShadowMap() {
     }
 }
 
-float Scene_IC_Camp::computeDistanceToMapFarCorner(const glm::vec3& camPos) const {
+float Scene_IC_Camp::computeDistanceToMapFarCorner(const glm::vec3& camPos) const 
+{
     glm::vec2 camPosXZ(camPos.x, camPos.z);
     glm::vec2 mapMin(m_topdownWorldMin.x, m_topdownWorldMin.y);
     glm::vec2 mapMax = mapMin + glm::vec2(m_topdownWorldSize.x, m_topdownWorldSize.y);
@@ -1405,7 +1228,8 @@ float Scene_IC_Camp::computeDistanceToMapFarCorner(const glm::vec3& camPos) cons
     return maxDist;
 }
 
-void Scene_IC_Camp::computeCascadeSplits(float camNear, float camFar) {
+void Scene_IC_Camp::computeCascadeSplits(float camNear, float camFar) 
+{
     for (int i = 0; i < NUM_CASCADES; ++i) {
         float p = float(i + 1) / float(NUM_CASCADES);
         float logSplit     = camNear * std::pow(camFar / camNear, p);
@@ -1421,45 +1245,26 @@ void Scene_IC_Camp::computeCascadeSplits(float camNear, float camFar) {
         std::max(mapEdgeDist, m_cascadeSplits[NUM_CASCADES - 2] + 1.0f);
 }
 
-glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float splitFar, float& lightDepthRange, float& texelWorldSize) const {
-    glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection));
-    glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
-                                                      : glm::vec3(0.f, 1.f, 0.f);
+glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float splitFar, float& lightDepthRange, float& texelWorldSize) const 
+{
+    glm::vec3 sunDir  = glm::normalize(toGLMVec3(m_astroState.sunDirection));
+    glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 1.f, 0.f);
     glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), -sunDir, worldUp);
 
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& camData      = m_entityManager.getCamera(m_camera);
 
-    // Build a sub-frustum covering only [splitNear, splitFar] of the camera's view.
-    CCamera subFrustumCamData = camData;
-    subFrustumCamData.nearPlane = splitNear;
-    subFrustumCamData.farPlane  = splitFar;
-
-    auto vp = Camera::getVPMatrix(camTransform, subFrustumCamData);
-    glm::mat4 camVP    = glm::make_mat4(vp.data());
-    glm::mat4 camInvVP = glm::inverse(camVP);
-
-    static const glm::vec3 ndcCorners[8] = {
-        {-1,-1, 0}, { 1,-1, 0}, { 1, 1, 0}, {-1, 1, 0},
-        {-1,-1, 1}, { 1,-1, 1}, { 1, 1, 1}, {-1, 1, 1},
-    };
-
-    glm::vec3 worldCorners[8];
-    glm::vec3 centroid(0.0f);
-    for (int i = 0; i < 8; ++i) {
-        glm::vec4 p = camInvVP * glm::vec4(ndcCorners[i], 1.0f);
-        worldCorners[i] = glm::vec3(p) / p.w;
-        centroid += worldCorners[i];
-    }
-    centroid /= 8.0f;
-
-    float radius = 0.0f;
-    for (int i = 0; i < 8; ++i)
-        radius = std::max(radius, glm::length(worldCorners[i] - centroid));
+    // Call your native custom tracking code cleanly
+    sf::Vector3f centroidSF;
+    float radius;
+    Camera::getFrustumBoundingSphere(camTransform, camData, splitNear, splitFar, centroidSF, radius);
     radius += m_shadowFrustumPadding;
 
+    glm::vec3 centroid = glm::vec3(centroidSF.x, centroidSF.y, centroidSF.z);
+
+    // Snapping logic remains exactly the same
     float worldUnitsPerTexel = (radius * 2.0f) / float(m_shadowMapSize);
-    texelWorldSize = worldUnitsPerTexel; // NEW: stash this before nearExtension distorts anything
+    texelWorldSize = worldUnitsPerTexel; 
 
     glm::vec3 centroidLS = glm::vec3(lightView * glm::vec4(centroid, 1.0f));
     centroidLS.x = std::floor(centroidLS.x / worldUnitsPerTexel) * worldUnitsPerTexel;
@@ -1468,19 +1273,21 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForRange(float splitNear, float spl
     float nearExtension = m_shadowFrustumPadding * 20.0f;
     centroidLS.z += radius + nearExtension;
 
-    glm::mat4 lightViewInv = glm::inverse(lightView);
-    glm::vec3 eyeWorldPos  = glm::vec3(lightViewInv * glm::vec4(centroidLS, 1.0f));
+    glm::vec3 eyeWorldPos    = glm::vec3(glm::inverse(lightView) * glm::vec4(centroidLS, 1.0f));
     glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos - sunDir, worldUp);
 
-    float farDist = radius * 2.0f + nearExtension;
+    float farDist   = radius * 2.0f + nearExtension;
     lightDepthRange = farDist;
-    return glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist) * finalLightView;
+
+    // Fetch the raw flat orthographic matrix array and cast to GLM instantly via make_mat4
+    std::array<float, 16> orthoProjRaw = Camera::getOrthoMatrix(-radius, radius, -radius, radius, 0.0f, farDist);
+    return glm::make_mat4(orthoProjRaw.data()) * finalLightView;
 }
 
-glm::mat4 Scene_IC_Camp::computeLightViewProjForMapBounds(float& lightDepthRange, float& texelWorldSize) const {
-    glm::vec3 sunDir = glm::normalize(toGLMVec3(m_astroState.sunDirection));
-    glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f)
-                                                      : glm::vec3(0.f, 1.f, 0.f);
+glm::mat4 Scene_IC_Camp::computeLightViewProjForMapBounds(float& lightDepthRange, float& texelWorldSize) const 
+{
+    glm::vec3 sunDir  = glm::normalize(toGLMVec3(m_astroState.sunDirection));
+    glm::vec3 worldUp = (std::abs(sunDir.y) > 0.99f) ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 1.f, 0.f);
     glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), -sunDir, worldUp);
 
     glm::vec2 mapMin(m_topdownWorldMin.x, m_topdownWorldMin.y);
@@ -1500,8 +1307,9 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForMapBounds(float& lightDepthRange
     centroid /= 8.0f;
 
     float radius = 0.0f;
-    for (auto& c : worldCorners)
+    for (auto& c : worldCorners) {
         radius = std::max(radius, glm::length(c - centroid));
+    }
     radius += m_shadowFrustumPadding;
 
     float worldUnitsPerTexel = (radius * 2.0f) / float(m_shadowMapSize);
@@ -1514,16 +1322,18 @@ glm::mat4 Scene_IC_Camp::computeLightViewProjForMapBounds(float& lightDepthRange
     float nearExtension = m_shadowFrustumPadding * 20.0f;
     centroidLS.z += radius + nearExtension;
 
-    glm::mat4 lightViewInv = glm::inverse(lightView);
-    glm::vec3 eyeWorldPos  = glm::vec3(lightViewInv * glm::vec4(centroidLS, 1.0f));
+    glm::vec3 eyeWorldPos    = glm::vec3(glm::inverse(lightView) * glm::vec4(centroidLS, 1.0f));
     glm::mat4 finalLightView = glm::lookAt(eyeWorldPos, eyeWorldPos - sunDir, worldUp);
 
-    float farDist = radius * 2.0f + nearExtension;
+    float farDist   = radius * 2.0f + nearExtension;
     lightDepthRange = farDist;
-    return glm::ortho(-radius, radius, -radius, radius, 0.0f, farDist) * finalLightView;
+
+    std::array<float, 16> orthoProjRaw = Camera::getOrthoMatrix(-radius, radius, -radius, radius, 0.0f, farDist);
+    return glm::make_mat4(orthoProjRaw.data()) * finalLightView;
 }
 
-void Scene_IC_Camp::runShadowPass() {
+void Scene_IC_Camp::runShadowPass() 
+{
     auto& camData = m_entityManager.getCamera(m_camera);
     
     // 1. Calculate cascade distributions based on our camera properties
@@ -1591,8 +1401,6 @@ void Scene_IC_Camp::runShadowPass() {
             glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
                             1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
             
-            // REMOVED: u_lightDir uniform dispatch (Going to be read natively via Environment/Astro state)
-            
             m_orbSSBO.bind(0);
             glBindVertexArray(m_cubeVAO);
             glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
@@ -1605,7 +1413,8 @@ void Scene_IC_Camp::runShadowPass() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::initSSAOKernel() {
+void Scene_IC_Camp::initSSAOKernel() 
+{
     std::uniform_real_distribution<float> randomFloats(0.0f, 1.0f);
     std::default_random_engine generator;
 
@@ -1637,15 +1446,16 @@ void Scene_IC_Camp::initSSAOKernel() {
     }
 }
 
-void Scene_IC_Camp::initSSAOFramebuffers() {
+void Scene_IC_Camp::initSSAOFramebuffers() 
+{
     // -------------------------------------------------------------------------
     // 1. RAW SSAO FRAMEBUFFER
     // -------------------------------------------------------------------------
-    glGenFramebuffers(1, &m_ssaoFBO);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoFBO);
+    glGenFramebuffers(1, &m_ssaoPipeline.fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoPipeline.fbo);
 
-    glGenTextures(1, &m_ssaoColorTex);
-    glBindTexture(GL_TEXTURE_2D, m_ssaoColorTex);
+    glGenTextures(1, &m_ssaoPipeline.colorTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.colorTex);
     
     // SSAO only needs a single grayscale channel. GL_RED or GL_R8 is perfect and fast.
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, m_gBufferWidth, m_gBufferHeight, 0, GL_RED, GL_FLOAT, nullptr);
@@ -1653,7 +1463,7 @@ void Scene_IC_Camp::initSSAOFramebuffers() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     
     // Attach texture to the FBO
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ssaoColorTex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ssaoPipeline.colorTex, 0);
 
     // Verify FBO is complete
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
@@ -1663,18 +1473,18 @@ void Scene_IC_Camp::initSSAOFramebuffers() {
     // -------------------------------------------------------------------------
     // 2. SSAO BLUR FRAMEBUFFER
     // -------------------------------------------------------------------------
-    glGenFramebuffers(1, &m_ssaoBlurFBO);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoBlurFBO);
+    glGenFramebuffers(1, &m_ssaoPipeline.blurFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoPipeline.blurFBO);
 
-    glGenTextures(1, &m_ssaoBlurTex);
-    glBindTexture(GL_TEXTURE_2D, m_ssaoBlurTex);
+    glGenTextures(1, &m_ssaoPipeline.blurTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.blurTex);
     
     // Same single-channel setup for the blurred result
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, m_gBufferWidth, m_gBufferHeight, 0, GL_RED, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ssaoBlurTex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ssaoPipeline.blurTex, 0);
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         std::cout << "SSAO Blur Framebuffer not complete!" << std::endl;
@@ -1684,7 +1494,8 @@ void Scene_IC_Camp::initSSAOFramebuffers() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::initUBOs() {
+void Scene_IC_Camp::initUBOs() 
+{
     // 1. Generate the buffer object
     glGenBuffers(1, &m_cameraUBO);
     
@@ -1716,7 +1527,8 @@ void Scene_IC_Camp::initUBOs() {
     glBindBufferBase(GL_UNIFORM_BUFFER, 2, m_atmoUBO);
 }
 
-void Scene_IC_Camp::initSSAONoiseTexture() {
+void Scene_IC_Camp::initSSAONoiseTexture() 
+{
     std::uniform_real_distribution<float> randomFloats(0.0f, 1.0f);
     std::default_random_engine generator;
 
@@ -1732,8 +1544,8 @@ void Scene_IC_Camp::initSSAONoiseTexture() {
     }
 
     // Generate the OpenGL texture
-    glGenTextures(1, &m_ssaoNoiseTex);
-    glBindTexture(GL_TEXTURE_2D, m_ssaoNoiseTex);
+    glGenTextures(1, &m_ssaoPipeline.noiseTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.noiseTex);
     
     // Upload raw float data (3 channels: RGB)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, 4, 4, 0, GL_RGB, GL_FLOAT, &ssaoNoise[0].x);
@@ -1747,7 +1559,8 @@ void Scene_IC_Camp::initSSAONoiseTexture() {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void Scene_IC_Camp::uploadViewRays(GLuint shaderProgram) {
+void Scene_IC_Camp::uploadViewRays(GLuint shaderProgram) 
+{
     // Grab your camera properties
     auto cameraData = m_entityManager.getCamera(m_camera);
     float fov = cameraData.fovY; // in degrees
@@ -1767,8 +1580,9 @@ void Scene_IC_Camp::uploadViewRays(GLuint shaderProgram) {
     glUniform3f(glGetUniformLocation(shaderProgram, "u_farBottomRight"), farWidth, -farHeight, -farPlane);
 }
 
-void Scene_IC_Camp::runSSAOPass() {
-    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoFBO);
+void Scene_IC_Camp::runSSAOPass() 
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoPipeline.fbo);
     glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
@@ -1785,7 +1599,7 @@ void Scene_IC_Camp::runSSAOPass() {
     glUniform1i(glGetUniformLocation(m_ssao, "u_gDepth"), 1);
 
     glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_ssaoNoiseTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.noiseTex);
     glUniform1i(glGetUniformLocation(m_ssao, "u_texNoise"), 2);
 
     // 2. Upload Kernel & Structural Parameters
@@ -1804,8 +1618,9 @@ void Scene_IC_Camp::runSSAOPass() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::runSSAOBlurPass() {
-    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoBlurFBO);
+void Scene_IC_Camp::runSSAOBlurPass() 
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoPipeline.blurFBO);
     glViewport(0, 0, m_gBufferWidth, m_gBufferHeight);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -1813,7 +1628,7 @@ void Scene_IC_Camp::runSSAOBlurPass() {
 
     // 1. Bind Input Texture Contexts
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_ssaoColorTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.colorTex);
     glUniform1i(glGetUniformLocation(m_ssao_blur, "u_ssaoInput"), 0);
 
     glActiveTexture(GL_TEXTURE1);
@@ -1833,7 +1648,8 @@ void Scene_IC_Camp::runSSAOBlurPass() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::initializeGBuffer(unsigned int width, unsigned int height) {
+void Scene_IC_Camp::initializeGBuffer(unsigned int width, unsigned int height) 
+{
     m_gBufferWidth = width;
     m_gBufferHeight = height;
 
@@ -1888,7 +1704,8 @@ void Scene_IC_Camp::initializeGBuffer(unsigned int width, unsigned int height) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::destroyGBuffer() {
+void Scene_IC_Camp::destroyGBuffer() 
+{
     if (m_gBufferFBO) {
         glDeleteFramebuffers(1, &m_gBufferFBO);
         glDeleteTextures(1, &m_gAlbedoTex);
@@ -1945,7 +1762,8 @@ void Scene_IC_Camp::updateOrbShaderStorage()
         m_orbSSBO.update(orbData);
 }
 
-void Scene_IC_Camp::runTerrainPass() {
+void Scene_IC_Camp::runTerrainPass() 
+{
     sf::Vector2i hex(-1, -1);
     if (m_cursorMode) {
         sf::Vector3f worldPos = screenToWorld(m_cachedMousePos);
@@ -2164,7 +1982,7 @@ void Scene_IC_Camp::deferredLighting()
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_shadowMap"), 5);
 
     glActiveTexture(GL_TEXTURE6);
-    glBindTexture(GL_TEXTURE_2D, m_ssaoBlurTex);
+    glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.blurTex);
     glUniform1i(glGetUniformLocation(m_lightingProgram, "u_ssaoTex"), 6);
 
     // =========================================================================
@@ -2254,7 +2072,8 @@ void Scene_IC_Camp::blitToScreen(GLuint tex)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void Scene_IC_Camp::renderSky() {
+void Scene_IC_Camp::renderSky() 
+{
     m_skyTexture.clear(sf::Color::Transparent);
     m_skyTexture.setActive(true); 
 
@@ -2315,7 +2134,8 @@ void Scene_IC_Camp::updateOrbBobbing(SoAEntityHandle e, float dt)
 // Coordinate and Color Utilities
 // =========================================================================
 
-sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
+sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) 
+{
     return sf::Glsl::Vec3(
         color.r / 255.0f,
         color.g / 255.0f,
@@ -2323,7 +2143,8 @@ sf::Glsl::Vec3 Scene_IC_Camp::colorToShader(const sf::Color& color) {
     );
 }
 
-sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
+sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const 
+{
     if (!m_cursorMode) {
         return { 0.f, 0.f, 0.f };
     }
@@ -2401,7 +2222,166 @@ sf::Vector3f Scene_IC_Camp::screenToWorld(sf::Vector2i position) const {
     };
 }
 
-float Scene_IC_Camp::getCameraHeightAboveGround(const sf::Vector3f& camPos) const {
+float Scene_IC_Camp::getCameraHeightAboveGround(const sf::Vector3f& camPos) const 
+{
     float groundHeight = heightAt(camPos.x, camPos.z);
     return camPos.y - groundHeight;
+}
+
+void Scene_IC_Camp::sGUI()
+{
+    ImGui::Begin("Scene Properties##IC_Camp");
+
+    ImGui::Text("FPS: %.1f", m_fps);
+
+    if (ImGui::BeginTabBar("MyTabBar"))
+    {
+        if (ImGui::BeginTabItem("Debug"))
+        {
+            ImGui::Checkbox("Draw Grid", &m_drawGrid);
+            ImGui::Checkbox("Draw Textures", &m_drawTextures);
+            ImGui::Checkbox("Draw Debug", &m_drawCollision);
+            ImGui::Checkbox("Draw Shadows", &m_debugShowShadowMap);
+            ImGui::Checkbox("Disable Texel Snap", &m_debugDisableTexelSnap);
+            ImGui::Checkbox("Show Cascade Colors", &m_debugShowCascadeColors);
+            sf::Vector2i mousePos = m_cachedMousePos;
+            sf::Vector2f mouseScreen(float(mousePos.x), float(mousePos.y));
+
+            sf::Vector3f worldPos = screenToWorld(mousePos);
+            sf::Vector2i hexCoords = WCH::worldToHex(worldPos.x, worldPos.z);
+
+            auto& playerTransform = m_entityManager.getTransform(m_player);
+            sf::Vector3f rel = m_homeLocation3D - playerTransform.pos;
+            float dist = std::sqrt(rel.x*rel.x + rel.y*rel.y + rel.z*rel.z);
+
+            ImGui::Text("Mouse screen: (%.1f, %.1f)", mouseScreen.x, mouseScreen.y);
+            ImGui::Text("World pos: (%.1f, %.1f, %.1f)", worldPos.x, worldPos.y, worldPos.z);
+            ImGui::Text("Hex coords: (%d, %d)", hexCoords.x, hexCoords.y);
+            ImGui::Text("Distance: %.1f", dist);
+            ImGui::Text("Camera Forward: (%.2f, %.2f, %.2f)", 
+                m_entityManager.getTransform(m_camera).forward().x,
+                m_entityManager.getTransform(m_camera).forward().y,
+                m_entityManager.getTransform(m_camera).forward().z
+            );
+            ImGui::Text("Camera Right: (%.2f, %.2f, %.2f)", 
+                m_entityManager.getTransform(m_camera).right().x,
+                m_entityManager.getTransform(m_camera).right().y,
+                m_entityManager.getTransform(m_camera).right().z
+            );
+            ImGui::Text("Camera Up: (%.2f, %.2f, %.2f)", 
+                m_entityManager.getTransform(m_camera).up().x,
+                m_entityManager.getTransform(m_camera).up().y,
+                m_entityManager.getTransform(m_camera).up().z
+            );
+            if (ImGui::Button("Reset Orientation", ImVec2(-1.0f, 0.0f))) // -1.0f spans full width of panel
+            {
+                m_entityManager.getTransform(m_player).setRotation(0.0f, 0.0f, 0.0f);
+            }
+            ImGui::Separator();
+
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("SSAO Debug"))
+        {
+            ImGui::Checkbox("Show SSAO Blur", &m_debugShowSSAOBlur);
+            ImGui::SliderFloat("SSAO Kernel Radius", &m_debugSSAOKernelRadius, 0.1f, 100.0f);
+            ImGui::SliderFloat("SSAO Bias", &m_debugSSAOBias, 0.0001f, 1.0f);
+            ImGui::SliderInt("SSAO Sample Count", &m_sampleCount, 1, m_ssaoKernelSize);
+            ImGui::Separator();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Entity Manager"))
+        {
+            auto& m_entities = m_entityManager;
+            static std::vector<std::string> tags;
+            if (tags.size() != m_entities.getEntityMap().size() + 1)
+            {
+                tags.clear();
+                tags.push_back("ALL");
+                for (auto& [tag, entities] : m_entities.getEntityMap())
+                {
+                    tags.push_back(tag);
+                }
+            }
+            static int currentTagIndex = 0;
+            static int currentEntityIndex = 0;
+
+            const char* currentTag = tags[currentTagIndex].c_str();
+            if (ImGui::BeginCombo("Tags", currentTag))
+            {
+                for (int n = 0; n < tags.size(); n++)
+                {
+                    bool isSelected = (currentTagIndex == n);
+                    if (ImGui::Selectable(tags[n].c_str(), isSelected))
+                    {
+                        currentTagIndex = n;
+                        currentEntityIndex = 0;
+                    }
+                    if (isSelected)
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            std::vector<SoAEntityHandle> entities;
+            if (tags[currentTagIndex] == "ALL") entities = m_entityManager.getEntities();
+            else entities = m_entityManager.getEntities(tags[currentTagIndex]);
+            if (!entities.empty())
+            {
+                std::vector<std::string> entityLabels;
+                for (auto e : entities)
+                {
+                    entityLabels.push_back(m_entityManager.getTag(e) + " " + std::to_string(int(e.index)) + " " + std::to_string(int(1)) + "," + std::to_string(int(0)));
+                }
+                const char* currentEntity = entityLabels[currentEntityIndex].c_str();
+                if (ImGui::BeginCombo("Entities", currentEntity))
+                {
+                    for (int n = 0; n < entityLabels.size(); n++)
+                    {
+                        bool isSelected = (currentEntityIndex == n);
+                        if (ImGui::Selectable(entityLabels[n].c_str(), isSelected))
+                            currentEntityIndex = n;
+                        if (isSelected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+                if (!entities.empty())
+                {
+                    auto entity = entities[currentEntityIndex];
+                    ImGui::Text("ID: %d", int(entity.index));
+                    ImGui::Text("Tag: %s", m_entityManager.getTag(entity).c_str());
+                    ImGui::Button("Destroy Entity");
+                    if (ImGui::IsItemClicked())
+                    {
+                        if (m_entityManager.getTag(entity) != "player")
+                        {
+                            m_entityManager.destroyEntity(entity);
+                            currentEntityIndex = 0;
+                        }
+                    }
+                }
+            }
+            ImGui::Separator();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Time and Date"))
+        {
+            bool changed = false;
+            float timeOfDayF = static_cast<float>(m_gameTimeOfDay);
+            if (ImGui::SliderFloat("Time of Day (hours)", &timeOfDayF, 0.0f, 24.0f))
+            {
+                m_gameTimeOfDay = static_cast<double>(timeOfDayF);
+                changed = true;
+            }
+            changed |= ImGui::SliderFloat("Latitude", &m_latitude, -90.0f, 90.0f);
+            if (changed) {
+                updateAstronomySystem();
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::End();
 }

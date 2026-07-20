@@ -25,7 +25,7 @@ void Scene_Menu::init()
            
     m_title = "NOM-NOM-CO";
     m_menuStrings.push_back("New Game");
-    m_menuStrings.push_back("Load Game");
+    m_menuStrings.push_back("Resume Game");
     m_menuStrings.push_back("Options");
 
     m_menuBackground.loadFromFile("images/IC_Title.png");
@@ -67,6 +67,7 @@ void Scene_Menu::activateSelectedMenuItem()
             m_game.changeScene("CAMP", std::make_shared<Scene_IC_Camp>(m_game, "open_world.txt"), false, false);
             break;
         case 1:
+            m_game.changeScene("CAMP", nullptr, false, false);
             break;
         case 2:
             break;

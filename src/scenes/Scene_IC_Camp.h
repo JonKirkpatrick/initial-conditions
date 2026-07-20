@@ -31,6 +31,23 @@ class Scene_IC_Camp : public Scene {
 
     enum class HeadlightState { Off, On, Auto };
 
+    struct SSAOPipeline {
+        GLuint fbo = 0;
+        GLuint blurFBO = 0;
+        GLuint colorTex = 0;
+        GLuint blurTex = 0;
+        GLuint noiseTex = 0;
+
+        void destroy() {
+            if (fbo)     glDeleteFramebuffers(1, &fbo);
+            if (blurFBO) glDeleteFramebuffers(1, &blurFBO);
+            if (colorTex) glDeleteTextures(1, &colorTex);
+            if (blurTex)  glDeleteTextures(1, &blurTex);
+            if (noiseTex) glDeleteTextures(1, &noiseTex);
+            fbo = blurFBO = colorTex = blurTex = noiseTex = 0;
+        }
+    };
+
 protected:
 
     // =========================================================================
@@ -113,11 +130,7 @@ protected:
     unsigned int        m_gBufferHeight         = 0;
 
     // SSAO Textures and Framebuffers
-    GLuint              m_ssaoFBO               = 0;
-    GLuint              m_ssaoBlurFBO           = 0;
-    GLuint              m_ssaoColorTex          = 0;
-    GLuint              m_ssaoBlurTex           = 0;
-    GLuint              m_ssaoNoiseTex          = 0; // If using a random rotation noise texture
+    SSAOPipeline        m_ssaoPipeline;
     std::vector<sf::Glsl::Vec3> m_ssaoKernel;
 
     // Uniform Buffer Objects (UBOs) for camera and lighting data
@@ -262,6 +275,10 @@ protected:
     void initializeShadowMap(unsigned int size);
     void destroyShadowMap();
     void initUBOs();
+    void initSceneConfiguration();
+    void initGraphicsPipelines();
+    void initLevelState();
+    void cleanUpGraphicsResources();
 
     // =========================================================================
     // Per-Frame Updates
@@ -270,10 +287,7 @@ protected:
     void updateCamera(float dt);
     void updateHUDData();
     void updateMinimapTexture();
-    void updateSiderealTime();
-    void updateSunPosition();
-    void updateStarRotation();
-    void updateMoonPosition();
+    void updateAstronomySystem();
     void updateBob(SoAEntityHandle e, float dt, float horizSpeed);
     void updateOrbBobbing(SoAEntityHandle e, float dt);
     glm::mat4 computeLightViewProjForRange(float splitNear, float splitFar, float& lightDepthRange, float& texelWorldSize) const;

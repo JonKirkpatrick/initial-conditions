@@ -1,6 +1,9 @@
 #include "renderer/Camera.h"
 #include "ecs/ComponentTypes.hpp"
 #include <cmath>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 
 namespace Camera {
 
@@ -13,7 +16,6 @@ namespace Camera {
     }
 
     sf::Vector3f cameraToWorld(const sf::Vector3f& v, const CTransform3D& t) {
-        // Local to World = Rotate vector forward by the orientation quaternion
         glm::vec3 localVec(v.x, v.y, v.z);
         glm::vec3 worldVec = t.orientation() * localVec;
         
@@ -21,10 +23,8 @@ namespace Camera {
     }
 
     sf::Vector3f worldToCamera(const sf::Vector3f& v, const CTransform3D& t) {
-        // World to Local = Rotate vector by the INVERSE (conjugate) of the orientation quaternion
         glm::vec3 worldVec(v.x, v.y, v.z);
         
-        // glm::conjugate(q) is an incredibly fast O(1) operation for unit quaternions—it just negates the vec3 part!
         glm::vec3 localVec = glm::conjugate(t.orientation()) * worldVec;
         
         return sf::Vector3f(localVec.x, localVec.y, localVec.z);
@@ -34,41 +34,33 @@ namespace Camera {
         sf::Vector3f rel = world - t.pos;
         sf::Vector3f cam = worldToCamera(rel, t);
         
-        // In right-handed camera space, objects in front of the lens have a NEGATIVE Z.
-        // If cam.z is greater than -nearPlane (e.g., -0.05), it's either too close or behind the camera.
         if (cam.z > -c.nearPlane) return false;
 
         float f = 1.0f / std::tan(c.fovY * 0.5f);
         
-        // Perspective division: dividing by the positive distance forward (-cam.z)
         float w_divisor = -cam.z; 
         float x_ndc = (cam.x * f / c.aspectRatio) / w_divisor;
         float y_ndc = (cam.y * f) / w_divisor;
         
-        // Convert from NDC [-1, 1] to screen coordinate pixels
         screenOut.x = (x_ndc * 0.5f + 0.5f) * static_cast<float>(c.viewportSize.x);
         screenOut.y = (1.0f - (y_ndc * 0.5f + 0.5f)) * static_cast<float>(c.viewportSize.y);
         return true;
     }
 
     sf::Vector3f screenToWorld(const CTransform3D& t, const CCamera& c, sf::Vector2f screen) {
-        // 1. Convert screen pixels back into Normalized Device Coordinates [-1, 1]
         float x_ndc = (screen.x / static_cast<float>(c.viewportSize.x)) * 2.f - 1.f;
         float y_ndc = 1.f - (screen.y / static_cast<float>(c.viewportSize.y)) * 2.f;
         
         float f = std::tan(c.fovY * 0.5f);
         
-        // 2. Formulate the ray direction pointing down the negative Z axis in local space
         sf::Vector3f rayDirLocal(x_ndc * f * c.aspectRatio, y_ndc * f, -1.f);
         
-        // 3. Transform the local ray direction into absolute world space vectors
         sf::Vector3f rayDirWorld = cameraToWorld(rayDirLocal, t);
         
-        // 4. Trace down to intersect with the flat landscape floor (Y = 0)
         if (std::abs(rayDirWorld.y) < 1e-6f) return t.pos;
         
         float tt = -t.pos.y / rayDirWorld.y;
-        if (tt < 0.f) return t.pos; // Intersection is behind the camera eye
+        if (tt < 0.f) return t.pos;
         
         return t.pos + rayDirWorld * tt;
     }
@@ -101,8 +93,6 @@ namespace Camera {
 
     std::array<std::array<float, 3>, 3> getWorldToCamMatrix(const CTransform3D& t) {
         std::array<std::array<float,3>,3> m{};
-        // Read directly from the cached transform vectors!
-        // No cos/sin calls, completely rigid
         m[0] = { t.right().x,   t.up().x,   -t.forward().x };
         m[1] = { t.right().y,   t.up().y,   -t.forward().y };
         m[2] = { t.right().z,   t.up().z,   -t.forward().z };
@@ -110,23 +100,16 @@ namespace Camera {
     }
 
     std::array<float, 16> getViewMatrix(const CTransform3D& t) {
-        // Get rotation matrix from world vectors -> camera space
         auto rot = getWorldToCamMatrix(t);
 
-        // Compute translation in camera space relative to current position
         double tx = -(double(rot[0][0]) * t.pos.x + double(rot[1][0]) * t.pos.y + double(rot[2][0]) * t.pos.z);
         double ty = -(double(rot[0][1]) * t.pos.x + double(rot[1][1]) * t.pos.y + double(rot[2][1]) * t.pos.z);
         double tz = -(double(rot[0][2]) * t.pos.x + double(rot[1][2]) * t.pos.y + double(rot[2][2]) * t.pos.z);
 
-        // Standalone View matrix (4x4 column-major)
         return {
-            // Column 0
             rot[0][0], rot[0][1], rot[0][2], 0.f,
-            // Column 1
             rot[1][0], rot[1][1], rot[1][2], 0.f,
-            // Column 2
             rot[2][0], rot[2][1], rot[2][2], 0.f,
-            // Column 3 (camera space translation)
             float(tx),        float(ty),        float(tz),        1.f
         };
     }
@@ -136,10 +119,8 @@ namespace Camera {
         float zNear = c.nearPlane;
         float zFar  = c.farPlane;
         
-        // Zero-to-one standard right-handed mapping
         float zRange = zNear - zFar; 
 
-        // Standalone Perspective Projection matrix (4x4 column-major)
         return {
             f / c.aspectRatio, 0.f,  0.f,  0.f,
             0.f,               f,  0.f,  0.f,
@@ -150,15 +131,12 @@ namespace Camera {
 
     std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c)
     {
-        // 1. Get rotation: world -> camera (columns = transformed basis vectors)
         auto rot = getWorldToCamMatrix(t);
 
-        // Translation in camera space: t_cam = - (R * world_pos)
         double tx = -(double(rot[0][0]) * t.pos.x + double(rot[1][0]) * t.pos.y + double(rot[2][0]) * t.pos.z);
         double ty = -(double(rot[0][1]) * t.pos.x + double(rot[1][1]) * t.pos.y + double(rot[2][1]) * t.pos.z);
         double tz = -(double(rot[0][2]) * t.pos.x + double(rot[1][2]) * t.pos.y + double(rot[2][2]) * t.pos.z);
 
-        // View matrix (column-major)
         std::array<float, 16> V = {
             // Column 0
             rot[0][0], rot[0][1], rot[0][2], 0.f,
@@ -170,24 +148,18 @@ namespace Camera {
             float(tx),        float(ty),        float(tz),        1.f
         };
 
-        // 2. Updated Projection matrix block to utilize the corrected [0, 1] depth logic
         float f     = 1.0f / std::tan(c.fovY * 0.5f);
         float zNear = c.nearPlane;
         float zFar  = c.farPlane;
         float zRange = zNear - zFar;
 
         std::array<float, 16> P = {
-            // Column 0
             f / c.aspectRatio, 0.f,  0.f,  0.f,
-            // Column 1
             0.f,               f,  0.f,  0.f,
-            // Column 2
-            0.f,               0.f,  zFar / zRange,  -1.f, // Correct mapping for native right-handed depth
-            // Column 3
+            0.f,               0.f,  zFar / zRange,  -1.f,
             0.f,               0.f,  (zNear * zFar) / zRange, 0.f
         };
 
-        // 3. P * V Multiplication (remains structurally pristine)
         std::array<float, 16> VP = {};
         for (int col = 0; col < 4; ++col) {
             for (int row = 0; row < 4; ++row) {
@@ -198,5 +170,59 @@ namespace Camera {
         }
 
         return VP;
+    }
+
+    std::array<float, 16> getOrthoMatrix(float left, float right, float bottom, float top, float zNear, float zFar)
+    {
+        float xRange = right - left;
+        float yRange = top - bottom;
+        float zRange = zNear - zFar;
+
+        return {
+            2.0f / xRange, 0.f,           0.f,           0.f,
+            0.f,           2.0f / yRange, 0.f,           0.f,
+            0.f,           0.f,           1.0f / zRange, 0.f,
+            -(right + left) / xRange, -(top + bottom) / yRange, zNear / zRange, 1.f
+        };
+    }
+
+    void getFrustumBoundingSphere(const CTransform3D& camTransform, const CCamera& camData, 
+                                  float splitNear, float splitFar, 
+                                  sf::Vector3f& outCentroid, float& outRadius)
+    {
+        // 1. Reconstruct temporary sub-frustum specs
+        CCamera subCam = camData;
+        subCam.nearPlane = splitNear;
+        subCam.farPlane  = splitFar;
+
+        // 2. Derive the Inverse View-Projection Matrix using your pipeline
+        auto vpRaw = getVPMatrix(camTransform, subCam);
+        glm::mat4 camVP = glm::make_mat4(vpRaw.data());
+        glm::mat4 camInvVP = glm::inverse(camVP);
+
+        // 3. Define the standard Normalized Device Coordinates (NDC) cuboid edges
+        static const glm::vec4 ndcCorners[8] = {
+            {-1.f,-1.f, 0.f, 1.f}, { 1.f,-1.f, 0.f, 1.f}, { 1.f, 1.f, 0.f, 1.f}, {-1.f, 1.f, 0.f, 1.f},
+            {-1.f,-1.f, 1.f, 1.f}, { 1.f,-1.f, 1.f, 1.f}, { 1.f, 1.f, 1.f, 1.f}, {-1.f, 1.f, 1.f, 1.f},
+        };
+
+        // 4. Back-project corners into absolute World Coordinates
+        glm::vec3 worldCorners[8];
+        glm::vec3 center(0.0f);
+
+        for (int i = 0; i < 8; ++i) {
+            glm::vec4 p = camInvVP * ndcCorners[i];
+            worldCorners[i] = glm::vec3(p) / p.w;
+            center += worldCorners[i];
+        }
+        center /= 8.0f;
+        outCentroid = sf::Vector3f(center.x, center.y, center.z);
+
+        // 5. Establish the absolute maximum boundary radius wrapping the frustum shell
+        outRadius = 0.0f;
+        for (int i = 0; i < 8; ++i) {
+            float dist = glm::length(worldCorners[i] - center);
+            outRadius = std::max(outRadius, dist);
+        }
     }
 } // namespace Camera

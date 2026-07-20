@@ -6,7 +6,6 @@
 #include <vector>
 #include <memory>
 
-// forward declarations to avoid heavy includes in this header
 struct CTransform3D;
 struct CCamera;
 
@@ -21,11 +20,15 @@ namespace Camera
     sf::Vector3f getRight(const CTransform3D& cameraTransform);
     sf::Vector3f getUp(const CTransform3D& cameraTransform);
     sf::Vector3f cross(const sf::Vector3f& a, const sf::Vector3f& b);
-    sf::Vector3f rotate(const sf::Vector3f& v, const CTransform3D& t); // legacy alias for worldToCamera
-    sf::Vector3f rotateInverse(const sf::Vector3f& v, const CTransform3D& t); // legacy alias for cameraToWorld
+    sf::Vector3f rotate(const sf::Vector3f& v, const CTransform3D& t);
+    sf::Vector3f rotateInverse(const sf::Vector3f& v, const CTransform3D& t);
     sf::Vector3f normalize(const sf::Vector3f& v);
     std::array<std::array<float, 3>, 3> getWorldToCamMatrix(const CTransform3D& t);
     std::array<float, 16> getVPMatrix(const CTransform3D& t, const CCamera& c);
     std::array<float, 16> getViewMatrix(const CTransform3D& t);
     std::array<float, 16> getProjectionMatrix(const CCamera& c);
+    std::array<float, 16> getOrthoMatrix(float left, float right, float bottom, float top, float zNear, float zFar);
+    void getFrustumBoundingSphere(const CTransform3D& camTransform, const CCamera& camData, 
+                                  float splitNear, float splitFar, 
+                                  sf::Vector3f& outCentroid, float& outRadius);
 }
