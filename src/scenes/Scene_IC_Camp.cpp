@@ -24,11 +24,13 @@
 // =========================================================================
 // File-Local Static Helper Utilities
 // =========================================================================
-static glm::vec3 toGLMVec3(const sf::Vector3f& v) {
+static glm::vec3 toGLMVec3(const sf::Vector3f& v) 
+{
     return glm::vec3(v.x, v.y, v.z);
 }
 
-static glm::vec4 toGLMVec4(const sf::Glsl::Vec4& v) {
+static glm::vec4 toGLMVec4(const sf::Glsl::Vec4& v) 
+{
     return glm::vec4(v.x, v.y, v.z, v.w);
 }
 
@@ -76,11 +78,13 @@ Scene_IC_Camp::Scene_IC_Camp(GameEngine& game, const std::string& levelPath)
     initLevelState();
 }
 
-Scene_IC_Camp::~Scene_IC_Camp() {
+Scene_IC_Camp::~Scene_IC_Camp() 
+{
     cleanUpGraphicsResources();
 }
 
-void Scene_IC_Camp::update() {
+void Scene_IC_Camp::update() 
+{
     // 1. Core Framework Timing Updates
     float currentTime = m_game.getElapsedClock().getElapsedTime().asSeconds();
     float dt = 1.0f / 60.0f;
@@ -128,7 +132,8 @@ void Scene_IC_Camp::update() {
     m_entityManager.update();
 }
 
-void Scene_IC_Camp::sDoAction(const Action& action) {
+void Scene_IC_Camp::sDoAction(const Action& action) 
+{
     auto& input = m_entityManager.getInput(m_player);
 
     if (action.type() == "ANALOG") {
@@ -195,7 +200,8 @@ void Scene_IC_Camp::sDoAction(const Action& action) {
     }
 }
 
-void Scene_IC_Camp::onEnter() {
+void Scene_IC_Camp::onEnter() 
+{
     m_entityManager.getInput(m_player).mouseDelta = {0.f, 0.f};
     sf::Vector2u size = m_game.window().getSize();
     sf::Mouse::setPosition(
@@ -218,10 +224,12 @@ void Scene_IC_Camp::onEnter() {
     cameraData.viewportSize = size;
 }
 
-void Scene_IC_Camp::onExit() {
+void Scene_IC_Camp::onExit() 
+{
 }
 
-void Scene_IC_Camp::onEnd() {
+void Scene_IC_Camp::onEnd() 
+{
 }
 
 HUD* Scene_IC_Camp::getHUD() const
@@ -229,7 +237,8 @@ HUD* Scene_IC_Camp::getHUD() const
     return m_hud.get();
 }
 
-Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const {
+Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const 
+{
     return Topography::TerrainContext {
         m_terrainStreamer.get(),
         m_topdownWorldMin,
@@ -237,7 +246,8 @@ Topography::TerrainContext Scene_IC_Camp::getTerrainContext() const {
     };
 }
 
-void Scene_IC_Camp::initSceneConfiguration() {
+void Scene_IC_Camp::initSceneConfiguration() 
+{
     m_topdownMaxHeight = 1000.f;
     m_topdownWorldMin   = { 0.f, 0.f };
     m_topdownWorldSize  = { Topography::BASE_SIZE, Topography::BASE_SIZE };
@@ -248,7 +258,8 @@ void Scene_IC_Camp::initSceneConfiguration() {
     m_cameraConfig.VIEWPORT_HEIGHT = windowSize.y;
 }
 
-void Scene_IC_Camp::initGraphicsPipelines() {
+void Scene_IC_Camp::initGraphicsPipelines() 
+{
     initializeGBuffer(m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT);
     initializeSkyCubemap();
     initializeShadowMap(m_shadowMapSize);
@@ -258,7 +269,8 @@ void Scene_IC_Camp::initGraphicsPipelines() {
     initUBOs();
 }
 
-void Scene_IC_Camp::initLevelState() {
+void Scene_IC_Camp::initLevelState() 
+{
     m_moonTexture    = Assets::Instance().getTexture("Moon");
     m_skyTexture     = sf::RenderTexture({m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT});
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
@@ -280,7 +292,8 @@ void Scene_IC_Camp::initLevelState() {
     m_cursorMode = false;
 }
 
-void Scene_IC_Camp::cleanUpGraphicsResources() {
+void Scene_IC_Camp::cleanUpGraphicsResources() 
+{
     destroyGBuffer();
     destroyShadowMap();
     m_ssaoPipeline.destroy();
@@ -348,7 +361,8 @@ void Scene_IC_Camp::cleanUpGraphicsResources() {
     }
 }
 
-void Scene_IC_Camp::sRender() {
+void Scene_IC_Camp::sRender() 
+{
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& camData = m_entityManager.getCamera(m_camera);
