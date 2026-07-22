@@ -8,6 +8,7 @@
 #include "common/sky.glsl"
 #include "common/optics.glsl"
 #include "common/fog.glsl"
+#include "common/gBuffer.glsl"
 
 in vec3 FragPos;
 in vec3 Normal;
@@ -15,7 +16,6 @@ in vec2 TexCoords;
 
 out vec4 FragColor;
 
-layout(location = 3) uniform sampler2D u_gDepth;
 layout(location = 4) uniform vec3  u_nightAmbientFloor;
 
 void main()

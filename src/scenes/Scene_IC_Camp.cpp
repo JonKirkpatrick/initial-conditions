@@ -1725,25 +1725,24 @@ void Scene_IC_Camp::runSSAOPass()
 
     glUseProgram(m_ssao);
 
-    // 1. Bind G-Buffer Texture Contexts
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
-    glUniform1i(glGetUniformLocation(m_ssao, "u_gNormal"), 0);
+    glUniform1i(Uniforms::GBuffer::GNormalTex, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
-    glUniform1i(glGetUniformLocation(m_ssao, "u_gDepth"), 1);
+    glUniform1i(Uniforms::GBuffer::GDepthTex, 1);
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.noiseTex);
-    glUniform1i(glGetUniformLocation(m_ssao, "u_texNoise"), 2);
+    glUniform1i(Uniforms::SSAO::NoiseTex, 2);
 
     // 2. Upload Kernel & Structural Parameters
-    glUniform3fv(glGetUniformLocation(m_ssao, "u_samples"), static_cast<GLsizei>(m_ssaoKernel.size()), &m_ssaoKernel[0].x);
-    glUniform2f(glGetUniformLocation(m_ssao, "u_noiseScale"), (float)m_gBufferWidth / 4.0f, (float)m_gBufferHeight / 4.0f);
-    glUniform1f(glGetUniformLocation(m_ssao, "u_radius"), m_debugSSAOKernelRadius);
-    glUniform1f(glGetUniformLocation(m_ssao, "u_bias"), m_debugSSAOBias);
-    glUniform1i(glGetUniformLocation(m_ssao, "u_sampleCount"), static_cast<GLint>(m_sampleCount));
+    glUniform3fv(Uniforms::SSAO::KernelSample, static_cast<GLsizei>(m_ssaoKernel.size()), &m_ssaoKernel[0].x);
+    glUniform2f(Uniforms::SSAO::NoiseScale, (float)m_gBufferWidth / 4.0f, (float)m_gBufferHeight / 4.0f);
+    glUniform1f(Uniforms::SSAO::Radius, m_debugSSAOKernelRadius);
+    glUniform1f(Uniforms::SSAO::Bias, m_debugSSAOBias);
+    glUniform1i(Uniforms::SSAO::SampleCount, static_cast<GLint>(m_sampleCount));
 
     // 3. Procedural Screen-Space Triangle Draw Call (Zero allocation overhead)
     glBindVertexArray(m_gridVAO); // Reusing your existing valid VAO
@@ -2117,42 +2116,38 @@ void Scene_IC_Camp::deferredLighting()
     // =========================================================================
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gAlbedoTex);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gAlbedo"), 0);
+    glUniform1i(Uniforms::GBuffer::GAlbedoTex, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gNormal"), 1);
+    glUniform1i(Uniforms::GBuffer::GNormalTex, 1);
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, m_gIndicesTex);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gIndices"), 2);
+    glUniform1i(Uniforms::GBuffer::GIndicesTex, 2);
 
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, m_gRetroTex);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gRetro"), 3);
+    glUniform1i(Uniforms::GBuffer::GRetroTex, 3);
 
     glActiveTexture(GL_TEXTURE4);
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_gDepth"), 4);
+    glUniform1i(Uniforms::GBuffer::GDepthTex, 4);
 
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_shadowMap"), 5);
+    glUniform1i(Uniforms::Shadows::ShadowMapArray, 5);
 
     glActiveTexture(GL_TEXTURE6);
     glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.blurTex);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_ssaoTex"), 6);
+    glUniform1i(Uniforms::Lighting::SSAOTex, 6);
 
     // =========================================================================
     // Forward Light Projection & Cascade Specifics (Still Loose Uniforms)
     // =========================================================================
-    glUniformMatrix4fv(glGetUniformLocation(m_lightingProgram, "u_lightViewProj"),
-                        NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
-    glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_lightDepthRange"), NUM_CASCADES, m_lightDepthRange);
-    glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_texelWorldSize"), NUM_CASCADES, m_texelWorldSize);
-    glUniform1fv(glGetUniformLocation(m_lightingProgram, "u_cascadeSplitDepths"), NUM_CASCADES, m_cascadeSplits);
-    glUniform1i(glGetUniformLocation(m_lightingProgram, "u_debugShowCascadeColors"), m_debugShowCascadeColors ? 1 : 0);
-
+    glUniformMatrix4fv(Uniforms::Shadows::LightViewProj, NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
+    glUniform1fv(Uniforms::Shadows::TexelWorldSize, NUM_CASCADES, m_texelWorldSize);
+    glUniform1fv(Uniforms::Shadows::CascadeSplitDepths, NUM_CASCADES, m_cascadeSplits);
     // =========================================================================
     // Bind SSBOs (Safely living up on non-conflicting slots 5 & 6)
     // =========================================================================
@@ -2162,11 +2157,10 @@ void Scene_IC_Camp::deferredLighting()
     // =========================================================================
     // Forward Player Specific Context State
     // =========================================================================
-    glUniform3fv(glGetUniformLocation(m_lightingProgram, "u_nightAmbientFloor"), 1, &m_nightAmbientFloor[0]);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampIntensity"), 2.0f);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampRange"),     200.0f);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampConeCos"),   1.0f);
-    glUniform1f(glGetUniformLocation(m_lightingProgram, "u_headlampEnabled"),   shouldHeadlightsBeOn() ? 1.0f : 0.0f);
+    glUniform3fv(Uniforms::Lighting::NightAmbientFloor, 1, &m_nightAmbientFloor[0]);
+    glUniform1f(Uniforms::Lighting::HeadlampIntensity, 2.0f);
+    glUniform1f(Uniforms::Lighting::HeadlampRange,     200.0f);
+    glUniform1f(Uniforms::Lighting::HeadlampEnabled,   shouldHeadlightsBeOn() ? 1.0f : 0.0f);
 
     // =========================================================================
     // Draw Fullscreen Composition Quad
@@ -2309,7 +2303,7 @@ void Scene_IC_Camp::renderOceanGrid()
     // =========================================================================
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
-    glUniform1i(Uniforms::Ocean::GDepth, 0);
+    glUniform1i(Uniforms::GBuffer::GDepthTex, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
@@ -2330,12 +2324,12 @@ void Scene_IC_Camp::renderOceanGrid()
     // =========================================================================
     // Feed Cascade Uniform Matrices and Configurations
     // =========================================================================
-    glUniformMatrix4fv(glGetUniformLocation(m_oceanProgram, "u_lightViewProj"),
+    glUniformMatrix4fv(Uniforms::Shadows::LightViewProj,
                         NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
-    glUniform1fv(glGetUniformLocation(m_oceanProgram, "u_texelWorldSize"), NUM_CASCADES, m_texelWorldSize);
-    glUniform1fv(glGetUniformLocation(m_oceanProgram, "u_cascadeSplitDepths"), NUM_CASCADES, m_cascadeSplits);
+    glUniform1fv(Uniforms::Shadows::TexelWorldSize, NUM_CASCADES, m_texelWorldSize);
+    glUniform1fv(Uniforms::Shadows::CascadeSplitDepths, NUM_CASCADES, m_cascadeSplits);
 
-    glUniform3fv(glGetUniformLocation(m_oceanProgram, "u_nightAmbientFloor"), 1, &m_nightAmbientFloor[0]);
+    glUniform3fv(Uniforms::Ocean::NightAmbientFloor, 1, &m_nightAmbientFloor[0]);
 
     GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
     glDisable(GL_CULL_FACE);

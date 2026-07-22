@@ -7,6 +7,7 @@
 #include "common/shadows.glsl"
 #include "common/optics.glsl"
 #include "common/fog.glsl"
+#include "common/gBuffer.glsl"
 
 // ==============================================================================
 // == Shader Storage Buffer Objects =============================================
@@ -45,19 +46,12 @@ layout(std430, binding = 6) readonly buffer MaterialBuffer {
 in vec2 v_uv;
 out vec4 FragColor;
 
-uniform sampler2D u_gAlbedo;
-uniform sampler2D u_gNormal;
-uniform sampler2D u_gIndices;
-uniform sampler2D u_gRetro;
-uniform sampler2D u_gDepth;
-uniform sampler2D u_ssaoTex;
+layout(location = 0) uniform vec3  u_nightAmbientFloor;
+layout(location = 1) uniform float u_headlampIntensity;
+layout(location = 2) uniform float u_headlampRange;
+layout(location = 3) uniform float u_headlampEnabled;
 
-uniform vec3  u_nightAmbientFloor;
-uniform float u_headlampIntensity;
-uniform float u_headlampRange;
-uniform float u_headlampEnabled;
-
-
+layout(location = 4) uniform sampler2D u_ssaoTex;
 
 void main()
 {
