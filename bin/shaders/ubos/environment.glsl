@@ -10,4 +10,7 @@ layout (std140, binding = 1) uniform EnvironmentData {
     float u_ambientStrength;
     vec3  u_moonDir;
     float u_skyExposure;
+    vec2  u_windDirection;
+    float u_windSpeed;
+    float envdata_padding;
 };

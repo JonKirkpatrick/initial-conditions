@@ -279,7 +279,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(256000);
+    spawnDebugOrbs(128000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -404,6 +404,9 @@ void Scene_IC_Camp::sRender()
     eb.ambientStrength  = m_sunIntensity;
     eb.moonDirection    = toGLMVec3(m_astroState.moonDirection);
     eb.skyExposure      = 5.0f;
+    eb.windDirection    = glm::vec2(m_windDirection.x, m_windDirection.y);
+    eb.windSpeed        = m_windSpeed;
+    eb._padding         = 0.0f;
 
     AtmosphereBlock ab;
     ab.fogColorDay      = glm::vec4(0.7f, 0.8f, 1.0f, 1.0f);
@@ -949,7 +952,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
 
     int spawned = 0;
     int attempts = 0;
-    const int maxAttempts = count * 50;   // Increased a bit due to new height constraint
+    const int maxAttempts = count * 50;
 
     while (spawned < count && attempts < maxAttempts)
     {
@@ -960,9 +963,9 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
 
         // === NEW: Height filter ===
         sf::Vector2f worldPos = WCH::hexToWorld(hexQ, hexR);
-        float height = heightAt(worldPos.x, worldPos.y);  // assuming y = z in your coord system
+        float height = heightAt(worldPos.x, worldPos.y);
 
-        if (height <= 5.0f) {
+        if (height <= m_seaLevel + 1.5f) {
             continue;
         }
 
@@ -972,7 +975,6 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
         // Accept position
         occupied.insert(posToKey(hexQ, hexR));
 
-        // Spawn parameters (unchanged)
         float radius = radiusDist(rng);
         float bobRate = bobRateDist(rng);
         float bobMag = bobMagDist(rng);
@@ -993,6 +995,121 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
 
         spawnOrbFauna(hexQ, hexR, radius, bobRate, bobMag, eyes, yaw, species);
         ++spawned;
+    }
+}
+
+// =========================================================================
+// Rendering Systems & Pipeline
+// =========================================================================
+
+void Scene_IC_Camp::updateCamera(float dt) 
+{
+    auto& camTransform = m_entityManager.getTransform(m_camera);
+    auto& playerTransform = m_entityManager.getTransform(m_player);
+    auto& playerPhysics = m_entityManager.getPhysics(m_player);
+    auto& playerBob = m_entityManager.getBob(m_player);
+    auto& cameraData = m_entityManager.getCamera(m_camera);
+
+    // Smooth crouch transition
+    float targetCrouch = playerPhysics.isCrouching ? 1.0f : 0.0f;
+    m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt;
+    m_crouchFactor = std::clamp(m_crouchFactor, 0.0f, 1.0f);
+
+    // Eye height
+    float eyeHeight = m_playerConfig.HEIGHT_OFFSET * (1.0f - m_crouchFactor * 0.45f);
+
+    sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
+
+    // =========================================================================
+    // UPGRADE: Pull direction vectors straight from the player's vector cache
+    // =========================================================================
+    sf::Vector3f forward = playerTransform.forward();
+    sf::Vector3f right   = playerTransform.right();
+
+    float horizontalSpeed = std::sqrt(
+        playerTransform.velocity.x * playerTransform.velocity.x +
+        playerTransform.velocity.z * playerTransform.velocity.z
+    );
+
+    float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
+    float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
+    float phase = playerBob.accumulator * 6.2831853f;
+
+    // === Bob Parameters ===
+    float baseFrequency = 1.0f;
+
+    float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
+    float lateralAmplitude = 0.055f + (0.038f - 0.055f) * t;
+    float verticalAmplitude = 0.062f + (0.048f - 0.062f) * t;
+
+    if (playerPhysics.isCrouching)
+    {
+        lateralAmplitude  *= (1.0f - m_crouchFactor * 0.45f);
+        verticalAmplitude *= (1.0f - m_crouchFactor * 0.55f);
+    }
+
+    lateralAmplitude *= 0.85f;
+
+    float lateralBob  = std::sin(phase * baseFrequency) * lateralAmplitude * moveFactor;
+    float verticalBob = std::sin(phase * baseFrequency * 1.65f) * verticalAmplitude * moveFactor;
+
+    sf::Vector3f targetBob = right * lateralBob + sf::Vector3f(0.f, verticalBob, 0.f);
+    m_cameraBobOffset += (targetBob - m_cameraBobOffset) * m_bobLag;
+
+    // =========================================================================
+    // UPGRADE: Update position, match orientation, and automate the dirty state
+    // =========================================================================
+    camTransform.pos = headPos - (forward * m_playerConfig.EYE_OFFSET) + m_cameraBobOffset;
+    
+    // Instead of assigning individual angles, copy the entire rotation basis!
+    // If you haven't exposed a direct setter for the underlying quaternion yet, 
+    // you can add `void setOrientation(const glm::quat& q) { m_orientation = q; m_isDirty = true; }`
+    camTransform.setOrientation(playerTransform.orientation());
+
+    // FOV scales continuously with speed rather than snapping on sprint state
+    float targetFov = m_cameraConfig.FOVY + 0.14f * (speedFraction / 3.0f);
+    targetFov -= m_crouchFactor * 0.05f;
+    cameraData.fovY += (targetFov - cameraData.fovY) * 0.12f;
+}
+
+void Scene_IC_Camp::updateHUDData()
+{
+    auto& playerTransform = m_entityManager.getTransform(m_player);
+    sf::Vector3f currentLocation = playerTransform.pos;
+    sf::Vector3f forward = forwardFromTransform(playerTransform);
+    forward.y = 0.f;
+    forward = Camera::normalize(forward);
+
+    float currentHeading = Astro::toDeg(-std::atan2(forward.x, forward.z));
+
+    updateMinimapTexture();
+
+    m_hudData.position = currentLocation;
+    m_hudData.mousePos = m_cachedMousePos;
+    m_hudData.leftMousePressed = m_leftMousePressed;
+    m_hudData.homeLocation = sf::Vector2f(m_homeLocationXZ.x, m_homeLocationXZ.y);
+    m_hudData.cameraYaw = currentHeading;
+    m_hudData.headlightState = static_cast<int>(m_headlightState);
+    m_hudData.headlightEnabled = shouldHeadlightsBeOn();
+    m_hudData.minimapTex = &m_minimapTexture.getTexture();
+}
+
+void Scene_IC_Camp::buildHud()
+{
+    m_hud = std::make_unique<HUD>(m_game.window().getSize());
+}
+
+bool Scene_IC_Camp::shouldHeadlightsBeOn() const
+{
+    switch (m_headlightState)
+    {
+    case HeadlightState::Off:
+        return false;
+    case HeadlightState::On:
+        return true;
+    case HeadlightState::Auto:
+    default:
+        return m_astroState.sunDirection.y < 0.12f || m_sunIntensity < 0.5f;
     }
 }
 
@@ -1179,121 +1296,6 @@ void Scene_IC_Camp::generateOceanMesh(float size, int resolution, unsigned int& 
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
 
     glBindVertexArray(0);
-}
-
-// =========================================================================
-// Rendering Systems & Pipeline
-// =========================================================================
-
-void Scene_IC_Camp::updateCamera(float dt) 
-{
-    auto& camTransform = m_entityManager.getTransform(m_camera);
-    auto& playerTransform = m_entityManager.getTransform(m_player);
-    auto& playerPhysics = m_entityManager.getPhysics(m_player);
-    auto& playerBob = m_entityManager.getBob(m_player);
-    auto& cameraData = m_entityManager.getCamera(m_camera);
-
-    // Smooth crouch transition
-    float targetCrouch = playerPhysics.isCrouching ? 1.0f : 0.0f;
-    m_crouchFactor += (targetCrouch - m_crouchFactor) * 8.0f * dt;
-    m_crouchFactor = std::clamp(m_crouchFactor, 0.0f, 1.0f);
-
-    // Eye height
-    float eyeHeight = m_playerConfig.HEIGHT_OFFSET * (1.0f - m_crouchFactor * 0.45f);
-
-    sf::Vector3f headPos = playerTransform.pos + sf::Vector3f(0.f, eyeHeight, 0.f);
-
-    // =========================================================================
-    // UPGRADE: Pull direction vectors straight from the player's vector cache
-    // =========================================================================
-    sf::Vector3f forward = playerTransform.forward();
-    sf::Vector3f right   = playerTransform.right();
-
-    float horizontalSpeed = std::sqrt(
-        playerTransform.velocity.x * playerTransform.velocity.x +
-        playerTransform.velocity.z * playerTransform.velocity.z
-    );
-
-    float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
-    float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
-    float phase = playerBob.accumulator * 6.2831853f;
-
-    // === Bob Parameters ===
-    float baseFrequency = 1.0f;
-
-    float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
-    float lateralAmplitude = 0.055f + (0.038f - 0.055f) * t;
-    float verticalAmplitude = 0.062f + (0.048f - 0.062f) * t;
-
-    if (playerPhysics.isCrouching)
-    {
-        lateralAmplitude  *= (1.0f - m_crouchFactor * 0.45f);
-        verticalAmplitude *= (1.0f - m_crouchFactor * 0.55f);
-    }
-
-    lateralAmplitude *= 0.85f;
-
-    float lateralBob  = std::sin(phase * baseFrequency) * lateralAmplitude * moveFactor;
-    float verticalBob = std::sin(phase * baseFrequency * 1.65f) * verticalAmplitude * moveFactor;
-
-    sf::Vector3f targetBob = right * lateralBob + sf::Vector3f(0.f, verticalBob, 0.f);
-    m_cameraBobOffset += (targetBob - m_cameraBobOffset) * m_bobLag;
-
-    // =========================================================================
-    // UPGRADE: Update position, match orientation, and automate the dirty state
-    // =========================================================================
-    camTransform.pos = headPos - (forward * m_playerConfig.EYE_OFFSET) + m_cameraBobOffset;
-    
-    // Instead of assigning individual angles, copy the entire rotation basis!
-    // If you haven't exposed a direct setter for the underlying quaternion yet, 
-    // you can add `void setOrientation(const glm::quat& q) { m_orientation = q; m_isDirty = true; }`
-    camTransform.setOrientation(playerTransform.orientation());
-
-    // FOV scales continuously with speed rather than snapping on sprint state
-    float targetFov = m_cameraConfig.FOVY + 0.14f * (speedFraction / 3.0f);
-    targetFov -= m_crouchFactor * 0.05f;
-    cameraData.fovY += (targetFov - cameraData.fovY) * 0.12f;
-}
-
-void Scene_IC_Camp::updateHUDData()
-{
-    auto& playerTransform = m_entityManager.getTransform(m_player);
-    sf::Vector3f currentLocation = playerTransform.pos;
-    sf::Vector3f forward = forwardFromTransform(playerTransform);
-    forward.y = 0.f;
-    forward = Camera::normalize(forward);
-
-    float currentHeading = Astro::toDeg(-std::atan2(forward.x, forward.z));
-
-    updateMinimapTexture();
-
-    m_hudData.position = currentLocation;
-    m_hudData.mousePos = m_cachedMousePos;
-    m_hudData.leftMousePressed = m_leftMousePressed;
-    m_hudData.homeLocation = sf::Vector2f(m_homeLocationXZ.x, m_homeLocationXZ.y);
-    m_hudData.cameraYaw = currentHeading;
-    m_hudData.headlightState = static_cast<int>(m_headlightState);
-    m_hudData.headlightEnabled = shouldHeadlightsBeOn();
-    m_hudData.minimapTex = &m_minimapTexture.getTexture();
-}
-
-void Scene_IC_Camp::buildHud()
-{
-    m_hud = std::make_unique<HUD>(m_game.window().getSize());
-}
-
-bool Scene_IC_Camp::shouldHeadlightsBeOn() const
-{
-    switch (m_headlightState)
-    {
-    case HeadlightState::Off:
-        return false;
-    case HeadlightState::On:
-        return true;
-    case HeadlightState::Auto:
-    default:
-        return m_astroState.sunDirection.y < 0.12f || m_sunIntensity < 0.5f;
-    }
 }
 
 void Scene_IC_Camp::initializeSkyCubemap()
@@ -2271,25 +2273,41 @@ void Scene_IC_Camp::renderOceanGrid()
     // Snap the mesh's world translation to perfectly line up with your vertex intervals
     float snappedX = std::floor(camPos.x / vertexSpacing) * vertexSpacing;
     float snappedZ = std::floor(camPos.z / vertexSpacing) * vertexSpacing;
-    float seaLevel  = 5.0f; // Kept your baseline's height displacement
 
-    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(snappedX, seaLevel, snappedZ));
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(snappedX, m_seaLevel, snappedZ));
+    glm::mat3 normalMatrix = glm::mat3(glm::transpose(glm::inverse(model)));
     
     glUniformMatrix4fv(glGetUniformLocation(m_oceanProgram, "model"), 1, GL_FALSE, &model[0][0]);
+    glUniformMatrix3fv(glGetUniformLocation(m_oceanProgram, "normalMatrix"), 1, GL_FALSE, &normalMatrix[0][0]);
     glUniform1f(glGetUniformLocation(m_oceanProgram, "time"), m_game.getElapsedClock().getElapsedTime().asSeconds());
 
     // =========================================================================
     // Bind Textures for Ocean Pass
     // =========================================================================
-    // Bind G-buffer depth to unit 0
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
     glUniform1i(glGetUniformLocation(m_oceanProgram, "u_gDepth"), 0);
 
-    // Bind Cascaded Shadow Depth Array to unit 1
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
     glUniform1i(glGetUniformLocation(m_oceanProgram, "u_shadowMap"), 1);
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
+    glUniform1i(glGetUniformLocation(m_oceanProgram, "skyCubemap"), 2);
+
+    glUniform1i(glGetUniformLocation(m_oceanProgram, "useSkyCubemap"), m_skyCubemapReady);
+    glUniformMatrix3fv(glGetUniformLocation(m_oceanProgram, "starRotationMatrix"), 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
+    
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
+    glUniform1i(glGetUniformLocation(m_oceanProgram, "skyCubemap"), 3);
+
+    glActiveTexture(GL_TEXTURE4);
+    sf::Texture::bind(&m_moonTexture);
+    glUniform1i(glGetUniformLocation(m_oceanProgram, "moonTexture"), 4);
+
+
 
     // =========================================================================
     // Feed Cascade Uniform Matrices and Configurations
@@ -2319,6 +2337,12 @@ void Scene_IC_Camp::renderOceanGrid()
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glActiveTexture(GL_TEXTURE4);
+    sf::Texture::bind(nullptr);
     
     // Reset states back to what SFML/HUD expects
     glPolygonMode(GL_FRONT, previousPolygonMode[0]);
@@ -2507,6 +2531,13 @@ void Scene_IC_Camp::sGUI()
             ImGui::SliderFloat("SSAO Kernel Radius", &m_debugSSAOKernelRadius, 0.1f, 100.0f);
             ImGui::SliderFloat("SSAO Bias", &m_debugSSAOBias, 0.0001f, 1.0f);
             ImGui::SliderInt("SSAO Sample Count", &m_sampleCount, 1, m_ssaoKernelSize);
+            ImGui::Separator();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Wind Tuning"))
+        {
+            ImGui::SliderFloat("Wind Speed", &m_windSpeed, 0.0f, 10.0f);
             ImGui::Separator();
             ImGui::EndTabItem();
         }

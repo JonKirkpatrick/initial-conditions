@@ -28,14 +28,14 @@ layout (location = 3) out vec4 outRetro;
 // ==============================================================================
 
 struct GeometrySample {
-    vec3  pos;            // world-space position
-    vec3  normal;         // world-space, after relief exaggeration + horizon damping
-    float dist;            // distance from camera (== "depth" in the orb shader)
-    float normHeight;      // height normalised to [0,1] against u_heightMax (pre-exaggeration curve)
+    vec3  pos;              // world-space position
+    vec3  normal;           // world-space, after relief exaggeration + horizon damping
+    float dist;             // distance from camera (== "depth" in the orb shader)
+    float normHeight;       // height normalised to [0,1] against u_heightMax (pre-exaggeration curve)
 };
 
 struct MaterialSample {
-    vec3  albedo;          // topo colour, lit by sun elevation/shade and damped toward atmosphere
+    vec3  albedo;           // topo colour, lit by sun elevation/shade and damped toward atmosphere
 };
 
 // ==============================================================================

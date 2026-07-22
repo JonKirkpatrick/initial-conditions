@@ -32,6 +32,10 @@ struct alignas(16) EnvironmentBlock {
 
     glm::vec3 moonDirection;        // 12 bytes
     float     skyExposure;          // 4 bytes
+
+    glm::vec2 windDirection;         // 8 bytes
+    float     windSpeed;            // 4 bytes
+    float     _padding;             // 4 bytes
 };
 
 struct alignas(16) AtmosphereBlock {

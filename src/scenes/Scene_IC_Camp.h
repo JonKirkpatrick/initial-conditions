@@ -61,9 +61,9 @@ protected:
     PlayerConfig        m_playerConfig;
     std::unique_ptr<TerrainStreamer> m_terrainStreamer;
     sf::Vector2i        m_cachedMousePos{0,0};
-    bool                m_leftMousePressed = false;
+    bool                m_leftMousePressed                          = false;
 
-    float               m_hexSize = 1.f;
+    float               m_hexSize                                   = 1.f;
     sf::Color           m_gridColour;
     sf::Vector2f        m_homeLocationXZ{0.f, 0.f};
     sf::Vector3f        m_homeLocation3D{0.f, 0.f, 0.f};
@@ -72,19 +72,19 @@ protected:
     // Time, Date and Location
     // =========================================================================
 
-    int                 m_gameYear              = 2000;
-    int                 m_gameMonth             = 1;
-    int                 m_gameDayOfMonth        = 1;
-    double              m_gameTimeOfDay         = 12.0;
-    float               m_latitude              = 0.f;
-    float               m_longitude             = 0.f;
+    int                 m_gameYear                                  = 2000;
+    int                 m_gameMonth                                 = 1;
+    int                 m_gameDayOfMonth                            = 1;
+    double              m_gameTimeOfDay                             = 12.0;
+    float               m_latitude                                  = 0.f;
+    float               m_longitude                                 = 0.f;
     Astro::State        m_astroState;
 
     // =========================================================================
     // Terrain
     // =========================================================================
 
-    float               m_topdownMaxHeight      = 1.f;
+    float               m_topdownMaxHeight                          = 1.f;
     sf::Vector2f        m_topdownWorldMin{0.f, 0.f};
     sf::Vector2f        m_topdownWorldSize{1.f, 1.f};
 
@@ -92,9 +92,17 @@ protected:
     // Ocean
     // =========================================================================
 
-    float m_oceanSize = 10000.0f;
-    float m_oceanResolution = 200.0f;
-    
+    float               m_oceanSize                                 = 10000.0f;
+    float               m_oceanResolution                           = 200.0f;
+    float               m_seaLevel                                  = 4.5f;
+
+    // =========================================================================
+    // Wind
+    // =========================================================================
+
+    sf::Vector2f        m_windDirection{1.f, 0.f};
+    float               m_windSpeed                                 = 2.0f;
+
     // =========================================================================
     // Rendering — OpenGL Programs
     // =========================================================================
@@ -118,80 +126,80 @@ protected:
 
     sf::RenderTexture   m_skyTexture;
     sf::RenderTexture   m_minimapTexture;
-    unsigned int        m_minimapTextureSize    = 256;
+    unsigned int        m_minimapTextureSize                        = 256;
 
     // ocean pipeline
-    GLuint              m_oceanVAO              = 0;
-    GLuint              m_oceanVBO              = 0;
-    GLuint              m_oceanEBO              = 0;
-    GLuint              m_oceanIndexCount       = 0;
+    GLuint              m_oceanVAO                                  = 0;
+    GLuint              m_oceanVBO                                  = 0;
+    GLuint              m_oceanEBO                                  = 0;
+    GLuint              m_oceanIndexCount                           = 0;
 
     // terrain pipeline
-    GLuint              m_gridVAO               = 0;
-    GLuint              m_gridVBO               = 0;
-    GLuint              m_gridEBO               = 0;
-    GLuint              m_gridIndexCount        = 0;
+    GLuint              m_gridVAO                                   = 0;
+    GLuint              m_gridVBO                                   = 0;
+    GLuint              m_gridEBO                                   = 0;
+    GLuint              m_gridIndexCount                            = 0;
 
     // sphere impostor pipeline
-    GLuint              m_cubeVAO               = 0;
-    GLuint              m_cubeVBO               = 0;
-    GLuint              m_cubeEBO               = 0;
+    GLuint              m_cubeVAO                                   = 0;
+    GLuint              m_cubeVBO                                   = 0;
+    GLuint              m_cubeEBO                                   = 0;
 
     // G-Buffer for deferred lighting
-    GLuint              m_gBufferFBO            = 0;
-    GLuint              m_gAlbedoTex            = 0;
-    GLuint              m_gNormalTex            = 0;
-    GLuint              m_gIndicesTex           = 0;
-    GLuint              m_gRetroTex             = 0;
-    GLuint              m_gDepthTex             = 0;
+    GLuint              m_gBufferFBO                                = 0;
+    GLuint              m_gAlbedoTex                                = 0;
+    GLuint              m_gNormalTex                                = 0;
+    GLuint              m_gIndicesTex                               = 0;
+    GLuint              m_gRetroTex                                 = 0;
+    GLuint              m_gDepthTex                                 = 0;
 
-    unsigned int        m_gBufferWidth          = 0;
-    unsigned int        m_gBufferHeight         = 0;
+    unsigned int        m_gBufferWidth                              = 0;
+    unsigned int        m_gBufferHeight                             = 0;
 
     // SSAO Textures and Framebuffers
     SSAOPipeline        m_ssaoPipeline;
     std::vector<sf::Glsl::Vec3> m_ssaoKernel;
 
     // Uniform Buffer Objects (UBOs) for camera and lighting data
-    GLuint              m_cameraUBO             = 0;
-    GLuint              m_envUBO                = 0;
-    GLuint              m_atmoUBO               = 0;
+    GLuint              m_cameraUBO                                 = 0;
+    GLuint              m_envUBO                                    = 0;
+    GLuint              m_atmoUBO                                   = 0;
 
 
     // =========================================================================
     // Rendering — Blit
     // =========================================================================
 
-    GLuint              m_blitVAO               = 0;
-    GLuint              m_blitVBO               = 0;
+    GLuint              m_blitVAO                                   = 0;
+    GLuint              m_blitVBO                                   = 0;
 
     // =========================================================================
     // Rendering — Deferred Lighting
     // =========================================================================
 
-    GLuint              m_lightingVAO               = 0;
-    GLuint              m_lightingVBO               = 0;
+    GLuint              m_lightingVAO                               = 0;
+    GLuint              m_lightingVBO                               = 0;
 
     // =========================================================================
     // Rendering — Shadow Map
     // =========================================================================
 
-    GLuint                  m_shadowFBO             = 0;
-    GLuint                  m_shadowDepthTexArray   = 0;
-    unsigned int            m_shadowMapSize         = 4096;
-    static constexpr int    NUM_CASCADES            = 5;
+    GLuint                  m_shadowFBO                             = 0;
+    GLuint                  m_shadowDepthTexArray                   = 0;
+    unsigned int            m_shadowMapSize                         = 4096;
+    static constexpr int    NUM_CASCADES                            = 5;
 
     float                   m_cascadeSplits[NUM_CASCADES] = {};
-    glm::mat4               m_lightViewProjCascades[NUM_CASCADES] = {};
-    float                   m_lightDepthRange[NUM_CASCADES] = {};
-    float                   m_texelWorldSize[NUM_CASCADES] = {};
-    float                   m_cascadeSplitLambda    = 0.25f; // 0 = uniform, 1 = logarithmic
-    float                   m_shadowFrustumPadding  = 30.0f;
-    float                   m_shadowMaxDistance     = 500.0f;
+    glm::mat4               m_lightViewProjCascades[NUM_CASCADES]   = {};
+    float                   m_lightDepthRange[NUM_CASCADES]         = {};
+    float                   m_texelWorldSize[NUM_CASCADES]          = {};
+    float                   m_cascadeSplitLambda                    = 0.25f; // 0 = uniform, 1 = logarithmic
+    float                   m_shadowFrustumPadding                  = 30.0f;
+    float                   m_shadowMaxDistance                     = 500.0f;
 
-    bool                    m_debugShowShadowMap     = false;
-    bool                    m_debugDisableTexelSnap  = false;
-    bool                    m_debugShowCascadeColors = false;
+    bool                    m_debugShowShadowMap                    = false;
+    bool                    m_debugDisableTexelSnap                 = false;
+    bool                    m_debugShowCascadeColors                = false;
 
     // =========================================================================
     // Rendering — Sky Cubemap
@@ -232,38 +240,38 @@ protected:
     // =========================================================================
 
     sf::Vector3f m_cameraBobOffset{0.f, 0.f, 0.f};
-    float m_bobLag                              = 0.16f;  // Smoothing factor (0..1)
-    float m_crouchFactor                        = 0.0f;  // 0 = standing, 1 = fully crouched
+    float m_bobLag                  = 0.16f;  // Smoothing factor (0..1)
+    float m_crouchFactor            = 0.0f;  // 0 = standing, 1 = fully crouched
 
-    float m_lastStepPhase                       = 0.0f;
+    float m_lastStepPhase           = 0.0f;
 
-    HeadlightState m_headlightState             = HeadlightState::Auto;
+    HeadlightState m_headlightState = HeadlightState::Auto;
 
     // =========================================================================
     // Debug and Editor Flags
     // =========================================================================
 
-    bool m_drawGrid         = true;
-    bool m_drawTextures     = true;
-    bool m_drawCollision    = false;
-    bool m_showGUI          = false;
-    bool m_cursorMode       = false;
-    glm::vec3 m_nightAmbientFloor = glm::vec3(0.002f, 0.003f, 0.006f);
-    bool m_debugShowSSAO     = false;
-    bool m_debugShowSSAOBlur = false;
-    float m_debugSSAOKernelRadius = 0.25f;
-    float m_debugSSAOBias         = 0.005f;
-    int m_sampleCount = 16;
-    int m_ssaoKernelSize = 16;
+    bool m_drawGrid                 = true;
+    bool m_drawTextures             = true;
+    bool m_drawCollision            = false;
+    bool m_showGUI                  = false;
+    bool m_cursorMode               = false;
+    glm::vec3 m_nightAmbientFloor   = glm::vec3(0.002f, 0.003f, 0.006f);
+    bool m_debugShowSSAO            = false;
+    bool m_debugShowSSAOBlur        = false;
+    float m_debugSSAOKernelRadius   = 0.25f;
+    float m_debugSSAOBias           = 0.005f;
+    int m_sampleCount               = 16;
+    int m_ssaoKernelSize            = 16;
 
     // =========================================================================
     // Performance Tracking
     // =========================================================================
 
     sf::Clock m_fpsClock;
-    int   m_fpsFrameCount  = 0;
-    float m_fps            = 0.0f;
-    float m_lastFrameTime  = 0.0f;
+    int   m_fpsFrameCount           = 0;
+    float m_fps                     = 0.0f;
+    float m_lastFrameTime           = 0.0f;
 
     // =========================================================================
     // Scene Initialization
