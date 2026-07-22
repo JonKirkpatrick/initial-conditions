@@ -107,4 +107,6 @@ private:
     std::array<GLint, 81> m_activeSliceUniforms{};
     GLuint m_arrayTexture = 0;
     bool   m_subgridDirty = true;
+    GLuint m_pbo = 0;
+    std::vector<float> m_packedSubgridData;
 };

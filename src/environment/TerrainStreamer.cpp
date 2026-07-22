@@ -89,6 +89,18 @@ TerrainStreamer::TerrainStreamer(const std::filesystem::path& manifestPath)
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
+    constexpr int kVisibleLayers = WorldCoordinates::Square::kVisibleGridDim * WorldCoordinates::Square::kVisibleGridDim; // 81
+    const size_t totalSubgridBytes = kVisibleLayers * floatsPerTile * sizeof(float);
+
+    // Reserve CPU packed staging memory
+    m_packedSubgridData.resize(kVisibleLayers * floatsPerTile, 0.0f);
+
+    // Create and allocate PBO
+    glGenBuffers(1, &m_pbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, totalSubgridBytes, nullptr, GL_STREAM_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
     // Worker thread intentionally not started yet -- Stage 7.1 runs
     // synchronously on the calling thread. Stage 7.4 will start it here.
 }
@@ -98,6 +110,10 @@ TerrainStreamer::~TerrainStreamer()
     if (m_arrayTexture != 0)
     {
         glDeleteTextures(1, &m_arrayTexture);
+    }
+    if (m_pbo != 0) 
+    {
+        glDeleteBuffers(1, &m_pbo);
     }
     // worker-thread teardown, still pending 7.4, unchanged
 }
@@ -363,21 +379,44 @@ GLuint TerrainStreamer::getOrUploadArrayTexture()
 
     using namespace WorldCoordinates::Square;
     constexpr int kTexSide = kTileResolution + kApronTexels;
-    static const std::vector<float> kZeroTile(static_cast<size_t>(kTexSide) * kTexSide, 0.0f);
+    const size_t floatsPerTile = tileAllocFloatCount();
+    const size_t bytesPerTile  = floatsPerTile * sizeof(float);
+    static const std::vector<float> kZeroTile(floatsPerTile, 0.0f);
 
     const ActiveSubgrid subgrid = getActiveSubgrid();
 
-    glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
+    // -------------------------------------------------------------------------
+    // Step 1: Pack all 81 active layers into one contiguous CPU buffer
+    // -------------------------------------------------------------------------
     for (int layer = 0; layer < static_cast<int>(subgrid.size()); ++layer)
     {
         const ActiveTileSlice& slice = subgrid[layer];
         const float* src = slice.valid ? slice.data : kZeroTile.data();
-        glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
-                         0, 0, layer,
-                         kTexSide, kTexSide, 1,
-                         GL_RED, GL_FLOAT, src);
+
+        // Copy source tile into contiguous CPU slice block
+        float* dst = m_packedSubgridData.data() + (layer * floatsPerTile);
+        std::memcpy(dst, src, bytesPerTile);
     }
+
+    // -------------------------------------------------------------------------
+    // Step 2: Asynchronous DMA Transfer via PBO (1 single API call for all layers!)
+    // -------------------------------------------------------------------------
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbo);
+    
+    // Orphan/Re-allocate the buffer to avoid CPU-GPU sync stalls (GL_STREAM_DRAW)
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, m_packedSubgridData.size() * sizeof(float), nullptr, GL_STREAM_DRAW);
+    glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, m_packedSubgridData.size() * sizeof(float), m_packedSubgridData.data());
+
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
+    
+    // Upload ALL 81 layers in 1 shot! Passing 'nullptr' reads from offset 0 in the bound PBO
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
+                    0, 0, 0,                          // x, y, z starting offsets
+                    kTexSide, kTexSide, subgrid.size(),// width, height, depth (81 layers)
+                    GL_RED, GL_FLOAT, nullptr);       // nullptr = offset into PBO
+
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0); // Unbind PBO so normal texture calls work again
 
     m_subgridDirty = false;
     return m_arrayTexture;

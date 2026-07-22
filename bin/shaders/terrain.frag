@@ -6,22 +6,22 @@
 // ==============================================================================
 // == Remaining Loose Uniforms ==================================================
 // ==============================================================================
-uniform float u_heightMax;
-uniform float u_reliefExaggeration;
+layout(location = 0) uniform float u_heightMax;
+layout(location = 1) uniform float u_reliefExaggeration;
 
-uniform bool  u_cursorMode;
-uniform float u_hexSize;
-uniform vec2  u_hoveredHex;
-uniform vec3  u_gridColour;
+layout(location = 2) uniform bool  u_cursorMode;
+layout(location = 3) uniform float u_hexSize;
+layout(location = 4) uniform vec2  u_hoveredHex;
+layout(location = 5) uniform vec3  u_gridColour;
 
 in vec2 v_worldXZ;
 in vec2 v_normalXZ;
 in float v_worldY;
 
-layout (location = 0) out vec4 outAlbedo;
-layout (location = 1) out vec4 outNormal;
-layout (location = 2) out vec4 outIndices;
-layout (location = 3) out vec4 outRetro;
+layout(location = 0) out vec4 outAlbedo;
+layout(location = 1) out vec4 outNormal;
+layout(location = 2) out vec4 outIndices;
+layout(location = 3) out vec4 outRetro;
 
 // ==============================================================================
 // == G-Buffer Structs ==========================================================

@@ -15,12 +15,12 @@ namespace Uniforms {
         constexpr GLint MoonTexture        = Base + 3;
     }
 
-    namespace Fog {
-        constexpr GLint Base               = 120;
-        constexpr GLint ColorDay           = Base + 0;
-        constexpr GLint ColorNight         = Base + 1;
-        constexpr GLint Density            = Base + 2;
-        // ...
+    namespace Shadows {
+        constexpr GLint Base               = 200;
+        constexpr GLint LightViewProj      = Base + 0;
+        constexpr GLint TexelWorldSize     = Base + 5;
+        constexpr GLint CascadeSplitDepths = Base + 10;
+        constexpr GLint ShadowMapArray     = Base + 15;
     }
 
     // =========================================================================
@@ -33,6 +33,19 @@ namespace Uniforms {
         constexpr GLint Time               = 2;
         constexpr GLint GDepth             = 3;
         constexpr GLint NightAmbientFloor  = 4;
+    }
+
+    namespace Terrain {
+        constexpr GLint HeightMax               = 0;
+        constexpr GLint ReliefExaggeration      = 1;
+        constexpr GLint CursorMode              = 2;
+        constexpr GLint HexSize                 = 3;
+        constexpr GLint HoveredHex              = 4;
+        constexpr GLint GridColour              = 5;
+        constexpr GLint TerrainGridWorldOrigin  = 6;
+        constexpr GLint TerrainTileWorldSize    = 7;
+        constexpr GLint TerrainHeightArray      = 8;
+        constexpr GLint TerrainSliceValid       = 9;
     }
 
 } // namespace Uniforms

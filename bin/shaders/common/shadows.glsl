@@ -1,7 +1,7 @@
-uniform sampler2DArrayShadow u_shadowMap;
-uniform mat4  u_lightViewProj[5];
-uniform float u_cascadeSplitDepths[5];
-uniform float u_texelWorldSize[5];
+layout(location = 200) uniform mat4  u_lightViewProj[5];
+layout(location = 205) uniform float u_texelWorldSize[5];
+layout(location = 210) uniform float u_cascadeSplitDepths[5];
+layout(location = 215) uniform sampler2DArrayShadow u_shadowMap;
 
 int selectCascade(vec3 worldPos) {
     float viewDepth = dot(worldPos - u_cameraPos, u_cameraForward);

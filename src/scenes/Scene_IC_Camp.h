@@ -225,8 +225,11 @@ protected:
     // Rendering — Orbs
     // =========================================================================
 
-    OrbSSBO             m_orbSSBO;
-    std::vector<OrbData> buildOrbData() const;
+    std::vector<OrbData>            buildOrbData() const;
+    static constexpr std::size_t    MAX_ORB_CAPACITY = 256000;
+    OrbSSBO                         m_orbSSBO{MAX_ORB_CAPACITY};
+    std::vector<OrbData>            m_orbStagingBuffer;
+
 
     // =========================================================================
     // Rendering — HUD

@@ -11,9 +11,9 @@ out vec3 FragPos;
 out vec3 Normal;
 out vec2 TexCoords;
 
-uniform mat4 model;
-uniform mat3 normalMatrix;
-uniform float time;
+layout(location = 0) uniform mat4 model;
+layout(location = 1) uniform mat3 normalMatrix;
+layout(location = 2) uniform float time;
 
 vec2 rotate(vec2 v, float angle) {
     float s = sin(angle);

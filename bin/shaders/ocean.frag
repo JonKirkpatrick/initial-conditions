@@ -15,8 +15,8 @@ in vec2 TexCoords;
 
 out vec4 FragColor;
 
-uniform sampler2D u_gDepth;
-uniform vec3  u_nightAmbientFloor;
+layout(location = 3) uniform sampler2D u_gDepth;
+layout(location = 4) uniform vec3  u_nightAmbientFloor;
 
 void main()
 {

@@ -16,6 +16,7 @@
 #include "renderer/Camera.h"
 #include "environment/Astro.hpp"
 #include "environment/TerrainStreamer.h"
+#include "renderer/ShaderLocations.h"
 #include <random>
 #include <array>
 #include <filesystem>
@@ -1885,16 +1886,38 @@ std::vector<OrbData> Scene_IC_Camp::buildOrbData() const
 
 void Scene_IC_Camp::initializeOrbShaderStorage()
 {
-    m_orbSSBO.upload(buildOrbData());
+    m_orbStagingBuffer.reserve(MAX_ORB_CAPACITY);
+    updateOrbShaderStorage();
 }
 
 void Scene_IC_Camp::updateOrbShaderStorage()
 {
-    auto orbData = buildOrbData();
-    if (m_orbSSBO.count() != static_cast<int>(orbData.size()))
-        m_orbSSBO.upload(orbData);
-    else
-        m_orbSSBO.update(orbData);
+    m_orbStagingBuffer.clear();
+
+    const auto& orbEntities = m_entityManager.getEntities("orb");
+
+    for (const auto& orb : orbEntities)
+    {
+        if (m_orbStagingBuffer.size() >= MAX_ORB_CAPACITY) break;
+
+        const auto& t    = m_entityManager.getTransform(orb);
+        const auto& c    = m_entityManager.getOrb(orb);
+        const auto& eyes = m_entityManager.getEyes(orb);
+        
+        const auto& f = t.forward();
+        const auto& r = t.right();
+        const auto& u = t.up();
+
+        m_orbStagingBuffer.push_back(OrbData{
+            .centreAndSpeciesIdx = { t.pos.x, t.pos.y, t.pos.z, static_cast<float>(c.speciesIdx) },
+            .forwardAndRadius    = { f.x, f.y, f.z, c.radius },
+            .rightPadded         = { r.x, r.y, r.z, 0.0f },
+            .upPadded            = { u.x, u.y, u.z, 0.0f },
+            .gazeDirDilationAndEyelidClosure = { eyes.gazeDirection.x, eyes.gazeDirection.y, eyes.pupilDilation, eyes.eyelidClosure }
+        });
+    }
+
+    m_orbSSBO.update(m_orbStagingBuffer.data(), m_orbStagingBuffer.size());
 }
 
 void Scene_IC_Camp::runTerrainPass() 
@@ -1910,28 +1933,28 @@ void Scene_IC_Camp::runTerrainPass()
     // 1. Bind Textures and Terrain Streaming Arrays
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
-    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_terrainHeightArray"), 0);
+    glUniform1i(Uniforms::Terrain::TerrainHeightArray, 0);
 
     sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
-    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_terrainGridWorldOrigin"),
+    glUniform2f(Uniforms::Terrain::TerrainGridWorldOrigin,
                 gridOrigin.x, gridOrigin.y);
 
     constexpr float kTileWorldSize =
         WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_terrainTileWorldSize"), kTileWorldSize);
+    glUniform1f(Uniforms::Terrain::TerrainTileWorldSize, kTileWorldSize);
 
-    glUniform1iv(glGetUniformLocation(m_terrainProgram, "u_terrainSliceValid"), 81,
+    glUniform1iv(Uniforms::Terrain::TerrainSliceValid, 81,
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
     // 2. Structural & Geometry Tweak Uniforms
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_heightMax"), m_topdownMaxHeight);
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_reliefExaggeration"), 1.0f);
+    glUniform1f(Uniforms::Terrain::HeightMax, m_topdownMaxHeight);
+    glUniform1f(Uniforms::Terrain::ReliefExaggeration, 1.0f);
 
     // 3. Cursor & Selection Grid Uniforms
-    glUniform1i(glGetUniformLocation(m_terrainProgram, "u_cursorMode"), static_cast<int>(m_cursorMode));
-    glUniform1f(glGetUniformLocation(m_terrainProgram, "u_hexSize"), m_hexSize);
-    glUniform2f(glGetUniformLocation(m_terrainProgram, "u_hoveredHex"), static_cast<float>(hex.x), static_cast<float>(hex.y));
-    glUniform3f(glGetUniformLocation(m_terrainProgram, "u_gridColour"), m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
+    glUniform1i(Uniforms::Terrain::CursorMode, static_cast<int>(m_cursorMode));
+    glUniform1f(Uniforms::Terrain::HexSize, m_hexSize);
+    glUniform2f(Uniforms::Terrain::HoveredHex, static_cast<float>(hex.x), static_cast<float>(hex.y));
+    glUniform3f(Uniforms::Terrain::GridColour, m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
     
     // 4. Render
     glBindVertexArray(m_gridVAO);
@@ -2216,17 +2239,17 @@ void Scene_IC_Camp::renderSky()
     glUseProgram(m_skyProgram);
 
     // 1. Send Remaining Celestial Structural Data
-    glUniform1i(glGetUniformLocation(m_skyProgram, "useSkyCubemap"), m_skyCubemapReady);
-    glUniformMatrix3fv(glGetUniformLocation(m_skyProgram, "starRotationMatrix"), 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
+    glUniform1i(Uniforms::Sky::UseSkyCubemap, m_skyCubemapReady);
+    glUniformMatrix3fv(Uniforms::Sky::StarRotationMatrix, 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
     
     // 2. Bind Texture Units Deterministically
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapReady ? m_skyCubemapHandle : 0);
-    glUniform1i(glGetUniformLocation(m_skyProgram, "skyCubemap"), 0);
+    glUniform1i(Uniforms::Sky::Cubemap, 0);
 
     glActiveTexture(GL_TEXTURE1);
     sf::Texture::bind(&m_moonTexture);
-    glUniform1i(glGetUniformLocation(m_skyProgram, "moonTexture"), 1);
+    glUniform1i(Uniforms::Sky::MoonTexture, 1);
 
     // 3. Procedural Draw Call
     glBindVertexArray(m_gridVAO); 
@@ -2277,36 +2300,31 @@ void Scene_IC_Camp::renderOceanGrid()
     glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(snappedX, m_seaLevel, snappedZ));
     glm::mat3 normalMatrix = glm::mat3(glm::transpose(glm::inverse(model)));
     
-    glUniformMatrix4fv(glGetUniformLocation(m_oceanProgram, "model"), 1, GL_FALSE, &model[0][0]);
-    glUniformMatrix3fv(glGetUniformLocation(m_oceanProgram, "normalMatrix"), 1, GL_FALSE, &normalMatrix[0][0]);
-    glUniform1f(glGetUniformLocation(m_oceanProgram, "time"), m_game.getElapsedClock().getElapsedTime().asSeconds());
+    glUniformMatrix4fv(Uniforms::Ocean::Model, 1, GL_FALSE, &model[0][0]);
+    glUniformMatrix3fv(Uniforms::Ocean::NormalMatrix, 1, GL_FALSE, &normalMatrix[0][0]);
+    glUniform1f(Uniforms::Ocean::Time, m_game.getElapsedClock().getElapsedTime().asSeconds());
 
     // =========================================================================
     // Bind Textures for Ocean Pass
     // =========================================================================
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
-    glUniform1i(glGetUniformLocation(m_oceanProgram, "u_gDepth"), 0);
+    glUniform1i(Uniforms::Ocean::GDepth, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthTexArray);
-    glUniform1i(glGetUniformLocation(m_oceanProgram, "u_shadowMap"), 1);
+    glUniform1i(Uniforms::Shadows::ShadowMapArray, 1);
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
-    glUniform1i(glGetUniformLocation(m_oceanProgram, "skyCubemap"), 2);
+    glUniform1i(Uniforms::Sky::Cubemap, 2);
 
-    glUniform1i(glGetUniformLocation(m_oceanProgram, "useSkyCubemap"), m_skyCubemapReady);
-    glUniformMatrix3fv(glGetUniformLocation(m_oceanProgram, "starRotationMatrix"), 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
+    glUniform1i(Uniforms::Sky::UseSkyCubemap, m_skyCubemapReady);
+    glUniformMatrix3fv(Uniforms::Sky::StarRotationMatrix, 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
     
     glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
-    glUniform1i(glGetUniformLocation(m_oceanProgram, "skyCubemap"), 3);
-
-    glActiveTexture(GL_TEXTURE4);
     sf::Texture::bind(&m_moonTexture);
-    glUniform1i(glGetUniformLocation(m_oceanProgram, "moonTexture"), 4);
-
+    glUniform1i(Uniforms::Sky::MoonTexture, 3);
 
 
     // =========================================================================
@@ -2341,7 +2359,6 @@ void Scene_IC_Camp::renderOceanGrid()
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-    glActiveTexture(GL_TEXTURE4);
     sf::Texture::bind(nullptr);
     
     // Reset states back to what SFML/HUD expects

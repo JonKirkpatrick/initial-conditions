@@ -5,14 +5,12 @@
 // ==============================================================================
 // == Remaining Vertex Uniforms =================================================
 // ==============================================================================
-layout(location = 0) in vec2 a_uv; // spans [0,1] across the FULL 5x5 visible grid
+layout(location = 0) in vec2 a_uv;                  // spans [0,1] across the FULL 9x9 visible grid
 
-uniform sampler2DArray u_terrainHeightArray;
-uniform vec2           u_terrainGridWorldOrigin; // world-space origin of subgrid tile [0][0]
-uniform float          u_terrainTileWorldSize;   // meters per tile side (256 * 4m)
-uniform int            u_terrainSliceValid[81];  // from getActiveSliceUniforms()
-
-// REMOVED: uniform mat4 u_viewProj; (Handled by UBO)
+layout(location = 6) uniform vec2           u_terrainGridWorldOrigin; // world-space origin of subgrid tile [0][0]
+layout(location = 7) uniform float          u_terrainTileWorldSize;   // meters per tile side (256 * 4m)
+layout(location = 8) uniform sampler2DArray u_terrainHeightArray;
+layout(location = 9) uniform int            u_terrainSliceValid[81];  // from getActiveSliceUniforms()
 
 out vec2  v_worldXZ;
 out vec2  v_normalXZ;
