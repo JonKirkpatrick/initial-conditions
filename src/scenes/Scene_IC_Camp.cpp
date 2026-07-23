@@ -453,7 +453,13 @@ void Scene_IC_Camp::sRender()
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
-    deferredLighting();
+    if (m_debugShowSSAOBlur)
+    {
+        blitToScreen(m_ssaoPipeline.blurTex);
+    } else
+    {
+        deferredLighting();
+    }
     renderOceanGrid();
     window.resetGLStates();
     m_hud->render(window, false);
@@ -1509,20 +1515,20 @@ void Scene_IC_Camp::runShadowPass()
         
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
-        glUniform1i(glGetUniformLocation(m_terrainShadowProgram, "u_terrainHeightArray"), 0);
+        glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
 
         sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
-        glUniform2f(glGetUniformLocation(m_terrainShadowProgram, "u_terrainGridWorldOrigin"),
+        glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin,
                     gridOrigin.x, gridOrigin.y);
 
         constexpr float kTileWorldSize =
             WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
-        glUniform1f(glGetUniformLocation(m_terrainShadowProgram, "u_terrainTileWorldSize"), kTileWorldSize);
+        glUniform1f(Uniforms::SharedTerrain::TerrainTileWorldSize, kTileWorldSize);
 
-        glUniform1iv(glGetUniformLocation(m_terrainShadowProgram, "u_terrainSliceValid"), 81,
+        glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81,
                     m_terrainStreamer->getActiveSliceUniforms().data());
         
-        glUniformMatrix4fv(glGetUniformLocation(m_terrainShadowProgram, "u_lightViewProj"),
+        glUniformMatrix4fv(Uniforms::ShadowPass::LightViewProj,
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
         
         glBindVertexArray(m_gridVAO);
@@ -1534,7 +1540,7 @@ void Scene_IC_Camp::runShadowPass()
         {
             glUseProgram(m_orbShadowProgram);
             
-            glUniformMatrix4fv(glGetUniformLocation(m_orbShadowProgram, "u_lightViewProj"),
+            glUniformMatrix4fv(Uniforms::ShadowPass::LightViewProj,
                             1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
             
             m_orbSSBO.bind(0);
@@ -1708,12 +1714,10 @@ void Scene_IC_Camp::uploadViewRays(GLuint shaderProgram)
     float farHeight = farPlane * tangent;
     float farWidth = farHeight * aspect;
 
-    // View Space corners at the far plane (Remember: Camera looks down -Z!)
-    // Top-Right, Bottom-Left, etc.
-    glUniform3f(glGetUniformLocation(shaderProgram, "u_farTopRight"),   farWidth,  farHeight, -farPlane);
-    glUniform3f(glGetUniformLocation(shaderProgram, "u_farTopLeft"),   -farWidth,  farHeight, -farPlane);
-    glUniform3f(glGetUniformLocation(shaderProgram, "u_farBottomLeft"), -farWidth, -farHeight, -farPlane);
-    glUniform3f(glGetUniformLocation(shaderProgram, "u_farBottomRight"), farWidth, -farHeight, -farPlane);
+    glUniform3f(Uniforms::SSAO::TopRight,   farWidth,  farHeight, -farPlane);
+    glUniform3f(Uniforms::SSAO::TopLeft,   -farWidth,  farHeight, -farPlane);
+    glUniform3f(Uniforms::SSAO::BottomLeft, -farWidth, -farHeight, -farPlane);
+    glUniform3f(Uniforms::SSAO::BottomRight, farWidth, -farHeight, -farPlane);
 }
 
 void Scene_IC_Camp::runSSAOPass() 
@@ -1724,6 +1728,7 @@ void Scene_IC_Camp::runSSAOPass()
     glDisable(GL_DEPTH_TEST);
 
     glUseProgram(m_ssao);
+    uploadViewRays(m_ssao);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
@@ -1764,15 +1769,15 @@ void Scene_IC_Camp::runSSAOBlurPass()
     // 1. Bind Input Texture Contexts
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_ssaoPipeline.colorTex);
-    glUniform1i(glGetUniformLocation(m_ssao_blur, "u_ssaoInput"), 0);
+    glUniform1i(Uniforms::SSAOBlur::SSAOInput, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, m_gNormalTex);
-    glUniform1i(glGetUniformLocation(m_ssao_blur, "u_gNormal"), 1);
+    glUniform1i(Uniforms::GBuffer::GNormalTex, 1);
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
-    glUniform1i(glGetUniformLocation(m_ssao_blur, "u_gDepth"), 2);
+    glUniform1i(Uniforms::GBuffer::GDepthTex, 2);
 
     // 2. Procedural Fullscreen Draw Call (Zero allocation overhead)
     glBindVertexArray(m_gridVAO); 
@@ -1932,21 +1937,21 @@ void Scene_IC_Camp::runTerrainPass()
     // 1. Bind Textures and Terrain Streaming Arrays
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
-    glUniform1i(Uniforms::Terrain::TerrainHeightArray, 0);
+    glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
 
     sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
-    glUniform2f(Uniforms::Terrain::TerrainGridWorldOrigin,
+    glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin,
                 gridOrigin.x, gridOrigin.y);
 
     constexpr float kTileWorldSize =
         WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
-    glUniform1f(Uniforms::Terrain::TerrainTileWorldSize, kTileWorldSize);
+    glUniform1f(Uniforms::SharedTerrain::TerrainTileWorldSize, kTileWorldSize);
 
-    glUniform1iv(Uniforms::Terrain::TerrainSliceValid, 81,
+    glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81,
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
     // 2. Structural & Geometry Tweak Uniforms
-    glUniform1f(Uniforms::Terrain::HeightMax, m_topdownMaxHeight);
+    glUniform1f(Uniforms::SharedTerrain::HeightMax, m_topdownMaxHeight);
     glUniform1f(Uniforms::Terrain::ReliefExaggeration, 1.0f);
 
     // 3. Cursor & Selection Grid Uniforms
@@ -1990,25 +1995,23 @@ void Scene_IC_Camp::updateMinimapTexture()
     glUseProgram(m_minimapProgram);
 
     // Uniforms
-    glUniform2f(glGetUniformLocation(m_minimapProgram, "u_playerXZ"), playerPos.x, playerPos.z);
-    glUniform1f(glGetUniformLocation(m_minimapProgram, "u_worldRadius"), worldRadius);
-    glUniform1f(glGetUniformLocation(m_minimapProgram, "u_heightMax"), m_topdownMaxHeight);
+    glUniform2f(Uniforms::MiniMap::PlayerXZ, playerPos.x, playerPos.z);
+    glUniform1f(Uniforms::MiniMap::WorldRadius, worldRadius);
+    glUniform1f(Uniforms::SharedTerrain::HeightMax, m_topdownMaxHeight);
 
     // Bind the terrain height array texture safely to texture unit 0
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
-    glUniform1i(glGetUniformLocation(m_minimapProgram, "u_terrainHeightArray"), 0);
+    glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
 
     sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
-    glUniform2f(glGetUniformLocation(m_minimapProgram, "u_terrainGridWorldOrigin"),
-                gridOrigin.x, gridOrigin.y);
+    glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin, gridOrigin.x, gridOrigin.y);
 
     constexpr float kTileWorldSize =
         WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
-    glUniform1f(glGetUniformLocation(m_minimapProgram, "u_terrainTileWorldSize"), kTileWorldSize);
+    glUniform1f(Uniforms::SharedTerrain::TerrainTileWorldSize, kTileWorldSize);
 
-    glUniform1iv(glGetUniformLocation(m_minimapProgram, "u_terrainSliceValid"), 81,
-                m_terrainStreamer->getActiveSliceUniforms().data());
+    glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81, m_terrainStreamer->getActiveSliceUniforms().data());
 
     // Draw fullscreen triangle using the zero-attribute VAO trick
     glBindVertexArray(m_gridVAO); 
@@ -2066,11 +2069,11 @@ void Scene_IC_Camp::renderOrbCreature()
     // ==================== TEXTURES ====================
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getSpeciesDiffuseArray());
-    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_charDiffuseTex"), 0);
+    glUniform1i(Uniforms::OrbCreature::DiffuseTex, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getSpeciesNormalArray());
-    glUniform1i(glGetUniformLocation(m_OrbCreatureProgram, "u_charNormalTex"), 1);
+    glUniform1i(Uniforms::OrbCreature::NormalTex, 1);
 
     // ==================== DRAW ====================
     m_orbSSBO.bind(0);
@@ -2193,7 +2196,7 @@ void Scene_IC_Camp::blitToScreen(GLuint tex)
     glUseProgram(m_blitProgram);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glUniform1i(glGetUniformLocation(m_blitProgram, "u_tex"), 0);
+    glUniform1i(Uniforms::Blit::InputTex, 0);
 
     if (m_blitVAO == 0) {
         static const float quadVerts[] = {

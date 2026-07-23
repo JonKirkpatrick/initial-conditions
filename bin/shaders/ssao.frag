@@ -16,8 +16,8 @@ layout(location = 0) uniform sampler2D u_texNoise;
 layout(location = 1) uniform float u_radius;     
 layout(location = 2) uniform float u_bias;       
 layout(location = 3) uniform vec2  u_noiseScale;  
-layout(location = 4) uniform int   u_sampleCount = 16;
-layout(location = 5) uniform vec3  u_samples[16];
+layout(location = 4) uniform int   u_sampleCount;
+layout(location = 9) uniform vec3  u_samples[64];
 
 vec3 getPositionInViewSpace(vec2 uv) {
     float depth = texture(u_gDepth, uv).r;

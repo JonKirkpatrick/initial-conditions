@@ -2,17 +2,16 @@
 
 #include "ubos/camera.glsl"
 #include "ubos/environment.glsl"
+#include "common/terrain.glsl"
 
 // ==============================================================================
 // == Remaining Loose Uniforms ==================================================
 // ==============================================================================
-layout(location = 0) uniform float u_heightMax;
-layout(location = 1) uniform float u_reliefExaggeration;
-
-layout(location = 2) uniform bool  u_cursorMode;
-layout(location = 3) uniform float u_hexSize;
-layout(location = 4) uniform vec2  u_hoveredHex;
-layout(location = 5) uniform vec3  u_gridColour;
+layout(location = 0) uniform float u_reliefExaggeration;
+layout(location = 1) uniform bool  u_cursorMode;
+layout(location = 2) uniform float u_hexSize;
+layout(location = 3) uniform vec2  u_hoveredHex;
+layout(location = 4) uniform vec3  u_gridColour;
 
 in vec2 v_worldXZ;
 in vec2 v_normalXZ;

@@ -264,8 +264,8 @@ protected:
     bool m_debugShowSSAOBlur        = false;
     float m_debugSSAOKernelRadius   = 0.25f;
     float m_debugSSAOBias           = 0.005f;
-    int m_sampleCount               = 16;
-    int m_ssaoKernelSize            = 16;
+    int m_sampleCount               = 64;
+    int m_ssaoKernelSize            = 64;
 
     // =========================================================================
     // Performance Tracking

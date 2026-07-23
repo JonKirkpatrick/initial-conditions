@@ -14,8 +14,8 @@ flat in int v_instanceID;
 // ==============================================================================
 // == Remaining Uniforms ========================================================
 // ==============================================================================
-uniform sampler2DArray u_charDiffuseTex;
-uniform sampler2DArray u_charNormalTex;
+layout(location = 0) uniform sampler2DArray u_charDiffuseTex;
+layout(location = 1) uniform sampler2DArray u_charNormalTex;
 
 // G-Buffer Slots
 layout (location = 0) out vec4 outAlbedo;

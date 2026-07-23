@@ -1,15 +1,10 @@
 #version 460 core
 
-// == Terrain Array Uniforms (matching terrain.vert) =========================
-uniform sampler2DArray u_terrainHeightArray;
-uniform vec2           u_terrainGridWorldOrigin; // world-space origin of subgrid tile [0][0]
-uniform float          u_terrainTileWorldSize;   // meters per tile side (e.g., 256 * 4m)
-uniform int            u_terrainSliceValid[81];  // active slice validation flags
+#include "common/terrain.glsl"
 
 // == Minimap Parameters =====================================================
-uniform vec2  u_playerXZ;
-uniform float u_worldRadius;
-uniform float u_heightMax;
+layout(location = 0) uniform vec2  u_playerXZ;
+layout(location = 1) uniform float u_worldRadius;
 
 in vec2 v_uv; // Spans [0, 1] in circular minimap quad space
 out vec4 fragColor;

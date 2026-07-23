@@ -1,5 +1,6 @@
 #version 460 core
 #include "ubos/camera.glsl"
+#include "common/gBuffer.glsl"
 
 out float FragColor;
 in vec2 v_uv;
@@ -7,9 +8,7 @@ in vec2 v_uv;
 // ==============================================================================
 // == Texture Samplers ==========================================================
 // ==============================================================================
-uniform sampler2D u_ssaoInput; 
-uniform sampler2D u_gNormal;    
-uniform sampler2D u_gDepth;
+layout(location = 0) uniform sampler2D u_ssaoInput; 
 
 // Linearize the raw depth so we are working with actual world units (meters)
 float getLinearDepth(vec2 uv) {
