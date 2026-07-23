@@ -4,23 +4,39 @@
     "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
     "roughness": 0.36,
     "metallic": 0.0,
-    "specularReflectance": 0.04,
+    "specularReflectance": 0.12,
     "emissiveIntensity": 0.0
   },
   {
     "name": "CreatureEye",
     "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
-    "roughness": 0.17,
+    "roughness": 0.05,
     "metallic": 0.0,
-    "specularReflectance": 0.025,
+    "specularReflectance": 0.25,
     "emissiveIntensity": 0.0
   },
   {
-    "name": "Terrain",
+    "name": "TerrainGrass",
     "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
-    "roughness": 0.92,
+    "roughness": 0.85,
     "metallic": 0.0,
-    "specularReflectance": 0.04,
+    "specularReflectance": 0.02,
+    "emissiveIntensity": 0.0
+  },
+  {
+    "name": "TerrainRock",
+    "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
+    "roughness": 0.35,
+    "metallic": 0.0,
+    "specularReflectance": 0.08,
+    "emissiveIntensity": 0.0
+  },
+  {
+    "name": "TerrainShore",
+    "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
+    "roughness": 0.25,
+    "metallic": 0.0,
+    "specularReflectance": 0.12,
     "emissiveIntensity": 0.0
   }
 ]

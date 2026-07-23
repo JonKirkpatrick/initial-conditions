@@ -371,7 +371,7 @@ void main()
     outAlbedo           = vec4(mat.albedo, 1.0);
     outNormal           = vec4(geo.normal, 1.0);
     outIndices.y        = float(mat.speciesIdx);
-    outIndices.zw       = vec2(1.0, 1.0);
+    outIndices.zw       = vec2(1.0, 0.0);
 
     float actualPupilMask = 0.0;
     if (geo.hitType == 1 || geo.hitType == 2) { // It's an eye

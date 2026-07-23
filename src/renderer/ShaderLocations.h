@@ -58,6 +58,7 @@ namespace Uniforms {
         constexpr GLint HexSize                 = 2;
         constexpr GLint HoveredHex              = 3;
         constexpr GLint GridColour              = 4;
+        constexpr GLint SeaLevel                = 5;
     }
 
     namespace Lighting {
@@ -88,6 +89,7 @@ namespace Uniforms {
     namespace MiniMap {
         constexpr GLint PlayerXZ                = 0;
         constexpr GLint WorldRadius             = 1;
+        constexpr GLint SeaLevel                = 2;
     }
 
     namespace ShadowPass {

@@ -67,10 +67,22 @@ void main()
     vec4 retroSample   = texture(u_gRetro, v_uv);
 
     vec3 albedo        = albedoSample.rgb;
-    int materialID     = int(indicesSample.r * 255.0 + 0.5);
-    int speciesIdx     = int(indicesSample.g * 255.0 + 0.5);
 
-    MaterialData mat   = material[materialID];
+    // --- DUAL MATERIAL UNPACKING ---
+    int primaryMatID   = int(indicesSample.r * 255.0 + 0.5);
+    int speciesIdx     = int(indicesSample.g * 255.0 + 0.5);
+    int secondaryMatID = int(indicesSample.b * 255.0 + 0.5);
+    float matBlend     = indicesSample.a;
+
+    // Fetch both materials from SSBO
+    MaterialData matA = material[primaryMatID];
+    MaterialData matB = material[secondaryMatID];
+
+    // Blend material properties
+    vec4  matAlbedoTint         = mix(matA.albedoTint, matB.albedoTint, matBlend);
+    float matRoughness          = mix(matA.roughness, matB.roughness, matBlend);
+    float matMetallic           = mix(matA.metallic, matB.metallic, matBlend);
+    float matSpecularReflectance = mix(matA.specularReflectance, matB.specularReflectance, matBlend);
     
     vec3 worldPos      = reconstructWorldPos(v_uv, depth, u_invViewProj);
     vec3 viewDir       = normalize(u_cameraPos - worldPos);
@@ -83,11 +95,10 @@ void main()
 
     float ssao = texture(u_ssaoTex, v_uv).r;
     vec3 dayFloor        = vec3(0.04, 0.06, 0.09);
-    vec3 nightFloor       = u_nightAmbientFloor; 
+    vec3 nightFloor      = u_nightAmbientFloor; 
     vec3 ambientFloor    = mix(nightFloor, dayFloor, dayLightingFactor);
     vec3 skyColor        = u_sunColor.rgb * 0.15 * dayLightingFactor + ambientFloor;
-    vec3 ambientLight    = skyColor * albedo * mat.albedoTint.rgb * ssao;
-    
+    vec3 ambientLight    = skyColor * albedo * matAlbedoTint.rgb * ssao;
 
     // 2. Diffuse Sun Light Calculation
     vec3 sunDirection  = normalize(u_sunDir);
@@ -95,8 +106,19 @@ void main()
     
     int cascade                 = selectCascade(worldPos);
     float shadowContribution    = computeShadow(worldPos, normal, sunDirection, cascade);
+
+    // --- SPECULAR REFLECTION (Data-Driven via Blended Material) ---
+    vec3 halfDir      = normalize(sunDirection + viewDir);
+    float specAngle   = max(dot(normal, halfDir), 0.0);
+
+    // Convert blended roughness from MaterialData SSBO (0.0 = glossy, 1.0 = rough) to shininess exponent
+    float shininess   = mix(128.0, 2.0, clamp(matRoughness, 0.05, 1.0)); 
+    float specular    = pow(specAngle, shininess) * matSpecularReflectance;
+
+    vec3 specColor    = u_sunColor.rgb * specular * shadowContribution * dayLightingFactor;
     
-    vec3 diffuseLight = u_sunColor.rgb * sunLambert * albedo * mat.albedoTint.rgb * shadowContribution * dayLightingFactor;
+    vec3 diffuseLight = (u_sunColor.rgb * sunLambert * albedo * matAlbedoTint.rgb + specColor) 
+                    * shadowContribution * dayLightingFactor;
 
     // 3. Player Headlamp Light
     float lampIntensityMask = 0.0;
@@ -115,7 +137,7 @@ void main()
         if (lampIntensityMask > 0.001) {
             float lampLambert = max(dot(normal, viewDir), 0.0);
             vec3 lampColour   = vec3(1.0, 0.95, 0.85); 
-            diffuseLight     += lampColour * lampLambert * albedo * mat.albedoTint.rgb * lampIntensityMask;
+            diffuseLight     += lampColour * lampLambert * albedo * matAlbedoTint.rgb * lampIntensityMask;
         }
     }
 

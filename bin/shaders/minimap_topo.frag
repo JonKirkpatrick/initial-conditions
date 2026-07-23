@@ -5,6 +5,7 @@
 // == Minimap Parameters =====================================================
 layout(location = 0) uniform vec2  u_playerXZ;
 layout(location = 1) uniform float u_worldRadius;
+layout(location = 2) uniform float u_seaLevel;
 
 in vec2 v_uv; // Spans [0, 1] in circular minimap quad space
 out vec4 fragColor;
@@ -38,6 +39,25 @@ vec3 topoColour(float normHeight, float shade) {
     vec3 shadeTint = vec3(0.85, 0.88, 0.94);
     vec3 tint      = mix(shadeTint, litTint, shade);
     return clamp(base * light * tint, 0.0, 1.0);
+}
+
+// == Water Palette =========================================================
+vec3 waterColour(float depth, float shade) {
+    vec3 shallowColor = vec3(0.18, 0.55, 0.68); // Bright shallow cyan
+    vec3 deepColor    = vec3(0.04, 0.12, 0.32); // Deep ocean blue
+
+    // Transition depth range (e.g., full deep color reached at 50 units below sea level)
+    float maxDepth = 50.0; 
+    float t = clamp(depth / maxDepth, 0.0, 1.0);
+
+    vec3 base = mix(shallowColor, deepColor, t);
+
+    // Apply soft light shading to ocean floor
+    float ambient = 0.5;
+    float diffuse = 0.5;
+    float light   = ambient + diffuse * shade;
+
+    return clamp(base * light, 0.0, 1.0);
 }
 
 // ================== RESOLVE TILE SAMPLE ==================
@@ -99,11 +119,22 @@ void main() {
     float h = sampleHeight(xz);
     vec3  normal = computeNormal(xz);
 
-    float normH  = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
-    vec3  light  = normalize(vec3(-1.0, 1.0, 1.0));
-    float shade  = clamp(dot(normal, light), 0.0, 1.0);
-    vec3  colour = topoColour(normH, shade);
-    float edge   = smoothstep(1.0, 0.92, r);
+    vec3 light  = normalize(vec3(-1.0, 1.0, 1.0));
+    float shade = clamp(dot(normal, light), 0.0, 1.0);
+
+    vec3 colour;
+    if (h <= u_seaLevel) {
+        // Compute how far below sea level the terrain is
+        float depth = u_seaLevel - h;
+        colour = waterColour(depth, shade);
+    } else {
+        // Standard topographical terrain colouring for land
+        float normH = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
+        colour = topoColour(normH, shade);
+    }
+
+    // Apply circular minimap border fade
+    float edge = smoothstep(1.0, 0.92, r);
     colour = mix(vec3(0.776, 0.902, 0.804), colour, edge);
 
     fragColor = vec4(colour, edge);

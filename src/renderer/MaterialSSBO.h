@@ -30,8 +30,8 @@ static_assert(sizeof(MaterialData) == 64, "MaterialData alignment mismatch");
 
 class MaterialSSBO {
 public:
-    MaterialSSBO() { glGenBuffers(2, &m_ssbo); }
-    ~MaterialSSBO() { glDeleteBuffers(2, &m_ssbo); }
+    MaterialSSBO() { glGenBuffers(1, &m_ssbo); }
+    ~MaterialSSBO() { glDeleteBuffers(1, &m_ssbo); }
 
     void upload(const std::vector<MaterialData>& materials) {
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_ssbo);
