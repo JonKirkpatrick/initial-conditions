@@ -5,7 +5,7 @@
 #include "common/terrain.glsl"
 
 // ==============================================================================
-// == Remaining Loose Uniforms ==================================================
+// == Uniforms ==================================================================
 // ==============================================================================
 layout(location = 0) uniform float u_reliefExaggeration;
 layout(location = 1) uniform bool  u_cursorMode;
@@ -14,16 +14,9 @@ layout(location = 3) uniform vec2  u_hoveredHex;
 layout(location = 4) uniform vec3  u_gridColour;
 layout(location = 5) uniform float u_seaLevel;
 
-// This is a temporary experiment while learning about textures in the terrain shader
-layout(location = 6) uniform sampler2D u_rockARM;
-layout(location = 7) uniform sampler2D u_rockDiff;
-layout(location = 8) uniform sampler2D u_rockDisp;
-layout(location = 9) uniform sampler2D u_rockNorm;
-
-layout(location = 10) uniform sampler2D u_grassARM;
-layout(location = 11) uniform sampler2D u_grassDiff;
-layout(location = 12) uniform sampler2D u_grassDisp;
-layout(location = 13) uniform sampler2D u_grassNorm;
+// Unified Terrain 2D Texture Arrays
+layout(binding = 6) uniform sampler2DArray u_terrainDiffuseArray;
+layout(binding = 7) uniform sampler2DArray u_terrainNormalArray;
 
 in vec2 v_worldXZ;
 in vec2 v_normalXZ;
@@ -34,6 +27,11 @@ layout(location = 1) out vec4 outNormal;
 layout(location = 2) out vec4 outIndices;
 layout(location = 3) out vec4 outRetro;
 
+// Material ID Constants (Matches JSON indexing: Grass=2, Rock=3, Shore=4)
+const uint MAT_GRASS = 2u;
+const uint MAT_ROCK  = 3u;
+const uint MAT_SHORE = 4u;
+
 // ==============================================================================
 // == G-Buffer Structs ==========================================================
 // ==============================================================================
@@ -41,14 +39,14 @@ layout(location = 3) out vec4 outRetro;
 struct GeometrySample {
     vec3  pos;              // world-space position
     vec3  normal;           // world-space, after relief exaggeration + horizon damping
-    float dist;             // distance from camera (== "depth" in the orb shader)
-    float normHeight;       // height normalised to [0,1] against u_heightMax (pre-exaggeration curve)
+    float dist;             // distance from camera
+    float normHeight;       // height normalised to [0,1] against u_heightMax
 };
 
 struct MaterialSample {
     vec3  albedo;
-    uint  materialID;          // Primary Material ID (e.g., Grass = 2u)
-    uint  secondaryMaterialID; // Secondary Material ID (e.g., Shore = 4u)
+    uint  materialID;          // Primary Material ID
+    uint  secondaryMaterialID; // Secondary Material ID
     float blendFactor;         // Blend amount [0.0 = Primary, 1.0 = Secondary]
 };
 
@@ -105,56 +103,33 @@ float hexGrid(vec2 p) {
 }
 
 // ==============================================================================
-// == Topo Colour ================================================================
+// == Triplanar Samplers for Texture Arrays ======================================
 // ==============================================================================
 
-vec3 topoColour(float normHeight, float shade) {
-    vec3 c0 = vec3(0.467, 0.631, 0.388);
-    vec3 c1 = vec3(0.647, 0.753, 0.447);
-    vec3 c2 = vec3(0.827, 0.816, 0.510);
-    vec3 c3 = vec3(0.784, 0.667, 0.392);
-    vec3 c4 = vec3(0.651, 0.529, 0.408);
-    vec3 c5 = vec3(0.820, 0.800, 0.788);
-    vec3 base;
-    if      (normHeight < 0.15) base = mix(c0, c1, normHeight / 0.15);
-    else if (normHeight < 0.35) base = mix(c1, c2, (normHeight - 0.15) / 0.20);
-    else if (normHeight < 0.55) base = mix(c2, c3, (normHeight - 0.35) / 0.20);
-    else if (normHeight < 0.72) base = mix(c3, c4, (normHeight - 0.55) / 0.17);
-    else                        base = mix(c4, c5, (normHeight - 0.72) / 0.28);
-    float ambient = 0.38;
-    float diffuse = 0.62;
-    float light   = ambient + diffuse * shade;
-    vec3 litTint   = vec3(1.04, 1.01, 0.96);
-    vec3 shadeTint = vec3(0.85, 0.88, 0.94);
-    vec3 tint      = mix(shadeTint, litTint, shade);
-    return clamp(base * light * tint, 0.0, 1.0);
-}
-
-// ==============================================================================
-// == Triplanar Sampler =========================================================
-// ==============================================================================
-
-vec4 sampleTriplanar(sampler2D tex, vec3 worldPos, vec3 normal, float scale) {
+vec4 sampleTriplanarArray(sampler2DArray texArray, vec3 worldPos, vec3 normal, float scale, uint layer) {
     vec3 blend = abs(normal);
-    blend = max(blend - 0.2, 0.0); // Sharpen transition zones
-    blend /= (blend.x + blend.y + blend.z); // Normalize so weights sum to 1.0
+    blend = max(blend - 0.2, 0.0); // Sharpen projection transition edges
+    blend /= (blend.x + blend.y + blend.z);
 
-    vec4 xTex = texture(tex, worldPos.zy * scale);
-    vec4 yTex = texture(tex, worldPos.xz * scale);
-    vec4 zTex = texture(tex, worldPos.xy * scale);
+    float layerIdx = float(layer);
+    vec4 xTex = texture(texArray, vec3(worldPos.zy * scale, layerIdx));
+    vec4 yTex = texture(texArray, vec3(worldPos.xz * scale, layerIdx));
+    vec4 zTex = texture(texArray, vec3(worldPos.xy * scale, layerIdx));
 
     return xTex * blend.x + yTex * blend.y + zTex * blend.z;
 }
 
-vec3 sampleTriplanarNormal(sampler2D normMap, vec3 worldPos, vec3 normal, float scale) {
+vec3 sampleTriplanarNormalArray(sampler2DArray normArray, vec3 worldPos, vec3 normal, float scale, uint layer) {
     vec3 blend = abs(normal);
     blend = max(blend - 0.2, 0.0);
     blend /= (blend.x + blend.y + blend.z);
 
+    float layerIdx = float(layer);
+
     // Unpack normal map from [0, 1] to [-1, 1]
-    vec3 tX = texture(normMap, worldPos.zy * scale).rgb * 2.0 - 1.0;
-    vec3 tY = texture(normMap, worldPos.xz * scale).rgb * 2.0 - 1.0;
-    vec3 tZ = texture(normMap, worldPos.xy * scale).rgb * 2.0 - 1.0;
+    vec3 tX = texture(normArray, vec3(worldPos.zy * scale, layerIdx)).rgb * 2.0 - 1.0;
+    vec3 tY = texture(normArray, vec3(worldPos.xz * scale, layerIdx)).rgb * 2.0 - 1.0;
+    vec3 tZ = texture(normArray, vec3(worldPos.xy * scale, layerIdx)).rgb * 2.0 - 1.0;
 
     // Swizzle normals according to projection plane orientation
     tX = vec3(tX.xy, tX.z * sign(normal.x));
@@ -167,7 +142,17 @@ vec3 sampleTriplanarNormal(sampler2D normMap, vec3 worldPos, vec3 normal, float 
     vec3 worldNormZ = vec3(tZ.x, tZ.y, 0.0);
 
     vec3 perturbed = worldNormX * blend.x + worldNormY * blend.y + worldNormZ * blend.z;
-    return normalize(normal + perturbed * 0.75); // 0.75 adjusts normal intensity
+    return normalize(normal + perturbed * 0.75);
+}
+
+// Distance-Based Dual Scale Triplanar Helper
+vec3 sampleLayerDualScale(sampler2DArray texArray, vec3 pos, vec3 normal, uint layer, float distBlend) {
+    const float microScale = 0.12;
+    const float macroScale = 0.015;
+
+    vec3 close = sampleTriplanarArray(texArray, pos, normal, microScale, layer).rgb;
+    vec3 far   = sampleTriplanarArray(texArray, pos, normal, macroScale, layer).rgb;
+    return mix(close, far, distBlend);
 }
 
 // ==============================================================================
@@ -181,68 +166,58 @@ vec3 calculateTerrainColour(
     out uint secondaryMatID,
     out float blendFactor
 ) {
-    // --- Palette Definitions ---
-    vec3 shoreColour = vec3(0.38, 0.35, 0.30); // Dark, wet coastal rock/shale
+    // --- 1. Distance & Scaled Texture Sampling ---
+    float distBlend = smoothstep(5.0, 50.0, geo.dist);
 
-    float uvScale = 0.01;
-
-    // Calculate distance to camera/fragment
-    float dist = length(geo.pos - u_cameraPos);
-
-    // Blend factor: 0.0 near camera, 1.0 in distance (e.g. over 50 meters)
-    float distBlend = smoothstep(5.0, 50.0, dist);
-
-    // Micro scale for close-up, Macro scale for distance
-    float microScale = 0.12;
-    float macroScale = 0.015;
-
-    // Sample twice and blend
-    vec3 rockClose = sampleTriplanar(u_rockDiff, geo.pos, geo.normal, microScale).rgb;
-    vec3 rockFar   = sampleTriplanar(u_rockDiff, geo.pos, geo.normal, macroScale).rgb;
-    vec3 rockTexColour = mix(rockClose, rockFar, distBlend);
-
-    vec3 grassClose = sampleTriplanar(u_grassDiff, geo.pos, geo.normal, microScale).rgb;
-    vec3 grassFar   = sampleTriplanar(u_grassDiff, geo.pos, geo.normal, macroScale).rgb;
-    vec3 grassTexColour = mix(grassClose, grassFar, distBlend);
+    vec3 grassTexColour = sampleLayerDualScale(u_terrainDiffuseArray, geo.pos, geo.normal, MAT_GRASS, distBlend);
+    vec3 rockTexColour  = sampleLayerDualScale(u_terrainDiffuseArray, geo.pos, geo.normal, MAT_ROCK,  distBlend);
+    vec3 shoreTexColour = sampleLayerDualScale(u_terrainDiffuseArray, geo.pos, geo.normal, MAT_SHORE, distBlend);
 
     // --- 2. Slope / Cliff Blending ---
     float slopeCos    = geo.normal.y; 
     float cliffFactor = 1.0 - smoothstep(0.80, 0.90, slopeCos);
 
-    // Blend between grass texture and rock texture based on slope!
-    vec3 baseColour   = mix(grassTexColour, rockTexColour, cliffFactor);
+    // Blend between grass and cliff rock based on slope
+    vec3 baseColour = mix(grassTexColour, rockTexColour, cliffFactor);
 
-    // --- 3. Perturb Normal Map on Rock Faces ---
-    if (cliffFactor > 0.01) {
-        vec3 rockWorldNormal = sampleTriplanarNormal(u_rockNorm, geo.pos, geo.normal, uvScale);
-        outNormal = normalize(mix(outNormal, rockWorldNormal, cliffFactor));
-    }
-
-    // --- 4. Shoreline Proximity ---
+    // --- 3. Shoreline Proximity ---
     float heightAboveSea = geo.pos.y - u_seaLevel;
     float shoreBandWidth = 20.0; 
     float shoreFactor    = 1.0 - smoothstep(0.0, shoreBandWidth, abs(heightAboveSea));
 
-    // --- 5. Determine Dual Material Indices & Blend Weight ---
+    // Combine slope and shoreline colors
+    vec3 finalTerrainColour = mix(baseColour, shoreTexColour, shoreFactor);
+
+    // --- 4. Perturb Normal Maps ---
+    // Perturb for cliff face or shoreline wet rocks
+    if (cliffFactor > 0.01 || shoreFactor > 0.01) {
+        uint normLayer = (shoreFactor > cliffFactor) ? MAT_SHORE : MAT_ROCK;
+        float normIntensity = max(cliffFactor, shoreFactor);
+
+        vec3 perturbedNormal = sampleTriplanarNormalArray(u_terrainNormalArray, geo.pos, geo.normal, 0.015, normLayer);
+        outNormal = normalize(mix(outNormal, perturbedNormal, normIntensity));
+    }
+
+    // --- 5. Determine Dual Material Indices & Blend Weight for G-Buffer SSBO Lookup ---
     // Default Base: Grass
-    primaryMatID   = 2u; 
-    secondaryMatID = 2u;
+    primaryMatID   = MAT_GRASS; 
+    secondaryMatID = MAT_GRASS;
     blendFactor    = 0.0;
 
     // Shoreline takes precedence near sea level
     if (shoreFactor > 0.001) {
-        primaryMatID   = (cliffFactor > 0.5) ? 3u : 2u; // Cliff or Grass under the shore
-        secondaryMatID = 4u;                            // Shore material
+        primaryMatID   = (cliffFactor > 0.5) ? MAT_ROCK : MAT_GRASS; // Cliff or Grass under the shore
+        secondaryMatID = MAT_SHORE;                                   // Shore material
         blendFactor    = clamp(shoreFactor, 0.0, 1.0);
     } 
     // Otherwise blend between Grass and Cliff Rock
     else if (cliffFactor > 0.001) {
-        primaryMatID   = 2u; // Grass
-        secondaryMatID = 3u; // Cliff Rock
+        primaryMatID   = MAT_GRASS;
+        secondaryMatID = MAT_ROCK;
         blendFactor    = clamp(cliffFactor, 0.0, 1.0);
     }
 
-    return mix(baseColour, shoreColour, shoreFactor);
+    return finalTerrainColour;
 }
 
 // ==============================================================================
@@ -277,7 +252,7 @@ MaterialSample resolveMaterial(inout GeometrySample geo)
 {
     MaterialSample mat;
 
-    // Calculate dynamic slope/shore terrain color + perturb rock normals + fetch dual material parameters
+    // Calculate dynamic slope/shore terrain color + perturb normals + fetch dual material parameters
     vec3 rawTerrainColour = calculateTerrainColour(
         geo, 
         geo.normal, 

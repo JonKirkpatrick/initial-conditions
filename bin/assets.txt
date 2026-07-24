@@ -7,25 +7,6 @@ Texture     HLOn            images/gui_elements/HL_On.png
 Texture     HLAuto          images/gui_elements/HL_Auto.png
 Texture     Moon            images/skymap/Moon_Cropped.png
 
-Texture     RockARM         images/terrain_textures/rock/lichen_rock_arm_1k.jpg
-Texture     RockDiff        images/terrain_textures/rock/lichen_rock_diff_1k.jpg
-Texture     RockDisp        images/terrain_textures/rock/lichen_rock_disp_1k.png
-Texture     RockNorm        images/terrain_textures/rock/lichen_rock_nor_gl_1k.jpg
-
-Texture     GrassARM         images/terrain_textures/grass/rocky_terrain_02_arm_1k.jpg
-Texture     GrassDiff        images/terrain_textures/grass/rocky_terrain_02_diff_1k.jpg
-Texture     GrassDisp        images/terrain_textures/grass/rocky_terrain_02_disp_1k.png
-Texture     GrassNorm        images/terrain_textures/grass/rocky_terrain_02_nor_gl_1k.jpg
-
-Texture     CoastARM         images/terrain_textures/coastal/gray_rocks_arm_1k.jpg
-Texture     CoastDiff        images/terrain_textures/coastal/gray_rocks_diff_1k.jpg
-Texture     CoastDisp        images/terrain_textures/coastal/gray_rocks_disp_1k.png
-Texture     CoastNorm        images/terrain_textures/coastal/gray_rocks_nor_gl_1k.jpg
-
-Texture     Test1           images/terrain/45_20-49_24.png
-
-HeightArray Test2           images/terrain/45_20-49_24.bin
-
 Music       MusicTitle      music/title_menu.mp3
 
 Sound       FootLeft        sounds/left_foot.wav

@@ -222,24 +222,6 @@ protected:
     sf::Texture         m_moonTexture;
 
     // =========================================================================
-    // Rendering — Temporary Rock Textures
-    // =========================================================================
-
-    sf::Texture        m_rockARMTexture;
-    sf::Texture        m_rockDiffTexture;
-    sf::Texture        m_rockDispTexture;
-    sf::Texture        m_rockNormTexture;
-
-    // =========================================================================
-    // Rendering — Temporary Grass Textures
-    // =========================================================================
-
-    sf::Texture        m_grassARMTexture;
-    sf::Texture        m_grassDiffTexture;
-    sf::Texture        m_grassDispTexture;
-    sf::Texture        m_grassNormTexture;
-
-    // =========================================================================
     // Rendering — Orbs
     // =========================================================================
 

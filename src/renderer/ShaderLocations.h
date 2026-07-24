@@ -59,6 +59,8 @@ namespace Uniforms {
         constexpr GLint HoveredHex              = 3;
         constexpr GLint GridColour              = 4;
         constexpr GLint SeaLevel                = 5;
+        constexpr GLint TerrainDiffuseArray     = 6;
+        constexpr GLint TerrainNormalArray      = 7;
     }
 
     namespace Lighting {

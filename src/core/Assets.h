@@ -35,6 +35,12 @@ struct SpeciesTexturePaths
     std::string normal;
 };
 
+struct TerrainTexturePaths
+{
+    std::string diffuse;
+    std::string normal;
+};
+
 // Temporary shim (pre-Stage-6 tiled sampler2DArray system): a single
 // monolithic float32 heightfield, held as a flat CPU buffer for height
 // queries and mirrored to a single-channel GL_R32F texture for GPU sampling.
@@ -63,6 +69,9 @@ class Assets
     std::map<std::string, std::unique_ptr<sf::Shader>>  m_shaderMap;
     std::map<std::string, GLuint>                       m_glProgramMap;
     std::vector<SpeciesTexturePaths>                    m_speciesTexturePaths;
+    std::vector<TerrainTexturePaths>                    m_terrainTexturePaths;
+    GLuint                                              m_terrainDiffuseArray = 0;
+    GLuint                                              m_terrainNormalArray = 0;
     SpeciesSSBO                                         m_speciesSSBO;
     MaterialSSBO                                        m_materialSSBO;
     GLuint                                              m_speciesDiffuseArray = 0;
@@ -73,7 +82,9 @@ class Assets
     void addTexture(const std::string& textureName, const std::string& path, bool smooth = false);
     void addHeightArray(const std::string& heightArrayName, const std::string& path);
     void buildSpeciesTextureArrays();
+    void buildTerrainTextureArrays();
     void releaseSpeciesTextures();
+    void releaseTerrainTextures();
     void addFont(const std::string& fontName, const std::string& path);
     void addSound(const std::string& soundName, const std::string& path);
     void addMusic(const std::string& musicName, const std::string& path);
@@ -118,6 +129,8 @@ public:
     GLuint getGLProgram(const std::string& name) const;
     GLuint getSpeciesDiffuseArray() const { return m_speciesDiffuseArray; }
     GLuint getSpeciesNormalArray()  const { return m_speciesNormalArray;  } 
+    GLuint getTerrainDiffuseArray() const { return m_terrainDiffuseArray; }
+    GLuint getTerrainNormalArray()  const { return m_terrainNormalArray;  }
     const std::map<std::string, sf::Texture>& getTextures() const;
     int getSpeciesId(const std::string& speciesName) const;
     const SpeciesSSBO& getSpeciesSSBO() const {

@@ -274,39 +274,13 @@ void Scene_IC_Camp::initGraphicsPipelines()
 void Scene_IC_Camp::initLevelState() 
 {
     m_moonTexture     = Assets::Instance().getTexture("Moon");
-    m_rockARMTexture  = Assets::Instance().getTexture("RockARM");
-    m_rockDiffTexture = Assets::Instance().getTexture("RockDiff");
-    m_rockDispTexture = Assets::Instance().getTexture("RockDisp");
-    m_rockNormTexture = Assets::Instance().getTexture("RockNorm");
-    m_rockARMTexture.setRepeated(true);
-    m_rockARMTexture.generateMipmap();
-    m_rockDiffTexture.setRepeated(true);
-    m_rockDiffTexture.generateMipmap();
-    m_rockDispTexture.setRepeated(true);
-    m_rockDispTexture.generateMipmap();
-    m_rockNormTexture.setRepeated(true);
-    m_rockNormTexture.generateMipmap();
-
-    m_grassARMTexture  = Assets::Instance().getTexture("GrassARM");
-    m_grassDiffTexture = Assets::Instance().getTexture("GrassDiff");
-    m_grassDispTexture = Assets::Instance().getTexture("GrassDisp");
-    m_grassNormTexture = Assets::Instance().getTexture("GrassNorm");
-    m_grassARMTexture.setRepeated(true);
-    m_grassARMTexture.generateMipmap();
-    m_grassDiffTexture.setRepeated(true);
-    m_grassDiffTexture.generateMipmap();
-    m_grassDispTexture.setRepeated(true);
-    m_grassDispTexture.generateMipmap();
-    m_grassNormTexture.setRepeated(true);
-    m_grassNormTexture.generateMipmap();
-
     m_skyTexture     = sf::RenderTexture({m_cameraConfig.VIEWPORT_WIDTH, m_cameraConfig.VIEWPORT_HEIGHT});
     m_minimapTexture = sf::RenderTexture({m_minimapTextureSize, m_minimapTextureSize});
 
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(8000);
+    spawnDebugOrbs(256000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -1960,47 +1934,24 @@ void Scene_IC_Camp::runTerrainPass()
 
     glUseProgram(m_terrainProgram);
 
-    // 1. Bind Textures and Terrain Streaming Arrays
+    // 1. Bind Material SSBO & Texture Arrays
+    Assets::Instance().getMaterialSSBO().bind(1); // Matches layout(std430, binding = 1) in GLSL
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
     glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
 
-    // 1.5 Temporary: Upload sample rock texture for testing
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_rockARMTexture.getNativeHandle());
-    glUniform1i(6, 1);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getTerrainDiffuseArray());
+    glUniform1i(Uniforms::Terrain::TerrainDiffuseArray, 1);
 
     glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_rockDiffTexture.getNativeHandle());
-    glUniform1i(7, 2);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getTerrainNormalArray());
+    glUniform1i(Uniforms::Terrain::TerrainNormalArray, 2);
 
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, m_rockDispTexture.getNativeHandle());
-    glUniform1i(8, 3);
-
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, m_rockNormTexture.getNativeHandle());
-    glUniform1i(9, 4);
-
-    glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, m_grassARMTexture.getNativeHandle());
-    glUniform1i(10, 5);
-
-    glActiveTexture(GL_TEXTURE6);
-    glBindTexture(GL_TEXTURE_2D, m_grassDiffTexture.getNativeHandle());
-    glUniform1i(11, 6);
-
-    glActiveTexture(GL_TEXTURE7);
-    glBindTexture(GL_TEXTURE_2D, m_grassDispTexture.getNativeHandle());
-    glUniform1i(12, 7);
-
-    glActiveTexture(GL_TEXTURE8);
-    glBindTexture(GL_TEXTURE_2D, m_grassNormTexture.getNativeHandle());
-    glUniform1i(13, 8);
-
+    // 2. Terrain Streaming Uniforms
     sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
-    glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin,
-                gridOrigin.x, gridOrigin.y);
+    glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin, gridOrigin.x, gridOrigin.y);
 
     constexpr float kTileWorldSize =
         WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
@@ -2009,42 +1960,27 @@ void Scene_IC_Camp::runTerrainPass()
     glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81,
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
-    // 2. Structural & Geometry Tweak Uniforms
+    // 3. Structural & Geometry Tweak Uniforms
     glUniform1f(Uniforms::SharedTerrain::HeightMax, m_topdownMaxHeight);
     glUniform1f(Uniforms::Terrain::ReliefExaggeration, 1.0f);
     glUniform1f(Uniforms::Terrain::SeaLevel, m_seaLevel);
 
-    // 3. Cursor & Selection Grid Uniforms
+    // 4. Cursor & Selection Grid Uniforms
     glUniform1i(Uniforms::Terrain::CursorMode, static_cast<int>(m_cursorMode));
     glUniform1f(Uniforms::Terrain::HexSize, m_hexSize);
     glUniform2f(Uniforms::Terrain::HoveredHex, static_cast<float>(hex.x), static_cast<float>(hex.y));
     glUniform3f(Uniforms::Terrain::GridColour, m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
     
-    // 4. Render
+    // 5. Render
     glBindVertexArray(m_gridVAO);
     glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
+
+    // 6. Cleanup
     glBindVertexArray(0);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE6);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE7);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE8);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glUseProgram(0);
-
 }
 
 void Scene_IC_Camp::updateMinimapTexture()

@@ -299,12 +299,15 @@ void Assets::loadFromMaterialJSON(const std::string& path)
     std::vector<MaterialData> materials;
     materials.reserve(j.size());
 
+    m_terrainTexturePaths.clear();
+    m_terrainTexturePaths.reserve(j.size());
+
     for (const auto& entry : j)
     {
         const std::string name = entry.at("name");
         const auto& tint = entry.at("albedoTint");
 
-        MaterialData m;
+        MaterialData m{};
         m.albedoTint          = { tint["r"], tint["g"], tint["b"], tint["a"] };
         m.roughness           = entry.at("roughness");
         m.metallic            = entry.at("metallic");
@@ -317,10 +320,25 @@ void Assets::loadFromMaterialJSON(const std::string& path)
             m.uvOffset = { entry["uvOffset"]["x"], entry["uvOffset"]["y"] };
 
         materials.push_back(m);
+
+        // --- Store Texture Paths for sampler2DArray ---
+        TerrainTexturePaths texPaths{};
+        if (entry.contains("textures"))
+        {
+            const auto& tex = entry.at("textures");
+            texPaths.diffuse = tex.value("diffuse", "");
+            texPaths.normal  = tex.value("normal", "");
+        }
+        m_terrainTexturePaths.push_back(texPaths);
+
         std::cout << "Loaded material: " << name << " (index " << materials.size() - 1 << ")" << std::endl;
     }
 
+    // 1. Upload packed struct array to GPU SSBO
     m_materialSSBO.upload(materials);
+
+    // 2. Build GPU sampler2DArray textures (Layer i corresponds directly to Material Index i)
+    buildTerrainTextureArrays();
 }
 
 void Assets::loadFromSpeciesJSON(const std::string& path)
@@ -434,6 +452,96 @@ void Assets::releaseSpeciesTextures()
 {
     if (m_speciesDiffuseArray) { glDeleteTextures(1, &m_speciesDiffuseArray); m_speciesDiffuseArray = 0; }
     if (m_speciesNormalArray)  { glDeleteTextures(1, &m_speciesNormalArray);  m_speciesNormalArray  = 0; }
+}
+
+void Assets::buildTerrainTextureArrays()
+{
+    releaseTerrainTextures();
+
+    if (m_terrainTexturePaths.empty()) return;
+
+    // Find the first valid diffuse image to probe array dimensions
+    sf::Image probe;
+    std::string probePath;
+    for (const auto& paths : m_terrainTexturePaths)
+    {
+        if (!paths.diffuse.empty()) { probePath = paths.diffuse; break; }
+    }
+
+    if (probePath.empty() || !probe.loadFromFile(probePath))
+    {
+        std::cerr << "Failed to load probe texture for terrain array dimensions" << std::endl;
+        return;
+    }
+
+    const GLsizei width  = static_cast<GLsizei>(probe.getSize().x);
+    const GLsizei height = static_cast<GLsizei>(probe.getSize().y);
+    const GLsizei layers = static_cast<GLsizei>(m_terrainTexturePaths.size());
+
+    auto uploadArray = [&](GLuint& texID, auto pathSelector)
+    {
+        glGenTextures(1, &texID);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, texID);
+
+        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8,
+                     width, height, layers,
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+        for (GLsizei i = 0; i < layers; ++i)
+        {
+            const std::string& imgPath = pathSelector(m_terrainTexturePaths[i]);
+            if (imgPath.empty()) continue; // Skip layers that don't use terrain textures
+
+            sf::Image img;
+            if (!img.loadFromFile(imgPath))
+            {
+                std::cerr << "Failed to load terrain texture layer " << i
+                          << ": " << imgPath << std::endl;
+                continue;
+            }
+
+            if (static_cast<GLsizei>(img.getSize().x) != width ||
+                static_cast<GLsizei>(img.getSize().y) != height)
+            {
+                std::cerr << "Terrain texture size mismatch at layer " << i
+                          << " (" << imgPath << ") — skipping" << std::endl;
+                continue;
+            }
+
+            glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
+                            0, 0, i,           // x, y, layer offset
+                            width, height, 1,  // width, height, single layer
+                            GL_RGBA, GL_UNSIGNED_BYTE, img.getPixelsPtr());
+        }
+
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+        // Apply Anisotropic Filtering
+        if (GLEW_EXT_texture_filter_anisotropic)
+        {
+            float maxAniso = 0.0f;
+            glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
+            glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAniso);
+        }
+
+        glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    };
+
+    uploadArray(m_terrainDiffuseArray, [](const TerrainTexturePaths& p){ return p.diffuse; });
+    uploadArray(m_terrainNormalArray,  [](const TerrainTexturePaths& p){ return p.normal;  });
+
+    std::cout << "Built terrain texture arrays: " << layers << " layers ("
+              << width << "x" << height << ")" << std::endl;
+}
+
+void Assets::releaseTerrainTextures()
+{
+    if (m_terrainDiffuseArray) { glDeleteTextures(1, &m_terrainDiffuseArray); m_terrainDiffuseArray = 0; }
+    if (m_terrainNormalArray)  { glDeleteTextures(1, &m_terrainNormalArray);  m_terrainNormalArray  = 0; }
 }
 
 const sf::Texture& Assets::getTexture(const std::string& textureName) const
