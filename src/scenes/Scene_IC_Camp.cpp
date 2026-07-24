@@ -280,7 +280,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(256000);
+    spawnDebugOrbs(32000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 

@@ -33,7 +33,7 @@ void main()
     float terrainLinear   = linearizeDepth(terrainDepth, u_nearPlane, u_farPlane);
     float waterLinear     = linearizeDepth(waterDepth, u_nearPlane, u_farPlane);
     float depthDifference = terrainLinear - waterLinear;
-    float shoreFade       = clamp(depthDifference * 0.5, 0.5, 1.0);
+    float shoreFade       = clamp(depthDifference * 0.5, 0.1, 1.0);
 
     // 3. Day/Night cycle scalars matching deferred pass
     vec3 sunDirNorm        = normalize(u_sunDir);
