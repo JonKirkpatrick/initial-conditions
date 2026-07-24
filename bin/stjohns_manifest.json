@@ -4,7 +4,7 @@
     "worldOriginLatLon": [47.0, -53.0],
     "tileBoundsUpperLeft": {
         "row": 40,
-        "col": 20
+        "col": 10
     },
     "tileBoundsLowerRight": {
         "row": 60,
