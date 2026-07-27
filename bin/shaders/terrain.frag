@@ -98,8 +98,9 @@ float hexGrid(vec2 p) {
     float distToEdge = max(delta.y, delta.y * 0.5 + delta.x * 0.866025);
     float hexBoundary = u_hexSize * 0.866025;
     float distToLine = abs(distToEdge - hexBoundary);
-    float lineWidth = u_hexSize * 0.012;
-    return smoothstep(lineWidth, 0.0, distToLine);
+    float lineWidth = u_hexSize * 0.0625;
+    float halfWidth = u_hexSize * 0.015625;
+    return smoothstep(halfWidth, halfWidth * 0.625, distToLine);
 }
 
 // ==============================================================================
@@ -145,7 +146,7 @@ vec3 sampleTriplanarNormalArray(sampler2DArray normArray, vec3 worldPos, vec3 no
     return normalize(normal + perturbed * 0.75);
 }
 
-// Distance-Based Dual Scale Triplanar Helper
+// Distance-Based Dual Scale Triplanar Helper for Diffuse
 vec3 sampleLayerDualScale(sampler2DArray texArray, vec3 pos, vec3 normal, uint layer, float distBlend) {
     const float microScale = 0.12;
     const float macroScale = 0.015;
@@ -153,6 +154,17 @@ vec3 sampleLayerDualScale(sampler2DArray texArray, vec3 pos, vec3 normal, uint l
     vec3 close = sampleTriplanarArray(texArray, pos, normal, microScale, layer).rgb;
     vec3 far   = sampleTriplanarArray(texArray, pos, normal, macroScale, layer).rgb;
     return mix(close, far, distBlend);
+}
+
+// Distance-Based Dual Scale Triplanar Helper for Normals
+vec3 sampleNormalLayerDualScale(sampler2DArray normArray, vec3 pos, vec3 normal, uint layer, float distBlend) {
+    const float microScale = 0.12;
+    const float macroScale = 0.015;
+
+    vec3 closeNorm = sampleTriplanarNormalArray(normArray, pos, normal, microScale, layer);
+    vec3 farNorm   = sampleTriplanarNormalArray(normArray, pos, normal, macroScale, layer);
+    
+    return normalize(mix(closeNorm, farNorm, distBlend));
 }
 
 // ==============================================================================
@@ -167,7 +179,7 @@ vec3 calculateTerrainColour(
     out float blendFactor
 ) {
     // --- 1. Distance & Scaled Texture Sampling ---
-    float distBlend = smoothstep(5.0, 50.0, geo.dist);
+    float distBlend = smoothstep(15.0, 75.0, geo.dist);
 
     vec3 grassTexColour = sampleLayerDualScale(u_terrainDiffuseArray, geo.pos, geo.normal, MAT_GRASS, distBlend);
     vec3 rockTexColour  = sampleLayerDualScale(u_terrainDiffuseArray, geo.pos, geo.normal, MAT_ROCK,  distBlend);
@@ -188,13 +200,14 @@ vec3 calculateTerrainColour(
     // Combine slope and shoreline colors
     vec3 finalTerrainColour = mix(baseColour, shoreTexColour, shoreFactor);
 
-    // --- 4. Perturb Normal Maps ---
+    // --- 4. Perturb Normal Maps (Now with Dual-Scale Sampling!) ---
     // Perturb for cliff face or shoreline wet rocks
     if (cliffFactor > 0.01 || shoreFactor > 0.01) {
         uint normLayer = (shoreFactor > cliffFactor) ? MAT_SHORE : MAT_ROCK;
         float normIntensity = max(cliffFactor, shoreFactor);
 
-        vec3 perturbedNormal = sampleTriplanarNormalArray(u_terrainNormalArray, geo.pos, geo.normal, 0.015, normLayer);
+        // Fetch dual-scale perturbed normal (uses microScale close up, macroScale far away)
+        vec3 perturbedNormal = sampleNormalLayerDualScale(u_terrainNormalArray, geo.pos, geo.normal, normLayer, distBlend);
         outNormal = normalize(mix(outNormal, perturbedNormal, normIntensity));
     }
 

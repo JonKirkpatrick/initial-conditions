@@ -80,6 +80,7 @@ struct CPhysics
     CPhysics() = default;
 };
 
+// This is on the chopping block to be replaced with a pair of components so they can fulfill their intended roles.
 struct CBob
 {
     float accumulator = 0.0f;   // phase [0, 1)
@@ -90,6 +91,34 @@ struct CBob
     CBob() = default;
     CBob(float r, float mag, float lat = 5.0f)
         : rate(r), magnitude(mag), lateralMag(lat) {}
+};
+
+// Player-only. Pure presentation/gait-event state — never touches position.
+// Read by: camera (bob offset), footstep-audio system.
+// Written by: gait system only, after sMovement has settled velocity/onGround.
+struct CGaitCycle
+{
+    float accumulator      = 0.0f;   // phase [0, 1)
+    float lastPhase        = 0.0f;   // previous frame's phase, for edge-detecting footfalls
+    float strideRate       = 0.020f; // base cycles per "unit," matches your old baseRate constant
+    float bobMagnitude     = 0.1f;   // vertical bob amplitude
+    float lateralMagnitude = 0.2f;  // side-to-side sway amplitude
+
+    CGaitCycle() = default;
+    CGaitCycle(float phase, float prevPhase, float rate, float vertMag, float latMag)
+        : accumulator(phase), lastPhase(prevPhase), strideRate(rate), bobMagnitude(vertMag), lateralMagnitude(latMag) {}
+};
+
+// Non-player kinematic bobbers (orbs, etc). Accumulator IS the motion —
+// consumed directly as a literal position term in resolveEntityPosition/updateOrbBobbing.
+struct CKinematicBob
+{
+    float accumulator = 0.0f;   // phase [0, 1)
+    float rate        = 1.0f;   // cycles per second
+    float amplitude   = 6.0f;   // vertical displacement
+
+    CKinematicBob() = default;
+    CKinematicBob(float r, float mag) : rate(r), amplitude(mag) {}
 };
 
 struct CPlayer
@@ -157,6 +186,8 @@ struct CEyes
 static_assert(std::is_default_constructible_v<CTransform3D>);
 static_assert(std::is_default_constructible_v<CPhysics>);
 static_assert(std::is_default_constructible_v<CBob>);
+static_assert(std::is_default_constructible_v<CGaitCycle>);
+static_assert(std::is_default_constructible_v<CKinematicBob>);
 static_assert(std::is_default_constructible_v<CPlayer>);
 static_assert(std::is_default_constructible_v<CCamera>);
 static_assert(std::is_default_constructible_v<CInput>);

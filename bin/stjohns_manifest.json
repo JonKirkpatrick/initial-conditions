@@ -11,5 +11,5 @@
         "col": 30
     },
     "tileDirectory": "./tiles/StJohns",
-    "channels": ["height"]
+    "channels": ["height", "roads"]
 }

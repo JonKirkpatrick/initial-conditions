@@ -10,11 +10,6 @@ layout(location = 2) uniform float u_seaLevel;
 in vec2 v_uv; // Spans [0, 1] in circular minimap quad space
 out vec4 fragColor;
 
-// == Constants matching terrain grid layout =================================
-const int  kVisibleGridDim = 9;
-const int  kTileResolution = 256;   // core texels/side
-const int  kTexSide        = 257;   // stored texels/side (with apron)
-
 // == Colour palette =========================================================
 vec3 topoColour(float normHeight, float shade) {
     vec3 c0 = vec3(0.467, 0.631, 0.388); // deep green       (0.00)
@@ -58,17 +53,6 @@ vec3 waterColour(float depth, float shade) {
     float light   = ambient + diffuse * shade;
 
     return clamp(base * light, 0.0, 1.0);
-}
-
-// ================== RESOLVE TILE SAMPLE ==================
-void resolveTileSample(vec2 gridUV, out int layer, out vec2 texUV)
-{
-    vec2 tileF   = clamp(gridUV, 0.0, 1.0) * float(kVisibleGridDim);
-    ivec2 tileXY = clamp(ivec2(floor(tileF)), ivec2(0), ivec2(kVisibleGridDim - 1));
-    layer = tileXY.y * kVisibleGridDim + tileXY.x;
-
-    vec2 localUV = fract(tileF); // 0..1 across this tile's 256 core texels
-    texUV = (localUV * float(kTileResolution) + 0.5) / float(kTexSide);
 }
 
 // ================== SAMPLE FLOAT HEIGHT ==================

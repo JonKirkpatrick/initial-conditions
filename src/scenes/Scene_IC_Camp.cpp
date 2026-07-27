@@ -107,6 +107,7 @@ void Scene_IC_Camp::update()
 
     // 4. Systems Phase Updates
     sMovement(dt);
+    sGaitAndFootsteps(dt);
     
     sf::Vector3f playerPos = m_entityManager.getTransform(m_player).pos;
     m_terrainStreamer->update({playerPos.x, playerPos.z});
@@ -210,7 +211,6 @@ void Scene_IC_Camp::onEnter()
         m_game.window()
     );
     m_game.setMouseCaptured(true);
-    m_lastStepPhase = 0.0f;
 
     m_game.window().setActive(true); 
     
@@ -252,7 +252,7 @@ void Scene_IC_Camp::initSceneConfiguration()
     m_topdownMaxHeight = 1000.f;
     m_topdownWorldMin   = { 0.f, 0.f };
     m_topdownWorldSize  = { Topography::BASE_SIZE, Topography::BASE_SIZE };
-    m_gridColour        = Theme::color("cerulean");
+    m_gridColour        = Theme::color("tarmac");
 
     sf::Vector2u windowSize        = m_game.window().getSize();
     m_cameraConfig.VIEWPORT_WIDTH  = windowSize.x;
@@ -513,13 +513,12 @@ void Scene_IC_Camp::sMovement(float dt)
 void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
 {
     if (!m_entityManager.hasTransform(e) || !m_entityManager.hasInput(e) ||
-        !m_entityManager.hasPhysics(e) || !m_entityManager.hasBob(e))
+        !m_entityManager.hasPhysics(e))
         return;
 
     auto& t     = m_entityManager.getTransform(e);
     auto& input = m_entityManager.getInput(e);
     auto& phys  = m_entityManager.getPhysics(e);
-    auto& bob   = m_entityManager.getBob(e);
     // === Locomotion State ===
     phys.isCrouching = input.crouch;
     phys.isSprinting = input.sprint && !phys.isCrouching;
@@ -674,36 +673,59 @@ void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
             phys.onGround = true;
         }
     }
+}
 
-    // === Bobbing & Footsteps ===
-    float horizSpeed = std::sqrt(t.velocity.x*t.velocity.x + t.velocity.z*t.velocity.z);
-    updateBob(e, dt, horizSpeed);
-
-    if (horizSpeed > 1.0f && phys.onGround)
+void Scene_IC_Camp::sGaitAndFootsteps(float dt)
+{
+    m_entityManager.forEachGaitCycle([this, dt](SoAEntityHandle e, CGaitCycle& gait)
     {
-        auto& bobComp = m_entityManager.getBob(e);
-        float currentPhase = bobComp.accumulator;
-        bool shouldStep = false;
-        bool isLeft = false;
+        if (!m_entityManager.hasTransform(e) || !m_entityManager.hasPhysics(e))
+            return;
 
-        if ((m_lastStepPhase > 0.8f && currentPhase < 0.2f) || (m_lastStepPhase < 0.2f && currentPhase > 0.8f))
-        {
-            shouldStep = true; isLeft = true;
-        }
-        else if ((m_lastStepPhase < 0.45f && currentPhase >= 0.45f) ||
-                 (m_lastStepPhase > 0.55f && currentPhase <= 0.55f))
-        {
-            shouldStep = true; isLeft = false;
-        }
+        auto& t    = m_entityManager.getTransform(e);
+        auto& phys = m_entityManager.getPhysics(e);
 
-        if (shouldStep)
+        float horizSpeed = std::sqrt(t.velocity.x*t.velocity.x + t.velocity.z*t.velocity.z);
+        float previousPhase = gait.accumulator;
+
+        // === Advance phase (only while actually striding on the ground) ===
+        if (phys.onGround && horizSpeed > 0.05f)
         {
-            const std::string& soundName = isLeft ? "FootLeft" : "FootRight";
-            float volume = phys.isSprinting ? 75.f : (phys.isCrouching ? 30.f : 45.f);
-            AudioManager::Instance().sfx.playSound(Assets::Instance().getSound(soundName), volume);
+            float speedFraction = std::clamp(horizSpeed / m_playerConfig.MOVE_SPEED, 0.0f, 3.0f);
+            float rate = gait.strideRate * std::sqrt(speedFraction);
+            if (phys.isCrouching) rate *= 0.625f;
+
+            gait.accumulator = std::fmod(gait.accumulator + rate * 60.0f * dt, 1.0f);
         }
-        m_lastStepPhase = currentPhase;
-    }
+        // else: phase holds steady — no striding while airborne or stationary.
+
+        gait.lastPhase = previousPhase;
+
+        // === Footstep events: edge-detect phase crossings ===
+        if (horizSpeed > 1.0f && phys.onGround)
+        {
+            bool shouldStep = false;
+            bool isLeft = false;
+
+            if ((previousPhase > 0.8f && gait.accumulator < 0.2f) ||
+                (previousPhase < 0.2f && gait.accumulator > 0.8f))
+            {
+                shouldStep = true; isLeft = true;
+            }
+            else if ((previousPhase < 0.45f && gait.accumulator >= 0.45f) ||
+                     (previousPhase > 0.55f && gait.accumulator <= 0.55f))
+            {
+                shouldStep = true; isLeft = false;
+            }
+
+            if (shouldStep)
+            {
+                const std::string& soundName = isLeft ? "FootLeft" : "FootRight";
+                float volume = phys.isSprinting ? 75.f : (phys.isCrouching ? 30.f : 45.f);
+                AudioManager::Instance().sfx.playSound(Assets::Instance().getSound(soundName), volume);
+            }
+        }
+    });
 }
 
 void Scene_IC_Camp::resolveEntityPosition(SoAEntityHandle e, float dt)
@@ -865,7 +887,7 @@ void Scene_IC_Camp::spawnPlayer()
     m_entityManager.addTransform(m_player, playerTransform);
     m_entityManager.addInput(m_player, CInput());
     m_entityManager.addPhysics(m_player, CPhysics());
-    m_entityManager.addBob(m_player, CBob(1.0f, 0.06f, 0.055f));   // rate, vertical mag, lateral mag
+    m_entityManager.addGaitCycle(m_player, CGaitCycle()); // phase, previous phase, step rate, vertical amplitude, lateral amplitude
     auto& phys = m_entityManager.getPhysics(m_player);
     phys.onGround = true;
 }
@@ -1014,7 +1036,7 @@ void Scene_IC_Camp::updateCamera(float dt)
     auto& camTransform = m_entityManager.getTransform(m_camera);
     auto& playerTransform = m_entityManager.getTransform(m_player);
     auto& playerPhysics = m_entityManager.getPhysics(m_player);
-    auto& playerBob = m_entityManager.getBob(m_player);
+    auto& gait = m_entityManager.getGaitCycle(m_player);
     auto& cameraData = m_entityManager.getCamera(m_camera);
 
     // Smooth crouch transition
@@ -1040,14 +1062,16 @@ void Scene_IC_Camp::updateCamera(float dt)
 
     float speedFraction = std::clamp(horizontalSpeed / std::max(m_playerConfig.MOVE_SPEED, 0.0001f), 0.0f, 3.0f);
     float moveFactor = std::clamp(speedFraction, 0.0f, 1.0f);
-    float phase = playerBob.accumulator * 6.2831853f;
+    float phase = gait.accumulator * 6.2831853f;
 
     // === Bob Parameters ===
     float baseFrequency = 1.0f;
 
     float t = std::clamp((speedFraction - 1.0f) / 2.0f, 0.0f, 1.0f); // 0 = walk, 1 = full sprint
-    float lateralAmplitude = 0.055f + (0.038f - 0.055f) * t;
-    float verticalAmplitude = 0.062f + (0.048f - 0.062f) * t;
+    float lateral = gait.lateralMagnitude;
+    float vertical = gait.bobMagnitude;
+    float lateralAmplitude = lateral - (0.5f * lateral) * t;
+    float verticalAmplitude = vertical + (1.0f * vertical) * t;
 
     if (playerPhysics.isCrouching)
     {
@@ -1937,17 +1961,25 @@ void Scene_IC_Camp::runTerrainPass()
     // 1. Bind Material SSBO & Texture Arrays
     Assets::Instance().getMaterialSSBO().bind(1); // Matches layout(std430, binding = 1) in GLSL
 
+    // Unit 0: Height Map Array
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
     glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
 
+    // Unit 1: Diffuse Splat Array
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getTerrainDiffuseArray());
     glUniform1i(Uniforms::Terrain::TerrainDiffuseArray, 1);
 
+    // Unit 2: Normal Splat Array
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D_ARRAY, Assets::Instance().getTerrainNormalArray());
     glUniform1i(Uniforms::Terrain::TerrainNormalArray, 2);
+
+    // Unit 3: Road SDF Distance Field Array (ADDED)
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadRoadArrayTexture());
+    glUniform1i(Uniforms::SharedTerrain::TerrainRoadArray, 3);
 
     // 2. Terrain Streaming Uniforms
     sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
@@ -1977,6 +2009,7 @@ void Scene_IC_Camp::runTerrainPass()
 
     // 6. Cleanup
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D_ARRAY, 0); // Cleanup Unit 3
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);

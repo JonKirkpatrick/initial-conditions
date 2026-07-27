@@ -111,7 +111,7 @@ protected:
     GLuint              m_skyProgram            = Assets::Instance().getGLProgram("Sky");
     GLuint              m_ssao                  = Assets::Instance().getGLProgram("SSAO");
     GLuint              m_ssao_blur             = Assets::Instance().getGLProgram("SSAOBlur");
-    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("Terrain");
+    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("PaperTerrain");
     GLuint              m_OrbCreatureProgram    = Assets::Instance().getGLProgram("OrbCreature");
     GLuint              m_blitProgram           = Assets::Instance().getGLProgram("Blit");
     GLuint              m_lightingProgram       = Assets::Instance().getGLProgram("Lighting");
@@ -246,8 +246,6 @@ protected:
     float m_bobLag                  = 0.16f;  // Smoothing factor (0..1)
     float m_crouchFactor            = 0.0f;  // 0 = standing, 1 = fully crouched
 
-    float m_lastStepPhase           = 0.0f;
-
     HeadlightState m_headlightState = HeadlightState::Auto;
 
     // =========================================================================
@@ -328,6 +326,7 @@ protected:
 
     void sMovement(float dt);
     void handlePlayerMovement(SoAEntityHandle player, float dt);
+    void sGaitAndFootsteps(float dt);
     void resolveEntityPosition(SoAEntityHandle e, float dt);
     bool shouldHeadlightsBeOn() const;
 

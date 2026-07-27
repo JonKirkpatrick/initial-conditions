@@ -71,51 +71,66 @@ TerrainStreamer::TerrainStreamer(const std::filesystem::path& manifestPath)
     const size_t slotCount     = WorldCoordinates::Square::kStreamerGridDim
                                 * WorldCoordinates::Square::kStreamerGridDim;
 
+    // Allocate height and road CPU slot storage
     m_tileStorage.assign(floatsPerTile * slotCount, 0.0f);
+    m_roadStorage.assign(floatsPerTile * slotCount, 1.0f); // Default to 1.0 (max distance / no roads)
+
     m_slotWorldCoord.assign(slotCount, TileCoord{});
     m_slotValid.assign(slotCount, false);
+    
     m_stagingBuffer.assign(floatsPerTile, 0.0f);
+    m_stagingRoadBuffer.assign(floatsPerTile, 1.0f);
 
     using namespace WorldCoordinates::Square;
     constexpr int kTexSide = kTileResolution + kApronTexels;
+    constexpr int kVisibleLayers = kVisibleGridDim * kVisibleGridDim; // 81
+    const size_t totalSubgridBytes = kVisibleLayers * floatsPerTile * sizeof(float);
 
+    // -------------------------------------------------------------------------
+    // 1. Setup Heightfield Texture Array & PBO (GL_R32F)
+    // -------------------------------------------------------------------------
     glGenTextures(1, &m_arrayTexture);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
-    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_R32F, kTexSide, kTexSide,
-                   kVisibleGridDim * kVisibleGridDim);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_R32F, kTexSide, kTexSide, kVisibleLayers);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
-    constexpr int kVisibleLayers = WorldCoordinates::Square::kVisibleGridDim * WorldCoordinates::Square::kVisibleGridDim; // 81
-    const size_t totalSubgridBytes = kVisibleLayers * floatsPerTile * sizeof(float);
-
-    // Reserve CPU packed staging memory
     m_packedSubgridData.resize(kVisibleLayers * floatsPerTile, 0.0f);
 
-    // Create and allocate PBO
     glGenBuffers(1, &m_pbo);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, totalSubgridBytes, nullptr, GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    // Worker thread intentionally not started yet -- Stage 7.1 runs
-    // synchronously on the calling thread. Stage 7.4 will start it here.
+    // -------------------------------------------------------------------------
+    // 2. Setup Road SDF Texture Array & PBO (GL_R32F)
+    // -------------------------------------------------------------------------
+    glGenTextures(1, &m_roadArrayTexture);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_roadArrayTexture);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_R32F, kTexSide, kTexSide, kVisibleLayers);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+    m_packedRoadSubgridData.resize(kVisibleLayers * floatsPerTile, 1.0f);
+
+    glGenBuffers(1, &m_roadPbo);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_roadPbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, totalSubgridBytes, nullptr, GL_STREAM_DRAW);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
 TerrainStreamer::~TerrainStreamer()
 {
-    if (m_arrayTexture != 0)
-    {
-        glDeleteTextures(1, &m_arrayTexture);
-    }
-    if (m_pbo != 0) 
-    {
-        glDeleteBuffers(1, &m_pbo);
-    }
-    // worker-thread teardown, still pending 7.4, unchanged
+    if (m_arrayTexture != 0)     glDeleteTextures(1, &m_arrayTexture);
+    if (m_pbo != 0)              glDeleteBuffers(1, &m_pbo);
+    if (m_roadArrayTexture != 0) glDeleteTextures(1, &m_roadArrayTexture);
+    if (m_roadPbo != 0)          glDeleteBuffers(1, &m_roadPbo);
 }
 
 // ---------------------------------------------------------------------
@@ -133,8 +148,6 @@ void TerrainStreamer::update(const sf::Vector2f& cameraWorldPos)
     }
 
     checkBoundaryCrossing(cameraWorldPos);
-
-    // Stage 7.4 will add: drainCompletionQueue();
 }
 
 // ---------------------------------------------------------------------
@@ -176,8 +189,9 @@ void TerrainStreamer::initializeGrid(const sf::Vector2f& cameraWorldPos)
             loadTileIntoSlot(TileCoord{row, col});
         }
     }
-    m_gridInitialized = true;
-    m_subgridDirty = true;
+    m_gridInitialized  = true;
+    m_subgridDirty     = true;
+    m_roadSubgridDirty = true;
     refreshActiveSliceUniforms();
 }
 
@@ -218,7 +232,8 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
     }
 
     refreshActiveSliceUniforms();
-    m_subgridDirty = true;
+    m_subgridDirty     = true;
+    m_roadSubgridDirty = true;
     
     std::cout << "[TerrainStreamer] Center tile updated to [" << m_centerTileCoord.row
               << ", " << m_centerTileCoord.col << "]\n";
@@ -227,7 +242,7 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
 void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
 {
     const int slot = WorldCoordinates::Square::slotIndexForTile(coord);
-    const bool ok  = loadTileFromDisk(m_manifest, coord, slotData(slot));
+    const bool ok  = loadTileFromDisk(m_manifest, coord, slotData(slot), slotRoadData(slot));
 
     m_slotWorldCoord[slot] = coord;
     m_slotValid[slot]      = ok;
@@ -235,7 +250,8 @@ void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
 
 bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
                                        TileCoord coord,
-                                       float* outBuffer)
+                                       float* outHeightBuffer,
+                                       float* outRoadBuffer)
 {
     using namespace WorldCoordinates::Square;
     
@@ -244,33 +260,54 @@ bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
         static_cast<size_t>(kTileResolution + kApronTexels);
     const size_t bytesPerTile = floatsPerTile * sizeof(float);
 
-    std::string fileName = "tile_" + std::to_string(coord.row) + "_" + std::to_string(coord.col) + ".bin";
-    std::filesystem::path tilePath = manifest.tileDirectory / fileName;
+    // -------------------------------------------------------------------------
+    // 1. Read Height Tile (tile_r_c.bin)
+    // -------------------------------------------------------------------------
+    std::string heightFileName = "tile_" + std::to_string(coord.row) + "_" + std::to_string(coord.col) + ".bin";
+    std::filesystem::path heightPath = manifest.tileDirectory / heightFileName;
 
-    if (!std::filesystem::exists(tilePath))
+    if (std::filesystem::exists(heightPath))
     {
-        std::memset(outBuffer, 0, bytesPerTile);
-        return true; 
+        std::ifstream file(heightPath, std::ios::binary);
+        if (file.is_open())
+        {
+            file.read(reinterpret_cast<char*>(outHeightBuffer), bytesPerTile);
+        }
+        else
+        {
+            std::memset(outHeightBuffer, 0, bytesPerTile);
+        }
+    }
+    else
+    {
+        std::memset(outHeightBuffer, 0, bytesPerTile);
     }
 
-    std::ifstream file(tilePath, std::ios::binary);
-    if (!file.is_open())
+    // -------------------------------------------------------------------------
+    // 2. Read Road SDF Tile (road_r_c.bin) if manifest supports "roads"
+    // -------------------------------------------------------------------------
+    if (manifest.hasChannel("roads"))
     {
-        std::cerr << "[TerrainStreamer] Error: Failed to open existing file: " << tilePath << "\n";
-        std::memset(outBuffer, 0, bytesPerTile);
-        return false;
-    }
+        std::string roadFileName = "road_" + std::to_string(coord.row) + "_" + std::to_string(coord.col) + ".bin";
+        std::filesystem::path roadPath = manifest.tileDirectory / roadFileName;
 
-    file.read(reinterpret_cast<char*>(outBuffer), bytesPerTile);
-
-    const std::streamsize bytesRead = file.gcount();
-    if (static_cast<size_t>(bytesRead) != bytesPerTile)
-    {
-        std::cerr << "[TerrainStreamer] Warning: Incomplete tile read on " << tilePath 
-                  << ". Expected " << bytesPerTile << " bytes, but read " << bytesRead << ".\n";
-        
-        std::memset(reinterpret_cast<char*>(outBuffer) + bytesRead, 0, bytesPerTile - bytesRead);
-        return false;
+        if (std::filesystem::exists(roadPath))
+        {
+            std::ifstream file(roadPath, std::ios::binary);
+            if (file.is_open())
+            {
+                file.read(reinterpret_cast<char*>(outRoadBuffer), bytesPerTile);
+            }
+            else
+            {
+                // Default to 1.0f (no roads / max distance)
+                std::fill_n(outRoadBuffer, floatsPerTile, 1.0f);
+            }
+        }
+        else
+        {
+            std::fill_n(outRoadBuffer, floatsPerTile, 1.0f);
+        }
     }
 
     return true;
@@ -283,7 +320,17 @@ const float* TerrainStreamer::getTileData(TileCoord coord) const
     {
         return slotData(slot);
     }
-    return nullptr; // Not loaded, out of bounds, or catching up
+    return nullptr;
+}
+
+const float* TerrainStreamer::getRoadData(TileCoord coord) const
+{
+    const int slot = WorldCoordinates::Square::slotIndexForTile(coord);
+    if (m_slotValid[slot] && m_slotWorldCoord[slot] == coord)
+    {
+        return slotRoadData(slot);
+    }
+    return nullptr;
 }
 
 TileCoord TerrainStreamer::getOriginTile() const
@@ -312,6 +359,16 @@ const float* TerrainStreamer::slotData(int slotIndex) const
     return m_tileStorage.data() + static_cast<size_t>(slotIndex) * tileAllocFloatCount();
 }
 
+float* TerrainStreamer::slotRoadData(int slotIndex)
+{
+    return m_roadStorage.data() + static_cast<size_t>(slotIndex) * tileAllocFloatCount();
+}
+
+const float* TerrainStreamer::slotRoadData(int slotIndex) const
+{
+    return m_roadStorage.data() + static_cast<size_t>(slotIndex) * tileAllocFloatCount();
+}
+
 // ---------------------------------------------------------------------
 // Stage 7.1: Active subgrid and uniforms
 // ---------------------------------------------------------------------
@@ -337,8 +394,9 @@ TerrainStreamer::ActiveSubgrid TerrainStreamer::getActiveSubgrid() const
 
             if (m_slotValid[slot] && m_slotWorldCoord[slot] == coord)
             {
-                slice.data  = slotData(slot);
-                slice.valid = true;
+                slice.heightData = slotData(slot);
+                slice.roadData   = slotRoadData(slot);
+                slice.valid      = true;
             }
         }
     }
@@ -385,41 +443,71 @@ GLuint TerrainStreamer::getOrUploadArrayTexture()
 
     const ActiveSubgrid subgrid = getActiveSubgrid();
 
-    // -------------------------------------------------------------------------
-    // Step 1: Pack all 81 active layers into one contiguous CPU buffer
-    // -------------------------------------------------------------------------
     for (int layer = 0; layer < static_cast<int>(subgrid.size()); ++layer)
     {
         const ActiveTileSlice& slice = subgrid[layer];
-        const float* src = slice.valid ? slice.data : kZeroTile.data();
+        const float* src = (slice.valid && slice.heightData) ? slice.heightData : kZeroTile.data();
 
-        // Copy source tile into contiguous CPU slice block
         float* dst = m_packedSubgridData.data() + (layer * floatsPerTile);
         std::memcpy(dst, src, bytesPerTile);
     }
 
-    // -------------------------------------------------------------------------
-    // Step 2: Asynchronous DMA Transfer via PBO (1 single API call for all layers!)
-    // -------------------------------------------------------------------------
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbo);
-    
-    // Orphan/Re-allocate the buffer to avoid CPU-GPU sync stalls (GL_STREAM_DRAW)
     glBufferData(GL_PIXEL_UNPACK_BUFFER, m_packedSubgridData.size() * sizeof(float), nullptr, GL_STREAM_DRAW);
     glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, m_packedSubgridData.size() * sizeof(float), m_packedSubgridData.data());
 
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
-    
-    // Upload ALL 81 layers in 1 shot! Passing 'nullptr' reads from offset 0 in the bound PBO
     glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
-                    0, 0, 0,                          // x, y, z starting offsets
-                    kTexSide, kTexSide, subgrid.size(),// width, height, depth (81 layers)
-                    GL_RED, GL_FLOAT, nullptr);       // nullptr = offset into PBO
+                    0, 0, 0,
+                    kTexSide, kTexSide, subgrid.size(),
+                    GL_RED, GL_FLOAT, nullptr);
 
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0); // Unbind PBO so normal texture calls work again
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
     m_subgridDirty = false;
     return m_arrayTexture;
+}
+
+GLuint TerrainStreamer::getOrUploadRoadArrayTexture()
+{
+    if (!m_roadSubgridDirty)
+    {
+        return m_roadArrayTexture;
+    }
+
+    using namespace WorldCoordinates::Square;
+    constexpr int kTexSide = kTileResolution + kApronTexels;
+    const size_t floatsPerTile = tileAllocFloatCount();
+    const size_t bytesPerTile  = floatsPerTile * sizeof(float);
+    static const std::vector<float> kDefaultRoadTile(floatsPerTile, 1.0f); // Default max distance
+
+    const ActiveSubgrid subgrid = getActiveSubgrid();
+
+    for (int layer = 0; layer < static_cast<int>(subgrid.size()); ++layer)
+    {
+        const ActiveTileSlice& slice = subgrid[layer];
+        const float* src = (slice.valid && slice.roadData) ? slice.roadData : kDefaultRoadTile.data();
+
+        float* dst = m_packedRoadSubgridData.data() + (layer * floatsPerTile);
+        std::memcpy(dst, src, bytesPerTile);
+    }
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_roadPbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, m_packedRoadSubgridData.size() * sizeof(float), nullptr, GL_STREAM_DRAW);
+    glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, m_packedRoadSubgridData.size() * sizeof(float), m_packedRoadSubgridData.data());
+
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_roadArrayTexture);
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
+                    0, 0, 0,
+                    kTexSide, kTexSide, subgrid.size(),
+                    GL_RED, GL_FLOAT, nullptr);
+
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    m_roadSubgridDirty = false;
+    return m_roadArrayTexture;
 }
 
 sf::Vector2f TerrainStreamer::getVisibleGridWorldOrigin() const

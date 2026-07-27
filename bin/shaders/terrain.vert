@@ -3,28 +3,11 @@
 #include "ubos/camera.glsl"
 #include "common/terrain.glsl"
 
-// ==============================================================================
-// == Remaining Vertex Uniforms =================================================
-// ==============================================================================
-layout(location = 0) in vec2 a_uv;                  // spans [0,1] across the FULL 9x9 visible grid
+layout(location = 0) in vec2 a_uv; // spans [0,1] across full 9x9 visible grid
 
 out vec2  v_worldXZ;
 out vec2  v_normalXZ;
 out float v_worldY;
-
-const int  kVisibleGridDim = 9;
-const int  kTileResolution = 256;   // core texels/side
-const int  kTexSide        = 257;   // stored texels/side (with apron)
-
-void resolveTileSample(vec2 gridUV, out int layer, out vec2 texUV)
-{
-    vec2 tileF   = clamp(gridUV, 0.0, 1.0) * float(kVisibleGridDim);
-    ivec2 tileXY = clamp(ivec2(floor(tileF)), ivec2(0), ivec2(kVisibleGridDim - 1));
-    layer = tileXY.y * kVisibleGridDim + tileXY.x;
-
-    vec2 localUV = fract(tileF);
-    texUV = (localUV * float(kTileResolution) + 0.5) / float(kTexSide);
-}
 
 float decodeHeightVertex(vec2 gridUV)
 {
@@ -40,14 +23,13 @@ float decodeHeightVertex(vec2 gridUV)
 }
 
 void main() {
-    float worldX = u_terrainGridWorldOrigin.x + a_uv.x * (kVisibleGridDim * u_terrainTileWorldSize);
-    float worldZ = u_terrainGridWorldOrigin.y + a_uv.y * (kVisibleGridDim * u_terrainTileWorldSize);
+    float worldX = u_terrainGridWorldOrigin.x + a_uv.x * (float(kVisibleGridDim) * u_terrainTileWorldSize);
+    float worldZ = u_terrainGridWorldOrigin.y + a_uv.y * (float(kVisibleGridDim) * u_terrainTileWorldSize);
 
     float h = decodeHeightVertex(a_uv);
     v_worldY = h;
 
-    // One texel step, expressed in grid-UV space (whole 5x5 extent)
-    vec2 gridTexelSize = 1.0 / vec2(kVisibleGridDim * kTileResolution);
+    vec2 gridTexelSize = 1.0 / vec2(float(kVisibleGridDim * kTileResolution));
 
     float hL = decodeHeightVertex(a_uv + vec2(-gridTexelSize.x, 0.0));
     float hR = decodeHeightVertex(a_uv + vec2( gridTexelSize.x, 0.0));

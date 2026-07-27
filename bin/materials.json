@@ -50,5 +50,41 @@
     "metallic": 0.0,
     "specularReflectance": 0.12,
     "emissiveIntensity": 0.0
+  },
+  {
+    "name": "TerrainAsphalt",
+    "textures": {
+      "diffuse": "images/terrain/asphalt_diffuse.jpg",
+      "normal":  "images/terrain/asphalt_normal.jpg"
+    },
+    "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
+    "roughness": 0.15,
+    "metallic": 0.0,
+    "specularReflectance": 0.15,
+    "emissiveIntensity": 0.0
+  },
+  {
+    "name": "Hessian",
+    "textures": {
+      "diffuse": "images/terrain/hessian_diffuse.jpg",
+      "normal":  "images/terrain/hessian_normal.jpg"
+    },
+    "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
+    "roughness": 0.75,
+    "metallic": 0.0,
+    "specularReflectance": 0.05,
+    "emissiveIntensity": 0.0
+  },
+  {
+    "name": "Paper",
+    "textures": {
+      "diffuse": "images/terrain/paper_diffuse.png",
+      "normal":  "images/terrain/paper_normal.png"
+    },
+    "albedoTint": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
+    "roughness": 0.85,
+    "metallic": 0.0,
+    "specularReflectance": 0.05,
+    "emissiveIntensity": 0.0
   }
 ]

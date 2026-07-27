@@ -4,6 +4,7 @@
 #include <SFML/System.hpp>
 #include "core/WorldCoordinates.hpp"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -25,6 +26,14 @@ struct TerrainManifest
     std::vector<std::string> channels;
 
     static TerrainManifest loadFromFile(const std::filesystem::path& manifestPath);
+    
+    // Quick helper to check manifest channels
+    bool hasChannel(const std::string& channelName) const {
+        for (const auto& c : channels) {
+            if (c == channelName) return true;
+        }
+        return false;
+    }
 };
 
 class TerrainStreamer
@@ -44,25 +53,31 @@ public:
     const TerrainManifest& getManifest() const { return m_manifest; }
     float sampleHeightAt(sf::Vector2f worldPos) const;
     const float* getTileData(TileCoord coord) const;
+    const float* getRoadData(TileCoord coord) const; // Added for Road Access
     TileCoord getOriginTile() const;
 
     struct ActiveTileSlice
     {
         WorldCoordinates::Square::TileCoord coord;
-        const float* data  = nullptr;
-        bool         valid = false;
+        const float* heightData = nullptr;
+        const float* roadData   = nullptr; // Added for Road Access
+        bool         valid      = false;
     };
 
     using ActiveSubgrid = std::array<ActiveTileSlice, WorldCoordinates::Square::kVisibleGridDim * WorldCoordinates::Square::kVisibleGridDim>;
     ActiveSubgrid getActiveSubgrid() const;
-    GLuint getOrUploadArrayTexture();
+    
+    GLuint getOrUploadArrayTexture();     // Uploads Height GL_R32F
+    GLuint getOrUploadRoadArrayTexture(); // Added: Uploads Road SDF GL_R32F / GL_R8
+    
     sf::Vector2f getVisibleGridWorldOrigin() const;
 
 private:
 
     static bool loadTileFromDisk(const TerrainManifest& manifest,
                                   TileCoord coord,
-                                  float* outBuffer);
+                                  float* outHeightBuffer,
+                                  float* outRoadBuffer); // Updated signature
 
     bool m_gridInitialized = false;
 
@@ -83,18 +98,28 @@ private:
     void drainCompletionQueue();
 
     size_t tileAllocFloatCount() const;
+    
+    // Height storage helpers
     float* slotData(int slotIndex);
     const float* slotData(int slotIndex) const;
 
+    // Road storage helpers (Added)
+    float* slotRoadData(int slotIndex);
+    const float* slotRoadData(int slotIndex) const;
+
     TerrainManifest m_manifest;
 
-    std::vector<float>     m_tileStorage;
+    // CPU Cache Storage
+    std::vector<float>     m_tileStorage; // Height data
+    std::vector<float>     m_roadStorage; // Road SDF data (Added)
     std::vector<TileCoord> m_slotWorldCoord;
     std::vector<bool>      m_slotValid;
 
     TileCoord m_centerTileCoord{};
 
-    std::vector<float> m_stagingBuffer;
+    // Async staging
+    std::vector<float> m_stagingBuffer;     // Staging for Height
+    std::vector<float> m_stagingRoadBuffer; // Staging for Roads (Added)
 
     std::thread              m_workerThread;
     std::mutex               m_requestQueueMutex;
@@ -105,8 +130,17 @@ private:
     std::atomic<bool>        m_shutdownRequested{false};
 
     std::array<GLint, 81> m_activeSliceUniforms{};
-    GLuint m_arrayTexture = 0;
-    bool   m_subgridDirty = true;
-    GLuint m_pbo = 0;
-    std::vector<float> m_packedSubgridData;
+    
+    // OpenGL GPU Texture & PBO Objects
+    GLuint m_arrayTexture     = 0; // Heightfield array (GL_TEXTURE_2D_ARRAY)
+    GLuint m_pbo              = 0; // Heightfield PBO
+    
+    GLuint m_roadArrayTexture = 0; // Road SDF array (GL_TEXTURE_2D_ARRAY) [Added]
+    GLuint m_roadPbo          = 0; // Road SDF PBO [Added]
+
+    bool m_subgridDirty     = true;
+    bool m_roadSubgridDirty = true; // [Added]
+
+    std::vector<float> m_packedSubgridData;     // Packed 81 layers for Height
+    std::vector<float> m_packedRoadSubgridData; // Packed 81 layers for Roads [Added]
 };

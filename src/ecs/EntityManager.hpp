@@ -39,6 +39,8 @@ class EntityManager
     soa::ComponentArray<CTransform3D>           m_compTransform;
     soa::ComponentArray<CPhysics>               m_compPhysics;
     soa::ComponentArray<CBob>                   m_compBob;
+    soa::ComponentArray<CGaitCycle>             m_compGaitCycle;
+    soa::ComponentArray<CKinematicBob>          m_compKinematicBob;
     soa::ComponentArray<CPlayer>                m_compPlayer;
     soa::ComponentArray<CCamera>                m_compCamera;
     soa::ComponentArray<CInput>                 m_compInput;
@@ -176,6 +178,8 @@ public:
         if (m_compTransform.has(h)) m_compTransform.remove(h);
         if (m_compPhysics.has(h)) m_compPhysics.remove(h);
         if (m_compBob.has(h)) m_compBob.remove(h);
+        if (m_compGaitCycle.has(h)) m_compGaitCycle.remove(h);
+        if (m_compKinematicBob.has(h)) m_compKinematicBob.remove(h);
         if (m_compPlayer.has(h)) m_compPlayer.remove(h);
         if (m_compCamera.has(h)) m_compCamera.remove(h);
         if (m_compInput.has(h)) m_compInput.remove(h);
@@ -213,6 +217,22 @@ public:
     const CBob& getBob(SoAEntityHandle h) const { return m_compBob.get(h); }
     void removeBob(SoAEntityHandle h) { m_compBob.remove(h); }
     template<typename F> void forEachBob(F&& f) { m_compBob.each([this,&f](uint32_t entIndex, CBob& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
+
+    // Gait Cycle
+    void addGaitCycle(SoAEntityHandle h, const CGaitCycle& g) { if (!m_soaPool.valid(h)) return; auto v = g; m_compGaitCycle.add(h, v); }
+    bool hasGaitCycle(SoAEntityHandle h) const { return m_compGaitCycle.has(h); }
+    CGaitCycle& getGaitCycle(SoAEntityHandle h) { return m_compGaitCycle.get(h); }
+    const CGaitCycle& getGaitCycle(SoAEntityHandle h) const { return m_compGaitCycle.get(h); }
+    void removeGaitCycle(SoAEntityHandle h) { m_compGaitCycle.remove(h); }
+    template<typename F> void forEachGaitCycle(F&& f) { m_compGaitCycle.each([this,&f](uint32_t entIndex, CGaitCycle& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
+
+    // Kinematic Bob
+    void addKinematicBob(SoAEntityHandle h, const CKinematicBob& k) { if (!m_soaPool.valid(h)) return; auto v = k; m_compKinematicBob.add(h, v); }
+    bool hasKinematicBob(SoAEntityHandle h) const { return m_compKinematicBob.has(h); }
+    CKinematicBob& getKinematicBob(SoAEntityHandle h) { return m_compKinematicBob.get(h); }
+    const CKinematicBob& getKinematicBob(SoAEntityHandle h) const { return m_compKinematicBob.get(h); }
+    void removeKinematicBob(SoAEntityHandle h) { m_compKinematicBob.remove(h); }
+    template<typename F> void forEachKinematicBob(F&& f) { m_compKinematicBob.each([this,&f](uint32_t entIndex, CKinematicBob& data){ SoAEntityHandle h = m_soaPool.handleFromIndex(entIndex); f(h, data); }); }
 
     // Player
     void addPlayer(SoAEntityHandle h, const CPlayer& p) { if (!m_soaPool.valid(h)) return; auto v = p; m_compPlayer.add(h, v); }

@@ -38,7 +38,8 @@ namespace Uniforms {
         constexpr GLint TerrainGridWorldOrigin  = Base + 1;
         constexpr GLint TerrainTileWorldSize    = Base + 2;
         constexpr GLint TerrainHeightArray      = Base + 3;
-        constexpr GLint TerrainSliceValid       = Base + 4;
+        constexpr GLint TerrainRoadArray        = Base + 4;
+        constexpr GLint TerrainSliceValid       = Base + 5;
     }
 
     // =========================================================================
