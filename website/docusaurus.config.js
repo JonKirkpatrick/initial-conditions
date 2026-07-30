@@ -10,7 +10,7 @@ import {themes as prismThemes} from 'prism-react-renderer';
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: 'Initial Conditions Engine Documentation',
+  title: 'ICEngine Docs',
   tagline: 'A 3D Game Engine to get the hang of OpenGL and C++',
   favicon: 'img/favicon.ico',
 
@@ -47,8 +47,6 @@ const config = {
       ({
         docs: {
           sidebarPath: './sidebars.js',
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
           editUrl:
             'https://github.com/JonKirkpatrick/initial-conditions/tree/main/website/docs/',
         },
@@ -58,11 +56,8 @@ const config = {
             type: ['rss', 'atom'],
             xslt: true,
           },
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
           editUrl:
             'https://github.com/JonKirkpatrick/initial-conditions/tree/main/website/blog/',
-          // Useful options to enforce blogging best practices
           onInlineTags: 'warn',
           onInlineAuthors: 'warn',
           onUntruncatedBlogPosts: 'warn',
@@ -77,15 +72,14 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
-      // Replace with your project's social card
       image: 'img/docusaurus-social-card.jpg',
       colorMode: {
         respectPrefersColorScheme: true,
       },
       navbar: {
-        title: 'Initial Conditions Engine Documentation',
+        title: 'ICEngine Docs',
         logo: {
-          alt: 'Initial Conditions Engine Documentation Logo',
+          alt: 'ICEngine Docs Logo',
           src: 'img/logo.svg',
         },
         items: [
@@ -96,11 +90,6 @@ const config = {
             label: 'Tutorial',
           },
           {to: '/blog', label: 'Blog', position: 'left'},
-          {
-            href: 'https://github.com/JonKirkpatrick/initial-conditions',
-            label: 'GitHub',
-            position: 'right',
-          },
         ],
       },
       footer: {
@@ -112,23 +101,6 @@ const config = {
               {
                 label: 'Tutorial',
                 to: '/docs/intro',
-              },
-            ],
-          },
-          {
-            title: 'Community',
-            items: [
-              {
-                label: 'Stack Overflow',
-                href: 'https://stackoverflow.com/questions/tagged/docusaurus',
-              },
-              {
-                label: 'Discord',
-                href: 'https://discordapp.com/invite/docusaurus',
-              },
-              {
-                label: 'X',
-                href: 'https://x.com/docusaurus',
               },
             ],
           },
@@ -146,7 +118,7 @@ const config = {
             ],
           },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} Initial Conditions Engine, Inc. Built with Docusaurus.`,
+        copyright: `Copyright © ${new Date().getFullYear()} Initial Conditions Engine. Built with Docusaurus.`,
       },
       prism: {
         theme: prismThemes.github,

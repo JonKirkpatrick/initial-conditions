@@ -1,23 +1,50 @@
-/**
- * CSS files with the .module.css suffix will be treated as CSS modules
- * and scoped locally.
- */
-
 .heroBanner {
   padding: 4rem 0;
-  text-align: center;
   position: relative;
   overflow: hidden;
 }
 
-@media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
-  }
+/* Flex wrapper for Logo + Text */
+.heroHeaderContent {
+  display: flex;
+  align-items: center;       /* Vertically centers image with text */
+  justify-content: center;   /* Horizontally centers the whole block */
+  gap: 2rem;                 /* Space between logo and text */
+  margin-bottom: 2rem;       /* Space above the buttons */
+  text-align: left;          /* Left-align text relative to the logo */
+}
+
+/* Logo sizing */
+.heroLogo {
+  width: 196px;              /* Adjust this size to fit your design */
+  height: auto;              /* Maintains aspect ratio */
+  object-fit: contain;
+  flex-shrink: 0;            /* Prevents the image from squishing */
+}
+
+.heroText {
+  display: flex;
+  flex-direction: column;
 }
 
 .buttons {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 2rem;
+  }
+
+  .heroHeaderContent {
+    flex-direction: column;
+    text-align: center;
+    gap: 1rem;
+  }
+
+  .heroLogo {
+    width: 90px;             /* Slightly smaller on mobile */
+  }
 }
