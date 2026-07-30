@@ -9,6 +9,7 @@
 // ==============================================================================
 layout(location = 0) uniform float u_reliefExaggeration;
 layout(location = 1) uniform bool  u_cursorMode;
+layout(location = 8) uniform bool  u_drawHexGrid;
 layout(location = 2) uniform float u_hexSize;
 layout(location = 3) uniform vec2  u_hoveredHex;
 layout(location = 4) uniform vec3  u_gridColour;
@@ -30,7 +31,7 @@ layout(location = 3) out vec4 outRetro;
 // Material ID Constants (Paper Material)
 const uint MAT_PAPER     = 7u;
 const uint MAT_GRID_LINE = 1u;
-const uint MAT_ROAD      = 2u; // Road material ID for G-Buffer
+const uint MAT_ROAD      = 5u; // Road material ID for G-Buffer
 
 // ==============================================================================
 // == G-Buffer Structs ==========================================================
@@ -315,24 +316,43 @@ MaterialSample resolveMaterial(inout GeometrySample geo)
     finalColor = mix(finalColor, roadCasingColour, roadCasingMask);
     finalColor = mix(finalColor, roadFillColour, roadCoreMask);
 
-    // ================== HEX GRID ==================
-    float gridFade = pow(clamp(1.0 - (geo.dist / u_farPlane), 0.0, 1.0), 2.0);
-    float visibilityDist = 20.0 + u_cameraHeight * 2.0;
-    float distanceFade = clamp(1.0 - (geo.dist / visibilityDist), 0.0, 1.0);
-    float gridVisibility = gridFade * distanceFade;
-
-    vec2 lineGradientDir;
-    float gridMask = hexGridWithNormal(geo.pos.xz, lineGradientDir);
-    float finalGridIntensity = gridMask * gridVisibility;
-
-    finalColor = mix(finalColor, u_gridColour, finalGridIntensity);
-
     // ================== MATERIAL INDICES SETTING ==================
     mat.materialID          = MAT_PAPER;     // Index 7
-    mat.secondaryMaterialID = MAT_GRID_LINE; // Index 1
-    
-    // Blend factor goes from 0.0 (Pure Paper) to 1.0 (Pure Line Material) 
-    mat.blendFactor          = clamp(finalGridIntensity, 0.0, 1.0);
+    mat.secondaryMaterialID = MAT_GRID_LINE; // Index 5
+    mat.blendFactor         = 0.0;
+
+    // ================== HEX GRID ==================
+    if (u_drawHexGrid) {
+        float gridFade = pow(clamp(1.0 - (geo.dist / u_farPlane), 0.0, 1.0), 2.0);
+        float visibilityDist = 20.0 + u_cameraHeight * 2.0;
+        float distanceFade = clamp(1.0 - (geo.dist / visibilityDist), 0.0, 1.0);
+        float gridVisibility = gridFade * distanceFade;
+
+        vec2 lineGradientDir;
+        float gridMask = hexGridWithNormal(geo.pos.xz, lineGradientDir);
+        float finalGridIntensity = gridMask * gridVisibility;
+
+        finalColor = mix(finalColor, u_gridColour, finalGridIntensity);
+
+        // Blend factor goes from 0.0 (Pure Paper) to 1.0 (Pure Line Material) 
+        mat.blendFactor          = clamp(finalGridIntensity, 0.0, 1.0);
+
+        // ================== SMOOTH BEVEL NORMAL ==================
+        const float edgeBevelStrength = 0.375;
+        if (gridVisibility > 0.01 && gridMask > 0.001) {
+            vec3 smoothGridNormal = calculateSmoothGridNormal(lineGradientDir, gridMask, geo.normal, edgeBevelStrength);
+            geo.normal = normalize(mix(geo.normal, smoothGridNormal, gridVisibility));
+        }
+        // ================== HEX HIGHLIGHT ==================
+        if (u_cursorMode) {
+            vec2 cell = hexAt(geo.pos.xz);
+            if (cell.x == u_hoveredHex.x && cell.y == u_hoveredHex.y) {
+                float insideCell = 1.0 - gridMask;
+                finalColor = mix(finalColor, u_gridColour, insideCell * 0.25);
+                finalColor = mix(finalColor, u_gridColour, gridMask * 0.9);
+            }
+        }
+    }
 
     // If road is predominant, assign road secondary material
     if (roadCasingMask > 0.5) {
@@ -340,22 +360,6 @@ MaterialSample resolveMaterial(inout GeometrySample geo)
         mat.blendFactor = max(mat.blendFactor, roadCoreMask);
     }
 
-    // ================== SMOOTH BEVEL NORMAL ==================
-    const float edgeBevelStrength = 0.375;
-    if (gridVisibility > 0.01 && gridMask > 0.001) {
-        vec3 smoothGridNormal = calculateSmoothGridNormal(lineGradientDir, gridMask, geo.normal, edgeBevelStrength);
-        geo.normal = normalize(mix(geo.normal, smoothGridNormal, gridVisibility));
-    }
-
-    // ================== HEX HIGHLIGHT ==================
-    if (u_cursorMode) {
-        vec2 cell = hexAt(geo.pos.xz);
-        if (cell.x == u_hoveredHex.x && cell.y == u_hoveredHex.y) {
-            float insideCell = 1.0 - gridMask;
-            finalColor = mix(finalColor, u_gridColour, insideCell * 0.25);
-            finalColor = mix(finalColor, u_gridColour, gridMask * 0.9);
-        }
-    }
 
     mat.albedo = finalColor; 
 

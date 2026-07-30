@@ -280,7 +280,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(32000);
+    spawnDebugOrbs(64000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -2002,6 +2002,7 @@ void Scene_IC_Camp::runTerrainPass()
     glUniform1f(Uniforms::Terrain::HexSize, m_hexSize);
     glUniform2f(Uniforms::Terrain::HoveredHex, static_cast<float>(hex.x), static_cast<float>(hex.y));
     glUniform3f(Uniforms::Terrain::GridColour, m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
+    glUniform1i(Uniforms::Terrain::DrawHexGrid, static_cast<int>(m_drawHexGrid));
     
     // 5. Render
     glBindVertexArray(m_gridVAO);
@@ -2543,6 +2544,7 @@ void Scene_IC_Camp::sGUI()
         if (ImGui::BeginTabItem("Debug"))
         {
             ImGui::Checkbox("Draw Grid", &m_drawGrid);
+            ImGui::Checkbox("Draw Hex Grid", &m_drawHexGrid);
             ImGui::Checkbox("Draw Textures", &m_drawTextures);
             ImGui::Checkbox("Draw Debug", &m_drawCollision);
             ImGui::Checkbox("Draw Shadows", &m_debugShowShadowMap);

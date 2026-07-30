@@ -62,6 +62,7 @@ namespace Uniforms {
         constexpr GLint SeaLevel                = 5;
         constexpr GLint TerrainDiffuseArray     = 6;
         constexpr GLint TerrainNormalArray      = 7;
+        constexpr GLint DrawHexGrid             = 8;
     }
 
     namespace Lighting {

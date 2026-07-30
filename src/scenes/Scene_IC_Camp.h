@@ -253,6 +253,7 @@ protected:
     // =========================================================================
 
     bool m_drawGrid                 = true;
+    bool m_drawHexGrid              = false;
     bool m_drawTextures             = true;
     bool m_drawCollision            = false;
     bool m_showGUI                  = false;
