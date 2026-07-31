@@ -13,7 +13,7 @@ namespace
     }
 
     const std::array<sf::Color, 18> palette = {
-        sf::Color(247, 192, 55),       // TextBody
+        sf::Color(247, 192, 55),       // Text_Body
         sf::Color(247, 192, 55),       // MajorTitle
         sf::Color(238, 186, 80),       // MinorTitle
         sf::Color(119, 251, 0),        // Active
@@ -34,7 +34,7 @@ namespace
     };
 
     const std::unordered_map<std::string_view, ColorRole> tokenMap = {
-        { "text-body", ColorRole::TextBody },
+        { "text-body", ColorRole::Text_Body },
         { "major-title", ColorRole::MajorTitle },
         { "minor-title", ColorRole::MinorTitle },
         { "active", ColorRole::Active },
@@ -65,7 +65,7 @@ const sf::Color& Theme::color(std::string_view token)
     auto it = tokenMap.find(token);
     if (it == tokenMap.end())
     {
-        return color(ColorRole::TextBody);
+        return color(ColorRole::Text_Body);
     }
 
     return color(it->second);
