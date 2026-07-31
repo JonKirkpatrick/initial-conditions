@@ -8,7 +8,6 @@ namespace Theme
 {
     enum class ColorRole
     {
-        Text_Body,
         MajorTitle,
         MinorTitle,
         Active,

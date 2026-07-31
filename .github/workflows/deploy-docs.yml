@@ -46,7 +46,6 @@ jobs:
         run: |
           mkdir -p website/docs/api
           doxybook2 -i xml -o website/docs/api -c doxybook2.json
-          find website/docs/api -name "*.md" -exec sed -i 's/<br>/<br \/>/g' {} +
 
       - name: Install Node Dependencies
         run: npm ci

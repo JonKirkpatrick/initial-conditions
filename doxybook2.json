@@ -4,7 +4,7 @@
     "sidebarLabel": "API Reference"
   },
   "options": {
-    "noHtml": false,
+    "noHtml": true,
     "markdownEngine": "docusaurus"
   },
   "fileExt": "md",
