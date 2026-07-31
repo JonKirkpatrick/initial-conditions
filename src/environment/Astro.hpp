@@ -1,51 +1,91 @@
 #pragma once
 
+/**
+ * @file Astro.hpp
+ * @brief Astronomical mechanics, celestial positioning, and temporal tracking system.
+ * 
+ * Provides analytical routines for calculating solar position, lunar positions using 
+ * truncated Meeus series, sidereal time (GMST/LST), starfield rotation matrices, 
+ * and day/night light coloration curves.
+ */
+
 #include <SFML/System.hpp>
 #include <array>
 #include <cmath>
 
 namespace Astro {
 
+    /**
+     * @brief Astronomical time metrics.
+     */
     struct Time
     {
-        double julianDate;
-        double julianCenturies;
-        double gmst;
-        double lst;
+        double julianDate;      ///< Full Julian Date (JDN + time fraction).
+        double julianCenturies; ///< Julian centuries elapsed since epoch J2000.0.
+        double gmst;            ///< Greenwich Mean Sidereal Time in degrees [0, 360).
+        double lst;             ///< Local Sidereal Time in degrees [0, 360).
     };
 
+    /**
+     * @brief Complete snapshot of celestial environment state for rendering.
+     */
     struct State
     {
-        Time astroTime;
-        sf::Glsl::Vec3 sunDirection;
-        sf::Glsl::Vec4 sunColor; // RGB + intensity
-        sf::Glsl::Vec3 moonDirection;
-        float epochOffset;
-        float starRotationMatrix[9]; // 3x3 row-major
+        Time astroTime;                  ///< Astronomical time parameters.
+        sf::Glsl::Vec3 sunDirection;     ///< Normalized unit vector pointing to the sun in world coordinates.
+        sf::Glsl::Vec4 sunColor;         ///< Direct sunlight RGB color + intensity factor (W).
+        sf::Glsl::Vec3 moonDirection;    ///< Normalized unit vector pointing to the moon in world coordinates.
+        float epochOffset;               ///< Calibrated epoch angle in radians for starfield alignment.
+        float starRotationMatrix[9];     ///< 3x3 row-major transformation matrix for orientation of background star sphere.
     };
 
+    /**
+     * @brief Horizontal coordinate system values (Altitude/Azimuth).
+     */
     struct AltAz {
-        float elevationRad;
-        float azimuthRad;
+        float elevationRad; ///< Elevation / Altitude angle in radians above the horizon.
+        float azimuthRad;   ///< Azimuth angle in radians measured eastwards from North.
     };
 
+    /**
+     * @brief Intermediate container returning calculated sidereal time and epoch calibration.
+     */
     struct TimeCalculationResult {
-        Time astroTime;
-        float epochOffset;
+        Time astroTime;     ///< Populated astronomical time structure.
+        float epochOffset;  ///< Calibrated starfield alignment offset in radians.
     };
 
+    /** @brief Mathematical constant $\pi$. */
     constexpr double PI = 3.14159265358979323846;
 
+    /**
+     * @brief Converts angular degrees to radians.
+     * @param degrees Angle in degrees.
+     * @return Angle in radians.
+     */
     inline double toRad(double degrees) 
     {
         return degrees * PI / 180.0;
     }
 
+    /**
+     * @brief Converts angular radians to degrees.
+     * @param radians Angle in radians.
+     * @return Angle in degrees.
+     */
     inline double toDeg(double radians) 
     {
         return radians * 180.0 / PI;
     }
 
+    /**
+     * @brief Computes Horizontal coordinates (Altitude/Azimuth) from Equatorial parameters.
+     * 
+     * @param haRad Hour angle in radians.
+     * @param decRad Declination in radians.
+     * @param latRad Geographic observer latitude in radians.
+     * @return Calculated `AltAz` structure.
+     */
     inline AltAz computeAltAz(float haRad, float decRad, float latRad)
     {
         float sinElevation = std::sin(latRad) * std::sin(decRad) +
@@ -64,6 +104,13 @@ namespace Astro {
         return { elevationRad, azimuthRad };
     }
 
+    /**
+     * @brief Approximates solar declination angle for a given calendar day.
+     * 
+     * @param month Current calendar month (1–12).
+     * @param dayOfMonth Current day of month (1–31).
+     * @return Solar declination angle in degrees.
+     */
     inline float solarDeclination(int month, int dayOfMonth)
     {
         static constexpr int daysBeforeMonth[] = {0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
@@ -71,6 +118,18 @@ namespace Astro {
         return 23.45f * std::sin((360.0f / 365.0f) * (dayOfYear - 81.0f) * PI / 180.0f);
     }
 
+    /**
+     * @brief Converts horizontal spherical coordinates (Altitude/Azimuth) to a normalized 3D direction vector.
+     * 
+     * Mapping convention:
+     * - X: East-West axis
+     * - Y: Vertical / Up axis
+     * - Z: North-South axis
+     * 
+     * @param elevationRad Elevation angle in radians.
+     * @param azimuthRad Azimuth angle in radians.
+     * @return 3D normalized unit vector in world space.
+     */
     inline sf::Glsl::Vec3 altAzToDirection(float elevationRad, float azimuthRad)
     {
         return sf::Glsl::Vec3(
@@ -80,6 +139,16 @@ namespace Astro {
         );
     }
 
+    /**
+     * @brief Calculates astronomical time variables (Julian Date, GMST, LST) based on observer location and time.
+     * 
+     * @param year Full calendar year (e.g. 2026).
+     * @param month Month (1–12).
+     * @param dayOfMonth Day of month (1–31).
+     * @param localTime Fractional solar hour of day [0.0, 24.0).
+     * @param longitude Observer geographic longitude in degrees (East positive, West negative).
+     * @return Calculated `TimeCalculationResult` struct containing `Time` metrics and `epochOffset`.
+     */
     inline TimeCalculationResult computeSiderealTime(int year, int month, int dayOfMonth, float localTime, float longitude)
     {
         double a   = std::floor((14.0 - month) / 12.0);
@@ -126,6 +195,14 @@ namespace Astro {
         return { t, epochOffset };
     }
 
+    /**
+     * @brief Computes a 3x3 rotation matrix for transforming background skybox star coordinates.
+     * 
+     * @param latitude Observer latitude in degrees.
+     * @param longitude Observer longitude in degrees.
+     * @param epochOffset Starfield texture alignment angle in radians.
+     * @param[out] outMatrix Array of 9 floats receiving the 3x3 row-major transformation matrix.
+     */
     inline void computeStarRotationMatrix(float latitude, float longitude, float epochOffset, float outMatrix[9])
     {
         float lat = (90.0f - latitude) * static_cast<float>(PI) / 180.0f;
@@ -145,6 +222,17 @@ namespace Astro {
         outMatrix[8] = -std::cos(lon) * std::cos(lat);
     }
 
+    /**
+     * @brief Computes the 3D world direction vector pointing toward the Moon.
+     * 
+     * Uses a truncated Jean Meeus analytical series (*Astronomical Algorithms*, Ch. 47) 
+     * to evaluate lunar ecliptic coordinates, converts to equatorial RA/Dec, and maps 
+     * to local Alt/Az direction vectors.
+     * 
+     * @param astroTime Current astronomical time parameter context.
+     * @param latitude Observer geographic latitude in degrees.
+     * @return 3D normalized direction vector toward the moon.
+     */
     inline sf::Glsl::Vec3 computeMoonDirection(const Time& astroTime, float latitude)
     {
         double T = astroTime.julianCenturies;
@@ -221,6 +309,20 @@ namespace Astro {
         return altAzToDirection(altaz.elevationRad, altaz.azimuthRad);
     }
 
+    /**
+     * @brief Computes complete astronomical system environment state for given date/time and location.
+     * 
+     * Evaluates sun position/color temperature, sidereal time parameters, celestial star matrix, 
+     * and analytical lunar direction vector.
+     * 
+     * @param year Calendar year.
+     * @param month Month (1–12).
+     * @param dayOfMonth Day of month (1–31).
+     * @param timeOfDay Time of day in decimal hours [0.0, 24.0).
+     * @param latitude Observer latitude in degrees.
+     * @param longitude Observer longitude in degrees.
+     * @return Fully populated `State` structure for sky rendering and directional lighting.
+     */
     inline State calculateState(int year, int month, int dayOfMonth, double timeOfDay, float latitude, float longitude)
     {
         State state;
@@ -263,6 +365,19 @@ namespace Astro {
         return state;
     }
 
+    /**
+     * @brief Advances in-game calendar and clock state based on delta time.
+     * 
+     * Handles progression of fractional hours, month length variations, leap years, 
+     * and year rollovers.
+     * 
+     * @param dt Frame delta time in seconds.
+     * @param realSecondsPerHour Time scale ratio (real seconds representing one in-game hour).
+     * @param[in,out] gameTime In-game clock in hours [0.0, 24.0).
+     * @param[in,out] day Day of month (1–31).
+     * @param[in,out] month Month (1–12).
+     * @param[in,out] year Full calendar year.
+     */
     inline void advanceCalendar(double dt, double realSecondsPerHour, 
                                 double& gameTime, int& day, int& month, int& year) 
     {
