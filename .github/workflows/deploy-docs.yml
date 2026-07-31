@@ -17,23 +17,46 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-node@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: website/package-lock.json
 
-      - name: Install dependencies
+      - name: Install Doxygen and Graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Install Doxybook2
+        run: |
+          wget https://github.com/matusnovak/doxybook2/releases/download/v1.0.0/doxybook2-linux-amd64-v1.0.0.zip
+          unzip doxybook2-linux-amd64-v1.0.0.zip
+          sudo mv bin/doxybook2 /usr/local/bin/
+          rm -rf doxybook2-linux-amd64-v1.0.0.zip bin
+
+      - name: Generate Doxygen XML
+        run: doxygen Doxyfile
+
+      - name: Generate API Docs with Doxybook2
+        run: |
+          mkdir -p website/docs/api
+          doxybook2 -i xml -o website/docs/api -c doxybook2.json
+          find website/docs/api -name "*.md" -exec sed -i 's/<br>/<br \/>/g' {} +
+
+      - name: Install Node Dependencies
         run: npm ci
         working-directory: ./website
 
-      - name: Build site
+      - name: Build Docusaurus Site
         run: npm run build
         working-directory: ./website
 
-      - name: Upload Artifact
+      - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: website/build

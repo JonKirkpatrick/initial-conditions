@@ -14,3 +14,11 @@
 *.exe
 *.out
 *.zip
+
+# Doxygen & Doxybook2 generated intermediates
+xml/
+latex/
+html/
+
+# Docusaurus generated API docs
+website/docs/api/

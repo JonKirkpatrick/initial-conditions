@@ -1,0 +1,24 @@
+{
+  "baseUrl": "/docs/api/",
+  "docusaurus": {
+    "sidebarLabel": "API Reference"
+  },
+  "options": {
+    "noHtml": false,
+    "markdownEngine": "docusaurus"
+  },
+  "fileExt": "md",
+  "useFolders": true,
+
+  "folderClassesName": "Classes",
+  "folderNamespacesName": "Namespaces",
+  "folderFilesName": "Files",
+  "folderGroupsName": "Modules",
+  "folderExamplesName": "Examples",
+  "folderRelatedPagesName": "Pages",
+
+  "indexClassesName": "index_classes",
+  "indexNamespacesName": "index_namespaces",
+  "indexFilesName": "index_files",
+  "indexGroupsName": "index_modules"
+}

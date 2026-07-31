@@ -83,14 +83,20 @@ const config = {
           src: 'img/logo.svg',
         },
         items: [
-          {
-            type: 'docSidebar',
-            sidebarId: 'tutorialSidebar',
-            position: 'left',
-            label: 'Tutorial',
-          },
-          {to: '/blog', label: 'Blog', position: 'left'},
-        ],
+        {
+          type: 'docSidebar',
+          sidebarId: 'apiSidebar', // Matches the key in sidebars.js
+          position: 'left',
+          label: 'API Reference',  // This will show in your top nav!
+        },
+        {
+          type: 'docSidebar',
+          sidebarId: 'tutorialSidebar',
+          position: 'left',
+          label: 'Tutorial',
+        },
+        { to: '/blog', label: 'Blog', position: 'left' },
+      ],
       },
       footer: {
         style: 'dark',
