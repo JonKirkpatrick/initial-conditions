@@ -2,12 +2,12 @@
 #define COMMON_TERRAIN_GLSL
 
 // Shared Uniforms (explicit locations match your codebase)
-layout(location = 400) uniform float          u_heightMax;
-layout(location = 401) uniform vec2           u_terrainGridWorldOrigin;
-layout(location = 402) uniform float          u_terrainTileWorldSize;
-layout(location = 403) uniform sampler2DArray u_terrainHeightArray;
-layout(location = 404) uniform sampler2DArray u_terrainRoadArray;
-layout(location = 405) uniform int            u_terrainSliceValid[81];
+layout(location = X) uniform float          u_heightMax;
+layout(location = X) uniform vec2           u_terrainGridWorldOrigin;
+layout(location = X) uniform float          u_terrainTileWorldSize;
+layout(location = X) uniform sampler2DArray u_terrainHeightArray;
+layout(location = X) uniform sampler2DArray u_terrainRoadArray;
+layout(location = X) uniform int            u_terrainSliceValid[81];
 
 // Constants matching streamer dimensions
 const int kVisibleGridDim = 9;

@@ -14,14 +14,14 @@ flat in int v_instanceID;
 // ==============================================================================
 // == Remaining Uniforms ========================================================
 // ==============================================================================
-layout(location = 0) uniform sampler2DArray u_charDiffuseTex;
-layout(location = 1) uniform sampler2DArray u_charNormalTex;
+layout(location = X) uniform sampler2DArray u_charDiffuseTex;
+layout(location = X) uniform sampler2DArray u_charNormalTex;
 
 // G-Buffer Slots
-layout (location = 0) out vec4 outAlbedo;
-layout (location = 1) out vec4 outNormal;
-layout (location = 2) out vec4 outIndices;
-layout (location = 3) out vec4 outRetro;
+layout(location = X) out vec4 outAlbedo;
+layout(location = X) out vec4 outNormal;
+layout(location = X) out vec4 outIndices;
+layout(location = X) out vec4 outRetro;
 
 // ==============================================================================
 // == OrbInstance — unpacked, derived per-instance data =========================

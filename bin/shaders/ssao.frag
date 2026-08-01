@@ -8,16 +8,16 @@ in vec2 v_uv;
 // ==============================================================================
 // == Texture Samplers ==========================================================
 // ==============================================================================
-layout(location = 0) uniform sampler2D u_texNoise;
+layout(location = X) uniform sampler2D u_texNoise;
 
 // ==============================================================================
 // == Remaining Loose Uniforms ==================================================
 // ==============================================================================
-layout(location = 1) uniform float u_radius;     
-layout(location = 2) uniform float u_bias;       
-layout(location = 3) uniform vec2  u_noiseScale;  
-layout(location = 4) uniform int   u_sampleCount;
-layout(location = 9) uniform vec3  u_samples[64];
+layout(location = X) uniform float u_radius;     
+layout(location = X) uniform float u_bias;       
+layout(location = X) uniform vec2  u_noiseScale;  
+layout(location = X) uniform int   u_sampleCount;
+layout(location = X) uniform vec3  u_samples[64];
 
 vec3 getPositionInViewSpace(vec2 uv) {
     float depth = texture(u_gDepth, uv).r;

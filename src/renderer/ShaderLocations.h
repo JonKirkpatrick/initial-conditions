@@ -1,163 +1,340 @@
-/**
- * @file UniformLocations.hpp
- * @brief Static uniform location index registry for OpenGL shader programs.
- * 
- * Defines explicit uniform locations mapping to layout location bindings (`layout(location = N)`).
- * Provides distinct index ranges for shared global properties (Sky, Shadows, GBuffer, Terrain)
- * and program-specific uniforms (Ocean, Terrain, Lighting, SSAO, MiniMap, etc.).
- * 
- * @note Planned migration: This static header will be replaced by a JSON-driven runtime schema 
- * generated during `GLProgram` compilation to serve as a single source of truth.
- */
-
 #pragma once
+
 #include <GL/glew.h>
+
+#include <algorithm>
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <nlohmann/json.hpp>
+#include <regex>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Uniforms {
 
-    // =========================================================================
-    // SHARED / GLOBAL UNIFORM BLOCKS (Reserved Ranges)
-    // =========================================================================
-    
-    /**
-     * @brief Uniform layout locations for skybox, celestial bodies, and star field rendering [Range 100-199].
-     */
-    namespace Sky {
-        constexpr GLint Base                    = 100;    ///< Base location offset for sky uniforms.
-        constexpr GLint Cubemap                 = Base + 0; ///< Texture sampler for sky background cubemap.
-        constexpr GLint StarRotationMatrix      = Base + 1; ///< 3x3 rotation matrix for nocturnal star field rotation.
-        constexpr GLint UseSkyCubemap           = Base + 2; ///< Boolean flag toggling sky cubemap sampling.
-        constexpr GLint MoonTexture             = Base + 3; ///< 2D texture sampler for dynamic moon rendering.
+namespace detail {
+
+struct ShaderBindingEntry
+{
+    std::string cppNamespace;
+    std::string cppSymbol;
+    std::string glslName;
+    GLint       location = 0;
+};
+
+inline std::string makeKey(const std::string& cppNamespace, const std::string& cppSymbol)
+{
+    return cppNamespace + "::" + cppSymbol;
+}
+
+class Registry
+{
+public:
+    static Registry& instance()
+    {
+        static Registry registry;
+        return registry;
     }
 
-    /**
-     * @brief Uniform layout locations for directional cascaded shadow maps (CSM) [Range 200-299].
-     */
-    namespace Shadows {
-        constexpr GLint Base                    = 200;    ///< Base location offset for shadow mapping uniforms.
-        constexpr GLint LightViewProj           = Base + 0; ///< Array of View-Projection matrices for shadow cascade splits.
-        constexpr GLint TexelWorldSize          = Base + 5; ///< Shadow map texel dimensions in world units.
-        constexpr GLint CascadeSplitDepths      = Base + 10;///< View-space split distance thresholds for CSM cascades.
-        constexpr GLint ShadowMapArray          = Base + 15;///< 2D Array texture sampler (`GL_TEXTURE_2D_ARRAY`) for CSM depths.
+    GLint location(const char* cppNamespace, const char* cppSymbol)
+    {
+        ensureLoaded();
+        const std::string key = makeKey(cppNamespace, cppSymbol);
+        const auto it = m_locationByKey.find(key);
+        if (it == m_locationByKey.end())
+        {
+            return 0;
+        }
+        return it->second;
     }
 
-    /**
-     * @brief Uniform layout locations for Deferred Rendering G-Buffer samplers [Range 300-399].
-     */
-    namespace GBuffer {
-        constexpr GLint Base                    = 300;    ///< Base location offset for G-Buffer texture uniforms.
-        constexpr GLint GAlbedoTex              = Base + 0; ///< G-Buffer albedo/specular 2D texture sampler.
-        constexpr GLint GNormalTex              = Base + 1; ///< G-Buffer world normal 2D texture sampler.
-        constexpr GLint GIndicesTex             = Base + 2; ///< G-Buffer material index / ID 2D texture sampler.
-        constexpr GLint GRetroTex               = Base + 3; ///< G-Buffer retro-reflective / custom channel 2D sampler.
-        constexpr GLint GDepthTex               = Base + 4; ///< Deferred scene depth buffer 2D texture sampler.
+    std::string rewriteShaderLayoutLocations(const std::string& source, const std::string& targetName)
+    {
+        ensureLoaded();
+
+        const auto it = m_targetLocations.find(targetName);
+        if (it == m_targetLocations.end() || it->second.empty())
+        {
+            return source;
+        }
+
+        const auto& locationByGlslName = it->second;
+        std::ostringstream rewritten;
+        std::istringstream input(source);
+        std::string line;
+
+        const std::regex declarationRegex(R"((?:uniform|in|out)\s+.*\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]+\])?\s*;)");
+        const std::regex locationRegex(R"(layout\s*\(\s*location\s*=\s*[^)]+\))");
+
+        while (std::getline(input, line))
+        {
+            std::smatch match;
+            if (std::regex_search(line, match, declarationRegex))
+            {
+                const std::string glslName = match[1].str();
+                const auto locationIt = locationByGlslName.find(glslName);
+                if (locationIt != locationByGlslName.end())
+                {
+                    line = std::regex_replace(line,
+                                              locationRegex,
+                                              "layout(location = " + std::to_string(locationIt->second) + ")");
+                }
+            }
+
+            rewritten << line << '\n';
+        }
+
+        return rewritten.str();
     }
 
-    /**
-     * @brief Uniform layout locations for shared streaming terrain texture arrays [Range 400-499].
-     */
-    namespace SharedTerrain {
-        constexpr GLint Base                    = 400;    ///< Base location offset for terrain streaming uniforms.
-        constexpr GLint HeightMax               = Base + 0; ///< Maximum height scale threshold in world units.
-        constexpr GLint TerrainGridWorldOrigin  = Base + 1; ///< 2D world space origin coordinate of visible grid.
-        constexpr GLint TerrainTileWorldSize    = Base + 2; ///< Side length dimension of individual terrain tile in world units.
-        constexpr GLint TerrainHeightArray      = Base + 3; ///< 2D texture array handle containing terrain height slices.
-        constexpr GLint TerrainRoadArray        = Base + 4; ///< 2D texture array handle containing road SDF distance slices.
-        constexpr GLint TerrainSliceValid       = Base + 5; ///< Uniform array of boolean validity flags for active grid slices.
+private:
+    void ensureLoaded()
+    {
+        if (m_loaded)
+        {
+            return;
+        }
+
+        const std::array<std::filesystem::path, 2> candidates = {
+            std::filesystem::path("shaders/shader_locations.json"),
+            std::filesystem::path("bin/shaders/shader_locations.json")
+        };
+
+        for (const auto& candidate : candidates)
+        {
+            std::ifstream file(candidate);
+            if (!file.is_open())
+            {
+                continue;
+            }
+
+            nlohmann::json data;
+            try
+            {
+                file >> data;
+            }
+            catch (const nlohmann::json::parse_error& e)
+            {
+                std::cerr << "Shader location registry parse error (" << candidate.string()
+                          << "): " << e.what() << std::endl;
+                m_loaded = true;
+                return;
+            }
+
+            std::vector<ShaderBindingEntry> sharedEntries;
+            if (data.contains("shared") && data["shared"].is_array())
+            {
+                sharedEntries = parseEntries(data["shared"]);
+            }
+
+            for (const auto& entry : sharedEntries)
+            {
+                if (!entry.cppNamespace.empty() && !entry.cppSymbol.empty())
+                {
+                    m_locationByKey[makeKey(entry.cppNamespace, entry.cppSymbol)] = entry.location;
+                }
+            }
+
+            if (!data.contains("targets") || !data["targets"].is_object())
+            {
+                std::cerr << "Shader location registry missing 'targets' object: "
+                          << candidate.string() << std::endl;
+                m_loaded = true;
+                return;
+            }
+
+            std::unordered_map<std::string, GLint> sharedByGlsl;
+            for (const auto& entry : sharedEntries)
+            {
+                sharedByGlsl[entry.glslName] = entry.location;
+            }
+
+            for (const auto& [targetName, entriesJson] : data["targets"].items())
+            {
+                if (!entriesJson.is_array())
+                {
+                    continue;
+                }
+
+                auto targetMap = sharedByGlsl;
+                const auto entries = parseEntries(entriesJson);
+                for (const auto& entry : entries)
+                {
+                    targetMap[entry.glslName] = entry.location;
+                    if (!entry.cppNamespace.empty() && !entry.cppSymbol.empty())
+                    {
+                        m_locationByKey[makeKey(entry.cppNamespace, entry.cppSymbol)] = entry.location;
+                    }
+                }
+
+                m_targetLocations[targetName] = std::move(targetMap);
+            }
+
+            m_loaded = true;
+            return;
+        }
+
+        m_loaded = true;
     }
 
-    // =========================================================================
-    // PER-PROGRAM UNIFORM BLOCKS (Start at 0)
-    // =========================================================================
+    static std::vector<ShaderBindingEntry> parseEntries(const nlohmann::json& entriesJson)
+    {
+        std::vector<ShaderBindingEntry> entries;
+        if (!entriesJson.is_array())
+        {
+            return entries;
+        }
 
-    /**
-     * @brief Program-specific uniform locations for ocean surface shader.
-     */
-    namespace Ocean {
-        constexpr GLint Model                   = 0; ///< 4x4 Model matrix for ocean mesh.
-        constexpr GLint NormalMatrix            = 1; ///< 3x3 Normal matrix for ocean mesh vectors.
-        constexpr GLint Time                    = 2; ///< Total elapsed time in seconds for animated wave synthesis.
-        constexpr GLint NightAmbientFloor       = 3; ///< Minimum lighting floor intensity during nighttime.
+        for (const auto& entryJson : entriesJson)
+        {
+            if (!entryJson.contains("glsl") || !entryJson.contains("location"))
+            {
+                continue;
+            }
+
+            ShaderBindingEntry entry;
+            entry.glslName = entryJson.at("glsl").get<std::string>();
+            entry.location = entryJson.at("location").get<GLint>();
+
+            if (entryJson.contains("cppNamespace"))
+            {
+                entry.cppNamespace = entryJson.at("cppNamespace").get<std::string>();
+            }
+            if (entryJson.contains("cppSymbol"))
+            {
+                entry.cppSymbol = entryJson.at("cppSymbol").get<std::string>();
+            }
+
+            entries.push_back(std::move(entry));
+        }
+
+        return entries;
     }
 
-    /**
-     * @brief Program-specific uniform locations for terrain surface shader.
-     */
-    namespace Terrain {
-        constexpr GLint ReliefExaggeration      = 0; ///< Vertical elevation multiplier for terrain exaggeration.
-        constexpr GLint CursorMode              = 1; ///< Active terrain editing or interaction cursor mode ID.
-        constexpr GLint HexSize                 = 2; ///< Dimension radius of tactical hex grid overlay cells.
-        constexpr GLint HoveredHex              = 3; ///< 2D coordinate of currently highlighted/hovered hex cell.
-        constexpr GLint GridColour              = 4; ///< RGBA color for rendering tactical hex grid lines.
-        constexpr GLint SeaLevel                = 5; ///< World elevation threshold representing sea level altitude.
-        constexpr GLint TerrainDiffuseArray     = 6; ///< 2D Array texture sampler for terrain albedo materials.
-        constexpr GLint TerrainNormalArray      = 7; ///< 2D Array texture sampler for terrain normal maps.
-        constexpr GLint DrawHexGrid             = 8; ///< Boolean flag toggling hex grid overlay rendering.
-    }
+    bool m_loaded = false;
+    std::unordered_map<std::string, GLint> m_locationByKey;
+    std::unordered_map<std::string, std::unordered_map<std::string, GLint>> m_targetLocations;
+};
 
-    /**
-     * @brief Program-specific uniform locations for deferred lighting pass shader.
-     */
-    namespace Lighting {
-        constexpr GLint NightAmbientFloor       = 0; ///< Minimum ambient illumination factor during night cycle.
-        constexpr GLint HeadlampIntensity       = 1; ///< Brightness scalar for player headlamp light source.
-        constexpr GLint HeadlampRange           = 2; ///< Effective illumination distance for player headlamp.
-        constexpr GLint HeadlampEnabled         = 3; ///< Boolean flag toggling player headlamp activation.
-        constexpr GLint SSAOTex                 = 4; ///< 2D texture sampler for Screen-Space Ambient Occlusion map.
-    }
+} // namespace detail
 
-    /**
-     * @brief Program-specific uniform locations for Screen-Space Ambient Occlusion (SSAO) pass.
-     */
-    namespace SSAO {
-        constexpr GLint NoiseTex                = 0; ///< 2D texture sampler containing randomized rotation vectors.
-        constexpr GLint Radius                  = 1; ///< Sampling hemisphere radius in view space units.
-        constexpr GLint Bias                    = 2; ///< Depth bias offset preventing self-occlusion artifacts.
-        constexpr GLint NoiseScale              = 3; ///< Tiling scale factor mapping noise texture across viewport.
-        constexpr GLint SampleCount             = 4; ///< Total number of kernel sample points evaluated per fragment.
-        constexpr GLint TopRight                = 5; ///< Top-right frustum corner vector for view-ray reconstruction.
-        constexpr GLint TopLeft                 = 6; ///< Top-left frustum corner vector for view-ray reconstruction.
-        constexpr GLint BottomLeft              = 7; ///< Bottom-left frustum corner vector for view-ray reconstruction.
-        constexpr GLint BottomRight             = 8; ///< Bottom-right frustum corner vector for view-ray reconstruction.
-        constexpr GLint KernelSample            = 9; ///< Array of 3D sample vectors distributed within hemisphere.
-    }
+struct LocationRef
+{
+    const char* cppNamespace = nullptr;
+    const char* cppSymbol = nullptr;
 
-    /**
-     * @brief Program-specific uniform locations for SSAO post-process spatial blur pass.
-     */
-    namespace SSAOBlur {
-        constexpr GLint SSAOInput               = 0; ///< 2D raw SSAO texture input to be blurred.
+    operator GLint() const
+    {
+        return detail::Registry::instance().location(cppNamespace, cppSymbol);
     }
+};
 
-    /**
-     * @brief Program-specific uniform locations for tactical mini-map rendering pass.
-     */
-    namespace MiniMap {
-        constexpr GLint PlayerXZ                = 0; ///< 2D world XZ coordinates of player location.
-        constexpr GLint WorldRadius             = 1; ///< Total visible radius represented on mini-map display.
-        constexpr GLint SeaLevel                = 2; ///< World altitude threshold for rendering water features.
-    }
+inline std::string rewriteShaderLayoutLocations(const std::string& source, const std::string& targetName)
+{
+    return detail::Registry::instance().rewriteShaderLayoutLocations(source, targetName);
+}
 
-    /**
-     * @brief Program-specific uniform locations for depth-only shadow map generation pass.
-     */
-    namespace ShadowPass {
-        constexpr GLint LightViewProj           = 0; ///< 4x4 Light View-Projection matrix for current CSM cascade.
-    }
+#define UNIFORM_LOCATION(namespaceName, symbolName) \
+    inline const ::Uniforms::LocationRef symbolName{#namespaceName, #symbolName}
 
-    /**
-     * @brief Program-specific uniform locations for creature orb surface shader.
-     */
-    namespace OrbCreature {
-        constexpr GLint DiffuseTex              = 0; ///< 2D diffuse albedo texture sampler for orb skin.
-        constexpr GLint NormalTex               = 1; ///< 2D normal map texture sampler for orb skin.
-    }
+namespace Sky {
+    UNIFORM_LOCATION(Sky, Cubemap);
+    UNIFORM_LOCATION(Sky, StarRotationMatrix);
+    UNIFORM_LOCATION(Sky, UseSkyCubemap);
+    UNIFORM_LOCATION(Sky, MoonTexture);
+}
 
-    /**
-     * @brief Program-specific uniform locations for full-screen texture blitting pass.
-     */
-    namespace Blit {
-        constexpr GLint InputTex                = 0; ///< 2D input texture to copy to render target.
-    }
+namespace Shadows {
+    UNIFORM_LOCATION(Shadows, LightViewProj);
+    UNIFORM_LOCATION(Shadows, TexelWorldSize);
+    UNIFORM_LOCATION(Shadows, CascadeSplitDepths);
+    UNIFORM_LOCATION(Shadows, ShadowMapArray);
+}
+
+namespace GBuffer {
+    UNIFORM_LOCATION(GBuffer, GAlbedoTex);
+    UNIFORM_LOCATION(GBuffer, GNormalTex);
+    UNIFORM_LOCATION(GBuffer, GIndicesTex);
+    UNIFORM_LOCATION(GBuffer, GRetroTex);
+    UNIFORM_LOCATION(GBuffer, GDepthTex);
+}
+
+namespace SharedTerrain {
+    UNIFORM_LOCATION(SharedTerrain, HeightMax);
+    UNIFORM_LOCATION(SharedTerrain, TerrainGridWorldOrigin);
+    UNIFORM_LOCATION(SharedTerrain, TerrainTileWorldSize);
+    UNIFORM_LOCATION(SharedTerrain, TerrainHeightArray);
+    UNIFORM_LOCATION(SharedTerrain, TerrainRoadArray);
+    UNIFORM_LOCATION(SharedTerrain, TerrainSliceValid);
+}
+
+namespace Blit {
+    UNIFORM_LOCATION(Blit, InputTex);
+}
+
+namespace MiniMap {
+    UNIFORM_LOCATION(MiniMap, PlayerXZ);
+    UNIFORM_LOCATION(MiniMap, WorldRadius);
+    UNIFORM_LOCATION(MiniMap, SeaLevel);
+}
+
+namespace Terrain {
+    UNIFORM_LOCATION(Terrain, ReliefExaggeration);
+    UNIFORM_LOCATION(Terrain, CursorMode);
+    UNIFORM_LOCATION(Terrain, HexSize);
+    UNIFORM_LOCATION(Terrain, HoveredHex);
+    UNIFORM_LOCATION(Terrain, GridColour);
+    UNIFORM_LOCATION(Terrain, SeaLevel);
+    UNIFORM_LOCATION(Terrain, TerrainDiffuseArray);
+    UNIFORM_LOCATION(Terrain, TerrainNormalArray);
+    UNIFORM_LOCATION(Terrain, DrawHexGrid);
+}
+
+namespace ShadowPass {
+    UNIFORM_LOCATION(ShadowPass, LightViewProj);
+}
+
+namespace OrbCreature {
+    UNIFORM_LOCATION(OrbCreature, DiffuseTex);
+    UNIFORM_LOCATION(OrbCreature, NormalTex);
+}
+
+namespace Lighting {
+    UNIFORM_LOCATION(Lighting, NightAmbientFloor);
+    UNIFORM_LOCATION(Lighting, HeadlampIntensity);
+    UNIFORM_LOCATION(Lighting, HeadlampRange);
+    UNIFORM_LOCATION(Lighting, HeadlampEnabled);
+    UNIFORM_LOCATION(Lighting, SSAOTex);
+}
+
+namespace SSAO {
+    UNIFORM_LOCATION(SSAO, NoiseTex);
+    UNIFORM_LOCATION(SSAO, Radius);
+    UNIFORM_LOCATION(SSAO, Bias);
+    UNIFORM_LOCATION(SSAO, NoiseScale);
+    UNIFORM_LOCATION(SSAO, SampleCount);
+    UNIFORM_LOCATION(SSAO, TopRight);
+    UNIFORM_LOCATION(SSAO, TopLeft);
+    UNIFORM_LOCATION(SSAO, BottomLeft);
+    UNIFORM_LOCATION(SSAO, BottomRight);
+    UNIFORM_LOCATION(SSAO, KernelSample);
+}
+
+namespace SSAOBlur {
+    UNIFORM_LOCATION(SSAOBlur, SSAOInput);
+}
+
+namespace Ocean {
+    UNIFORM_LOCATION(Ocean, Model);
+    UNIFORM_LOCATION(Ocean, NormalMatrix);
+    UNIFORM_LOCATION(Ocean, Time);
+    UNIFORM_LOCATION(Ocean, NightAmbientFloor);
+}
+
+#undef UNIFORM_LOCATION
 
 } // namespace Uniforms

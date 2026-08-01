@@ -3,17 +3,17 @@
 #include "ubos/camera.glsl"
 #include "ubos/environment.glsl"
 
-layout (location = 0) in vec3 aPos;
-layout (location = 1) in vec3 aNormal;
-layout (location = 2) in vec2 aTexCoords;
+layout(location = X) in vec3 aPos;
+layout(location = X) in vec3 aNormal;
+layout(location = X) in vec2 aTexCoords;
 
 out vec3 FragPos;
 out vec3 Normal;
 out vec2 TexCoords;
 
-layout(location = 0) uniform mat4 model;
-layout(location = 1) uniform mat3 normalMatrix;
-layout(location = 2) uniform float time;
+layout(location = X) uniform mat4 model;
+layout(location = X) uniform mat3 normalMatrix;
+layout(location = X) uniform float time;
 
 vec2 rotate(vec2 v, float angle) {
     float s = sin(angle);

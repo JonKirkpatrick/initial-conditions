@@ -3,7 +3,7 @@
 in vec2 v_uv;
 out vec4 fragColor;
 
-layout(location = 0) uniform sampler2D u_tex;
+layout(location = X) uniform sampler2D u_tex;
 
 void main() {
     float depthValue = texture(u_tex, v_uv).r;

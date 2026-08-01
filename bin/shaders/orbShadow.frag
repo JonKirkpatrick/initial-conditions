@@ -8,7 +8,7 @@
 flat in int v_instanceID;
 in vec3 v_worldPos;
 
-uniform mat4 u_lightViewProj;
+layout(location = X) uniform mat4 u_lightViewProj;
 
 void main()
 {

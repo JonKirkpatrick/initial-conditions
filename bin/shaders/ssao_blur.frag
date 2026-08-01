@@ -8,7 +8,7 @@ in vec2 v_uv;
 // ==============================================================================
 // == Texture Samplers ==========================================================
 // ==============================================================================
-layout(location = 0) uniform sampler2D u_ssaoInput; 
+layout(location = X) uniform sampler2D u_ssaoInput; 
 
 // Linearize the raw depth so we are working with actual world units (meters)
 float getLinearDepth(vec2 uv) {

@@ -16,7 +16,7 @@ in vec2 TexCoords;
 
 out vec4 FragColor;
 
-layout(location = 3) uniform vec3  u_nightAmbientFloor;
+layout(location = X) uniform vec3  u_nightAmbientFloor;
 
 void main()
 {

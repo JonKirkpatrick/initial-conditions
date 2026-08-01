@@ -7,25 +7,25 @@
 // ==============================================================================
 // == Uniforms ==================================================================
 // ==============================================================================
-layout(location = 0) uniform float u_reliefExaggeration;
-layout(location = 1) uniform bool  u_cursorMode;
-layout(location = 2) uniform float u_hexSize;
-layout(location = 3) uniform vec2  u_hoveredHex;
-layout(location = 4) uniform vec3  u_gridColour;
-layout(location = 5) uniform float u_seaLevel;
+layout(location = X) uniform float u_reliefExaggeration;
+layout(location = X) uniform bool  u_cursorMode;
+layout(location = X) uniform float u_hexSize;
+layout(location = X) uniform vec2  u_hoveredHex;
+layout(location = X) uniform vec3  u_gridColour;
+layout(location = X) uniform float u_seaLevel;
 
 // Unified Terrain 2D Texture Arrays
-layout(binding = 6) uniform sampler2DArray u_terrainDiffuseArray;
-layout(binding = 7) uniform sampler2DArray u_terrainNormalArray;
+layout(location = X) uniform sampler2DArray u_terrainDiffuseArray;
+layout(location = X) uniform sampler2DArray u_terrainNormalArray;
 
 in vec2 v_worldXZ;
 in vec2 v_normalXZ;
 in float v_worldY;
 
-layout(location = 0) out vec4 outAlbedo;
-layout(location = 1) out vec4 outNormal;
-layout(location = 2) out vec4 outIndices;
-layout(location = 3) out vec4 outRetro;
+layout(location = X) out vec4 outAlbedo;
+layout(location = X) out vec4 outNormal;
+layout(location = X) out vec4 outIndices;
+layout(location = X) out vec4 outRetro;
 
 // Material ID Constants (Matches JSON indexing: Grass=2, Rock=3, Shore=4)
 const uint MAT_GRASS = 2u;

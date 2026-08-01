@@ -1,6 +1,6 @@
 #version 460 core
 // blit.vert
-layout(location = 0) in vec2 a_pos;
+layout(location = X) in vec2 a_pos;
 out vec2 v_uv;
 void main() {
     v_uv        = a_pos * 0.5 + 0.5;

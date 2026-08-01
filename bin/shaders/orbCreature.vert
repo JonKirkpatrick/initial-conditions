@@ -3,7 +3,7 @@
 #include "orb/orbData.glsl"
 #include "ubos/camera.glsl"
 
-layout(location = 0) in vec3 a_cubePos;
+layout(location = X) in vec3 a_cubePos;
 
 flat out int v_instanceID;
 

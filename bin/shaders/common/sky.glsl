@@ -2,10 +2,10 @@
 #include "common/celestial.glsl"
 #include "common/fog.glsl"
 
-layout(location = 100) uniform samplerCube skyCubemap;
-layout(location = 101) uniform mat3        starRotationMatrix;
-layout(location = 102) uniform bool        useSkyCubemap;
-layout(location = 103) uniform sampler2D   moonTexture;
+layout(location = X) uniform samplerCube skyCubemap;
+layout(location = X) uniform mat3        starRotationMatrix;
+layout(location = X) uniform bool        useSkyCubemap;
+layout(location = X) uniform sampler2D   moonTexture;
 
 vec3 evaluateSkyColor(vec3 rayDir)
 {

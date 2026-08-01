@@ -3,7 +3,7 @@
 #include "ubos/camera.glsl"
 #include "common/terrain.glsl"
 
-layout(location = 0) in vec2 a_uv; // spans [0,1] across full 9x9 visible grid
+layout(location = X) in vec2 a_uv; // spans [0,1] across full 9x9 visible grid
 
 out vec2  v_worldXZ;
 out vec2  v_normalXZ;

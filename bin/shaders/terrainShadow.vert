@@ -2,9 +2,9 @@
 
 #include "common/terrain.glsl"
 
-layout(location = 0) in vec2 a_uv;
+layout(location = X) in vec2 a_uv;
 
-layout(location = 0) uniform mat4 u_lightViewProj;
+layout(location = X) uniform mat4 u_lightViewProj;
 
 float decodeHeightVertex(vec2 gridUV)
 {

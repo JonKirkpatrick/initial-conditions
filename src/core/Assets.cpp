@@ -8,6 +8,9 @@
 #include <cassert>
 #include <iostream>
 #include <fstream>
+#include <regex>
+#include <sstream>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 
 static constexpr std::array<Assets::CubeFaceSpec, 6> SKY_CUBEMAP_FACES = {{
@@ -18,6 +21,184 @@ static constexpr std::array<Assets::CubeFaceSpec, 6> SKY_CUBEMAP_FACES = {{
     {"back",   GL_TEXTURE_CUBE_MAP_POSITIVE_Z},
     {"front",  GL_TEXTURE_CUBE_MAP_NEGATIVE_Z},
 }};
+
+namespace {
+
+struct ShaderLayoutEntry
+{
+    std::string cppNamespace;
+    std::string cppSymbol;
+    std::string glslName;
+    GLint       location = 0;
+};
+
+class ShaderLayoutRegistry
+{
+public:
+    void ensureLoaded()
+    {
+        if (m_loaded)
+        {
+            return;
+        }
+
+        const std::array<std::filesystem::path, 2> candidates = {
+            std::filesystem::path("shaders/shader_locations.json"),
+            std::filesystem::path("bin/shaders/shader_locations.json")
+        };
+
+        for (const auto& candidate : candidates)
+        {
+            std::ifstream file(candidate);
+            if (!file.is_open())
+            {
+                continue;
+            }
+
+            nlohmann::json data;
+            try
+            {
+                file >> data;
+            }
+            catch (const nlohmann::json::parse_error& e)
+            {
+                std::cerr << "Shader location registry parse error (" << candidate.string()
+                          << "): " << e.what() << std::endl;
+                m_loaded = true;
+                return;
+            }
+
+            if (data.contains("shared") && data["shared"].is_array())
+            {
+                m_sharedEntries = parseEntries(data["shared"]);
+            }
+
+            if (!data.contains("targets") || !data["targets"].is_object())
+            {
+                std::cerr << "Shader location registry missing 'targets' object: "
+                          << candidate.string() << std::endl;
+                m_loaded = true;
+                return;
+            }
+
+            for (const auto& [targetName, entriesJson] : data["targets"].items())
+            {
+                if (!entriesJson.is_array())
+                {
+                    continue;
+                }
+
+                auto entries = m_sharedEntries;
+                appendEntries(entries, entriesJson);
+                m_entriesByTarget[targetName] = std::move(entries);
+            }
+
+            m_loaded = true;
+            return;
+        }
+
+        m_loaded = true;
+    }
+
+    const std::vector<ShaderLayoutEntry>* find(const std::string& targetName)
+    {
+        ensureLoaded();
+        auto it = m_entriesByTarget.find(targetName);
+        if (it == m_entriesByTarget.end())
+        {
+            return nullptr;
+        }
+        return &it->second;
+    }
+
+private:
+    static std::vector<ShaderLayoutEntry> parseEntries(const nlohmann::json& entriesJson)
+    {
+        std::vector<ShaderLayoutEntry> entries;
+        appendEntries(entries, entriesJson);
+        return entries;
+    }
+
+    static void appendEntries(std::vector<ShaderLayoutEntry>& entries, const nlohmann::json& entriesJson)
+    {
+        for (const auto& entryJson : entriesJson)
+        {
+            if (!entryJson.contains("glsl") || !entryJson.contains("location"))
+            {
+                continue;
+            }
+
+            ShaderLayoutEntry entry;
+            entry.glslName = entryJson.at("glsl").get<std::string>();
+            entry.location = entryJson.at("location").get<GLint>();
+
+            if (entryJson.contains("cppNamespace"))
+            {
+                entry.cppNamespace = entryJson.at("cppNamespace").get<std::string>();
+            }
+            if (entryJson.contains("cppSymbol"))
+            {
+                entry.cppSymbol = entryJson.at("cppSymbol").get<std::string>();
+            }
+
+            entries.push_back(std::move(entry));
+        }
+    }
+
+    bool m_loaded = false;
+    std::vector<ShaderLayoutEntry> m_sharedEntries;
+    std::unordered_map<std::string, std::vector<ShaderLayoutEntry>> m_entriesByTarget;
+};
+
+ShaderLayoutRegistry& shaderLayoutRegistry()
+{
+    static ShaderLayoutRegistry registry;
+    return registry;
+}
+
+std::string rewriteShaderLayoutLocations(const std::string& source, const std::string& targetName)
+{
+    const auto* entries = shaderLayoutRegistry().find(targetName);
+    if (entries == nullptr || entries->empty())
+    {
+        return source;
+    }
+
+    std::unordered_map<std::string, GLint> locationByGlslName;
+    for (const auto& entry : *entries)
+    {
+        locationByGlslName[entry.glslName] = entry.location;
+    }
+
+    std::ostringstream rewritten;
+    std::istringstream input(source);
+    std::string line;
+
+    const std::regex declarationRegex(R"((?:uniform|in|out)\s+.*\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]+\])?\s*;)");
+    const std::regex locationRegex(R"(layout\s*\(\s*location\s*=\s*[^)]+\))");
+
+    while (std::getline(input, line))
+    {
+        std::smatch match;
+        if (std::regex_search(line, match, declarationRegex))
+        {
+            const std::string glslName = match[1].str();
+            const auto locationIt = locationByGlslName.find(glslName);
+            if (locationIt != locationByGlslName.end())
+            {
+                line = std::regex_replace(line,
+                                          locationRegex,
+                                          "layout(location = " + std::to_string(locationIt->second) + ")");
+            }
+        }
+
+        rewritten << line << '\n';
+    }
+
+    return rewritten.str();
+}
+
+} // namespace
 
 Assets& Assets::Instance()
 {
@@ -598,16 +779,21 @@ void Assets::addShader(const std::string& shaderName, const std::string& path)
 {
     auto shader = std::make_unique<sf::Shader>();
     
-    std::string processedSource = preprocessShaderIncludes(path);
+    std::string processedSource = preprocessShaderSource(path, shaderName);
     
     if (!shader->loadFromMemory(processedSource, sf::Shader::Type::Fragment)) return;
     m_shaderMap.emplace(shaderName, std::move(shader));
 }
 
-std::string Assets::preprocessShaderIncludes(const std::string& filePath)
+std::string Assets::preprocessShaderIncludes(const std::string& filePath, const std::string& targetName)
 {
     std::unordered_set<std::string> visitedFiles;
-    return preprocessShaderIncludesInternal(filePath, visitedFiles);
+    return rewriteShaderLayoutLocations(preprocessShaderIncludesInternal(filePath, visitedFiles), targetName);
+}
+
+std::string Assets::preprocessShaderSource(const std::string& filePath, const std::string& targetName)
+{
+    return preprocessShaderIncludes(filePath, targetName);
 }
 
 std::string Assets::preprocessShaderIncludesInternal(const std::string& filePath, 
@@ -657,7 +843,7 @@ void Assets::addGLProgram(const std::string& name,
                            const std::string& fragPath)
 {
     auto compile = [&](GLenum type, const std::string& path) -> GLuint {
-        std::string src = preprocessShaderIncludes(path);
+        std::string src = preprocessShaderSource(path, name);
         const char* c = src.c_str();
         GLuint s = glCreateShader(type);
         glShaderSource(s, 1, &c, nullptr);

@@ -2,10 +2,10 @@
 out vec2 v_uv;
 out vec3 v_viewRay;
 
-layout(location = 5) uniform vec3 u_farTopRight;
-layout(location = 6) uniform vec3 u_farTopLeft;
-layout(location = 7) uniform vec3 u_farBottomLeft;
-layout(location = 8) uniform vec3 u_farBottomRight;
+layout(location = X) uniform vec3 u_farTopRight;
+layout(location = X) uniform vec3 u_farTopLeft;
+layout(location = X) uniform vec3 u_farBottomLeft;
+layout(location = X) uniform vec3 u_farBottomRight;
 
 void main() {
     uint id = uint(gl_VertexID);

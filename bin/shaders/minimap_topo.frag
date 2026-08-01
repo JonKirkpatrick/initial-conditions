@@ -3,9 +3,9 @@
 #include "common/terrain.glsl"
 
 // == Minimap Parameters =====================================================
-layout(location = 0) uniform vec2  u_playerXZ;
-layout(location = 1) uniform float u_worldRadius;
-layout(location = 2) uniform float u_seaLevel;
+layout(location = X) uniform vec2  u_playerXZ;
+layout(location = X) uniform float u_worldRadius;
+layout(location = X) uniform float u_seaLevel;
 
 in vec2 v_uv; // Spans [0, 1] in circular minimap quad space
 out vec4 fragColor;

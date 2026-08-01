@@ -131,7 +131,8 @@ class Assets
     Assets() = default;
 
 private:
-    std::string preprocessShaderIncludes(const std::string& filePath);
+    std::string preprocessShaderIncludes(const std::string& filePath, const std::string& targetName);
+    std::string preprocessShaderSource(const std::string& filePath, const std::string& targetName);
     std::string preprocessShaderIncludesInternal(const std::string& filePath, std::unordered_set<std::string>& includeStack);
     std::map<std::string, GLuint> m_cubemapMap; ///< Map of loaded GL cubemap handles.
 

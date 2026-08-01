@@ -2,9 +2,9 @@
 
 #include "orb/orbData.glsl"
 
-layout(location = 0) in vec3 a_cubePos;
+layout(location = X) in vec3 a_cubePos;
 
-uniform mat4 u_lightViewProj;
+layout(location = X) uniform mat4 u_lightViewProj;
 
 flat out int v_instanceID;
 out vec3 v_worldPos;
