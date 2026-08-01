@@ -3,17 +3,17 @@
 #include "ubos/camera.glsl"
 #include "ubos/environment.glsl"
 
-layout(location = X) in vec3 aPos;
-layout(location = X) in vec3 aNormal;
-layout(location = X) in vec2 aTexCoords;
+layout(location = X) in vec3 a_Pos;
+layout(location = X) in vec3 a_Normal;
+layout(location = X) in vec2 a_TexCoords;
 
 out vec3 FragPos;
 out vec3 Normal;
 out vec2 TexCoords;
 
-layout(location = X) uniform mat4 model;
-layout(location = X) uniform mat3 normalMatrix;
-layout(location = X) uniform float time;
+layout(location = X) uniform mat4 u_model;
+layout(location = X) uniform mat3 u_normalMatrix;
+layout(location = X) uniform float u_time;
 
 vec2 rotate(vec2 v, float angle) {
     float s = sin(angle);
@@ -26,7 +26,7 @@ vec3 addGerstnerWave(vec3 pos, vec2 dir, float steepness, float waveLength, inou
     float c = sqrt(9.81 / k); // True phase speed (m/s) determined by gravity & wavelength
     vec2 d = normalize(dir);
     
-    float f = k * (dot(d, pos.xz) - c * time * 0.5);
+    float f = k * (dot(d, pos.xz) - c * u_time * 0.5);
     float a = steepness / k;
 
     tangent += vec3(
@@ -50,7 +50,7 @@ vec3 addGerstnerWave(vec3 pos, vec2 dir, float steepness, float waveLength, inou
 
 void main()
 {
-    vec4 worldPos = model * vec4(aPos, 1.0);
+    vec4 worldPos = u_model * vec4(a_Pos, 1.0);
     vec3 gridPos  = worldPos.xyz;
 
     vec2 windDir   = length(u_windDirection) > 0.001 ? normalize(u_windDirection) : vec2(1.0, 0.0);
@@ -78,10 +78,10 @@ void main()
     worldPos.xyz += displacement;
 
     vec3 waveNormal = normalize(cross(binormal, tangent));
-    Normal          = normalMatrix * waveNormal;
+    Normal          = u_normalMatrix * waveNormal;
 
     FragPos   = worldPos.xyz;
-    TexCoords = aTexCoords;
+    TexCoords = a_TexCoords;
 
     gl_Position = u_proj * u_view * worldPos;
 }

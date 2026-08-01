@@ -1,118 +1,146 @@
 {
-  "schemaVersion": 2,
-  "shared": [
-    { "cppNamespace": "SkyShared", "cppSymbol": "Cubemap", "glsl": "skyCubemap", "location": 100 },
-    { "cppNamespace": "SkyShared", "cppSymbol": "StarRotationMatrix", "glsl": "starRotationMatrix", "location": 101 },
-    { "cppNamespace": "SkyShared", "cppSymbol": "UseSkyCubemap", "glsl": "useSkyCubemap", "location": 102 },
-    { "cppNamespace": "SkyShared", "cppSymbol": "MoonTexture", "glsl": "moonTexture", "location": 103 },
-    { "cppNamespace": "Shadows", "cppSymbol": "LightViewProj", "glsl": "u_lightViewProj", "location": 200 },
-    { "cppNamespace": "Shadows", "cppSymbol": "TexelWorldSize", "glsl": "u_texelWorldSize", "location": 205 },
-    { "cppNamespace": "Shadows", "cppSymbol": "CascadeSplitDepths", "glsl": "u_cascadeSplitDepths", "location": 210 },
-    { "cppNamespace": "Shadows", "cppSymbol": "ShadowMapArray", "glsl": "u_shadowMap", "location": 215 },
-    { "cppNamespace": "GBuffer", "cppSymbol": "GAlbedoTex", "glsl": "u_gAlbedo", "location": 300 },
-    { "cppNamespace": "GBuffer", "cppSymbol": "GNormalTex", "glsl": "u_gNormal", "location": 301 },
-    { "cppNamespace": "GBuffer", "cppSymbol": "GIndicesTex", "glsl": "u_gIndices", "location": 302 },
-    { "cppNamespace": "GBuffer", "cppSymbol": "GRetroTex", "glsl": "u_gRetro", "location": 303 },
-    { "cppNamespace": "GBuffer", "cppSymbol": "GDepthTex", "glsl": "u_gDepth", "location": 304 },
-    { "cppNamespace": "SharedTerrain", "cppSymbol": "HeightMax", "glsl": "u_heightMax", "location": 400 },
-    { "cppNamespace": "SharedTerrain", "cppSymbol": "TerrainGridWorldOrigin", "glsl": "u_terrainGridWorldOrigin", "location": 401 },
-    { "cppNamespace": "SharedTerrain", "cppSymbol": "TerrainTileWorldSize", "glsl": "u_terrainTileWorldSize", "location": 402 },
-    { "cppNamespace": "SharedTerrain", "cppSymbol": "TerrainHeightArray", "glsl": "u_terrainHeightArray", "location": 403 },
-    { "cppNamespace": "SharedTerrain", "cppSymbol": "TerrainRoadArray", "glsl": "u_terrainRoadArray", "location": 404 },
-    { "cppNamespace": "SharedTerrain", "cppSymbol": "TerrainSliceValid", "glsl": "u_terrainSliceValid", "location": 405 }
-  ],
-  "targets": {
-    "Blit": [
-      { "glsl": "a_pos", "location": 0 },
-      { "cppNamespace": "Blit", "cppSymbol": "InputTex", "glsl": "u_tex", "location": 0 }
+    "schemaVersion": 2,
+    "shared": 
+    [
+        { "cppNamespace": "SkyShared",      "cppSymbol": "Cubemap",                 "glsl": "u_skyCubemap",             "location": 100 },
+        { "cppNamespace": "SkyShared",      "cppSymbol": "StarRotationMatrix",      "glsl": "u_starRotationMatrix",     "location": 101 },
+        { "cppNamespace": "SkyShared",      "cppSymbol": "UseSkyCubemap",           "glsl": "u_useSkyCubemap",          "location": 102 },
+        { "cppNamespace": "SkyShared",      "cppSymbol": "MoonTexture",             "glsl": "u_moonTexture",            "location": 103 },
+
+        { "cppNamespace": "Shadows",        "cppSymbol": "LightViewProj",           "glsl": "u_lightViewProj",          "location": 200 },
+        { "cppNamespace": "Shadows",        "cppSymbol": "TexelWorldSize",          "glsl": "u_texelWorldSize",         "location": 205 },
+        { "cppNamespace": "Shadows",        "cppSymbol": "CascadeSplitDepths",      "glsl": "u_cascadeSplitDepths",     "location": 210 },
+        { "cppNamespace": "Shadows",        "cppSymbol": "ShadowMapArray",          "glsl": "u_shadowMap",              "location": 215 },
+
+        { "cppNamespace": "GBuffer",        "cppSymbol": "GAlbedoTex",              "glsl": "u_gAlbedo",                "location": 300 },
+        { "cppNamespace": "GBuffer",        "cppSymbol": "GNormalTex",              "glsl": "u_gNormal",                "location": 301 },
+        { "cppNamespace": "GBuffer",        "cppSymbol": "GIndicesTex",             "glsl": "u_gIndices",               "location": 302 },
+        { "cppNamespace": "GBuffer",        "cppSymbol": "GRetroTex",               "glsl": "u_gRetro",                 "location": 303 },
+        { "cppNamespace": "GBuffer",        "cppSymbol": "GDepthTex",               "glsl": "u_gDepth",                 "location": 304 },
+
+        { "cppNamespace": "SharedTerrain",  "cppSymbol": "HeightMax",               "glsl": "u_heightMax",              "location": 400 },
+        { "cppNamespace": "SharedTerrain",  "cppSymbol": "TerrainGridWorldOrigin",  "glsl": "u_terrainGridWorldOrigin", "location": 401 },
+        { "cppNamespace": "SharedTerrain",  "cppSymbol": "TerrainTileWorldSize",    "glsl": "u_terrainTileWorldSize",   "location": 402 },
+        { "cppNamespace": "SharedTerrain",  "cppSymbol": "TerrainHeightArray",      "glsl": "u_terrainHeightArray",     "location": 403 },
+        { "cppNamespace": "SharedTerrain",  "cppSymbol": "TerrainRoadArray",        "glsl": "u_terrainRoadArray",       "location": 404 },
+        { "cppNamespace": "SharedTerrain",  "cppSymbol": "TerrainSliceValid",       "glsl": "u_terrainSliceValid",      "location": 405 }
     ],
-    "MiniMap": [
-      { "cppNamespace": "MiniMap", "cppSymbol": "PlayerXZ", "glsl": "u_playerXZ", "location": 0 },
-      { "cppNamespace": "MiniMap", "cppSymbol": "WorldRadius", "glsl": "u_worldRadius", "location": 1 },
-      { "cppNamespace": "MiniMap", "cppSymbol": "SeaLevel", "glsl": "u_seaLevel", "location": 2 }
-    ],
-    "Terrain": [
-      { "cppNamespace": "Terrain", "cppSymbol": "ReliefExaggeration", "glsl": "u_reliefExaggeration", "location": 0 },
-      { "cppNamespace": "Terrain", "cppSymbol": "CursorMode", "glsl": "u_cursorMode", "location": 1 },
-      { "cppNamespace": "Terrain", "cppSymbol": "HexSize", "glsl": "u_hexSize", "location": 2 },
-      { "cppNamespace": "Terrain", "cppSymbol": "HoveredHex", "glsl": "u_hoveredHex", "location": 3 },
-      { "cppNamespace": "Terrain", "cppSymbol": "GridColour", "glsl": "u_gridColour", "location": 4 },
-      { "cppNamespace": "Terrain", "cppSymbol": "SeaLevel", "glsl": "u_seaLevel", "location": 5 },
-      { "cppNamespace": "Terrain", "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray", "location": 6 },
-      { "cppNamespace": "Terrain", "cppSymbol": "TerrainNormalArray", "glsl": "u_terrainNormalArray", "location": 7 },
-      { "cppNamespace": "Terrain", "cppSymbol": "DrawHexGrid", "glsl": "u_drawHexGrid", "location": 8 },
-      { "glsl": "a_uv", "location": 0 },
-      { "glsl": "outAlbedo", "location": 0 },
-      { "glsl": "outNormal", "location": 1 },
-      { "glsl": "outIndices", "location": 2 },
-      { "glsl": "outRetro", "location": 3 }
-    ],
-    "PaperTerrain": [
-      { "cppNamespace": "Terrain", "cppSymbol": "ReliefExaggeration", "glsl": "u_reliefExaggeration", "location": 0 },
-      { "cppNamespace": "Terrain", "cppSymbol": "CursorMode", "glsl": "u_cursorMode", "location": 1 },
-      { "cppNamespace": "Terrain", "cppSymbol": "HexSize", "glsl": "u_hexSize", "location": 2 },
-      { "cppNamespace": "Terrain", "cppSymbol": "HoveredHex", "glsl": "u_hoveredHex", "location": 3 },
-      { "cppNamespace": "Terrain", "cppSymbol": "GridColour", "glsl": "u_gridColour", "location": 4 },
-      { "cppNamespace": "Terrain", "cppSymbol": "SeaLevel", "glsl": "u_seaLevel", "location": 5 },
-      { "cppNamespace": "Terrain", "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray", "location": 6 },
-      { "cppNamespace": "Terrain", "cppSymbol": "TerrainNormalArray", "glsl": "u_terrainNormalArray", "location": 7 },
-      { "cppNamespace": "Terrain", "cppSymbol": "DrawHexGrid", "glsl": "u_drawHexGrid", "location": 8 },
-      { "glsl": "a_uv", "location": 0 },
-      { "glsl": "outAlbedo", "location": 0 },
-      { "glsl": "outNormal", "location": 1 },
-      { "glsl": "outIndices", "location": 2 },
-      { "glsl": "outRetro", "location": 3 }
-    ],
-    "TerrainShadow": [
-      { "glsl": "a_uv", "location": 0 },
-      { "cppNamespace": "ShadowPass", "cppSymbol": "LightViewProj", "glsl": "u_lightViewProj", "location": 0 }
-    ],
-    "OrbCreature": [
-      { "glsl": "a_cubePos", "location": 0 },
-      { "glsl": "outAlbedo", "location": 0 },
-      { "glsl": "outNormal", "location": 1 },
-      { "glsl": "outIndices", "location": 2 },
-      { "glsl": "outRetro", "location": 3 },
-      { "cppNamespace": "OrbCreature", "cppSymbol": "DiffuseTex", "glsl": "u_charDiffuseTex", "location": 0 },
-      { "cppNamespace": "OrbCreature", "cppSymbol": "NormalTex", "glsl": "u_charNormalTex", "location": 1 }
-    ],
-    "OrbShadow": [
-      { "glsl": "a_cubePos", "location": 0 },
-      { "cppNamespace": "ShadowPass", "cppSymbol": "LightViewProj", "glsl": "u_lightViewProj", "location": 0 }
-    ],
-    "Lighting": [
-      { "cppNamespace": "Lighting", "cppSymbol": "NightAmbientFloor", "glsl": "u_nightAmbientFloor", "location": 0 },
-      { "cppNamespace": "Lighting", "cppSymbol": "HeadlampIntensity", "glsl": "u_headlampIntensity", "location": 1 },
-      { "cppNamespace": "Lighting", "cppSymbol": "HeadlampRange", "glsl": "u_headlampRange", "location": 2 },
-      { "cppNamespace": "Lighting", "cppSymbol": "HeadlampEnabled", "glsl": "u_headlampEnabled", "location": 3 },
-      { "cppNamespace": "Lighting", "cppSymbol": "SSAOTex", "glsl": "u_ssaoTex", "location": 4 },
-      { "glsl": "a_pos", "location": 0 }
-    ],
-    "SSAO": [
-      { "glsl": "a_pos", "location": 0 },
-      { "cppNamespace": "SSAO", "cppSymbol": "NoiseTex", "glsl": "u_texNoise", "location": 0 },
-      { "cppNamespace": "SSAO", "cppSymbol": "Radius", "glsl": "u_radius", "location": 1 },
-      { "cppNamespace": "SSAO", "cppSymbol": "Bias", "glsl": "u_bias", "location": 2 },
-      { "cppNamespace": "SSAO", "cppSymbol": "NoiseScale", "glsl": "u_noiseScale", "location": 3 },
-      { "cppNamespace": "SSAO", "cppSymbol": "SampleCount", "glsl": "u_sampleCount", "location": 4 },
-      { "cppNamespace": "SSAO", "cppSymbol": "TopRight", "glsl": "u_farTopRight", "location": 5 },
-      { "cppNamespace": "SSAO", "cppSymbol": "TopLeft", "glsl": "u_farTopLeft", "location": 6 },
-      { "cppNamespace": "SSAO", "cppSymbol": "BottomLeft", "glsl": "u_farBottomLeft", "location": 7 },
-      { "cppNamespace": "SSAO", "cppSymbol": "BottomRight", "glsl": "u_farBottomRight", "location": 8 },
-      { "cppNamespace": "SSAO", "cppSymbol": "KernelSample", "glsl": "u_samples", "location": 9 }
-    ],
-    "SSAOBlur": [
-      { "cppNamespace": "SSAOBlur", "cppSymbol": "SSAOInput", "glsl": "u_ssaoInput", "location": 0 }
-    ],
-    "Ocean": [
-      { "glsl": "aPos", "location": 0 },
-      { "glsl": "aNormal", "location": 1 },
-      { "glsl": "aTexCoords", "location": 2 },
-      { "cppNamespace": "Ocean", "cppSymbol": "Model", "glsl": "model", "location": 0 },
-      { "cppNamespace": "Ocean", "cppSymbol": "NormalMatrix", "glsl": "normalMatrix", "location": 1 },
-      { "cppNamespace": "Ocean", "cppSymbol": "Time", "glsl": "time", "location": 2 },
-      { "cppNamespace": "Ocean", "cppSymbol": "NightAmbientFloor", "glsl": "u_nightAmbientFloor", "location": 3 }
-    ],
-    "Sky": []
-  }
+    "targets": 
+    {
+        "Blit": 
+        [
+            { "glsl":           "a_pos",        "location": 0 },
+
+            { "cppNamespace":   "Blit",         "cppSymbol": "InputTex",            "glsl": "u_tex",                    "location": 0 }
+        ],
+        "MiniMap": 
+        [
+            { "cppNamespace":   "MiniMap",      "cppSymbol": "PlayerXZ",            "glsl": "u_playerXZ",               "location": 0 },
+            { "cppNamespace":   "MiniMap",      "cppSymbol": "WorldRadius",         "glsl": "u_worldRadius",            "location": 1 },
+            { "cppNamespace":   "MiniMap",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 2 }
+        ],
+        "Terrain": 
+        [
+            { "glsl":           "a_uv",         "location": 0 },
+
+            { "glsl":           "outAlbedo",    "location": 0 },
+            { "glsl":           "outNormal",    "location": 1 },
+            { "glsl":           "outIndices",   "location": 2 },
+            { "glsl":           "outRetro",     "location": 3 },
+
+            { "cppNamespace":   "Terrain",      "cppSymbol": "ReliefExaggeration",  "glsl": "u_reliefExaggeration",     "location": 0 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 1 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 2 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 3 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "GridColour",          "glsl": "u_gridColour",             "location": 4 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 5 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray",    "location": 6 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainNormalArray",  "glsl": "u_terrainNormalArray",     "location": 7 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",            "location": 8 }
+        ],
+        "PaperTerrain": 
+        [
+            { "glsl":           "a_uv",         "location": 0 },
+
+            { "glsl":           "outAlbedo",    "location": 0 },
+            { "glsl":           "outNormal",    "location": 1 },
+            { "glsl":           "outIndices",   "location": 2 },
+            { "glsl":           "outRetro",     "location": 3 },
+
+            { "cppNamespace":   "Terrain",      "cppSymbol": "ReliefExaggeration",  "glsl": "u_reliefExaggeration",     "location": 0 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 1 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 2 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 3 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "GridColour",          "glsl": "u_gridColour",             "location": 4 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 5 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray",    "location": 6 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainNormalArray",  "glsl": "u_terrainNormalArray",     "location": 7 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",           	"location": 8 }
+        ],
+        "TerrainShadow": 
+        [
+            { "glsl":           "a_uv",         "location": 0 },
+
+            { "cppNamespace":   "ShadowPass",   "cppSymbol": "LightViewProj",       "glsl": "u_lightViewProj",          "location": 0 }
+        ],
+        "OrbCreature": 
+        [
+            { "glsl":           "a_cubePos",    "location": 0 },
+
+            { "glsl":           "outAlbedo",    "location": 0 },
+            { "glsl":           "outNormal",    "location": 1 },
+            { "glsl":           "outIndices",   "location": 2 },
+            { "glsl":           "outRetro",     "location": 3 },
+
+            { "cppNamespace":   "OrbCreature",  "cppSymbol": "DiffuseTex",          "glsl": "u_charDiffuseTex",         "location": 0 },
+            { "cppNamespace":   "OrbCreature",  "cppSymbol": "NormalTex",           "glsl": "u_charNormalTex",          "location": 1 }
+        ],
+        "OrbShadow": 
+        [
+            { "glsl":           "a_cubePos",    "location": 0 },
+
+            { "cppNamespace":   "ShadowPass",   "cppSymbol": "LightViewProj",       "glsl": "u_lightViewProj",          "location": 0 }
+        ],
+        "Lighting": 
+        [
+            { "glsl":           "a_pos",        "location": 0 },
+
+            { "cppNamespace":   "Lighting",     "cppSymbol": "NightAmbientFloor",   "glsl": "u_nightAmbientFloor",      "location": 0 },
+            { "cppNamespace":   "Lighting",     "cppSymbol": "HeadlampIntensity",   "glsl": "u_headlampIntensity",      "location": 1 },
+            { "cppNamespace":   "Lighting",     "cppSymbol": "HeadlampRange",       "glsl": "u_headlampRange",          "location": 2 },
+            { "cppNamespace":   "Lighting",     "cppSymbol": "HeadlampEnabled",     "glsl": "u_headlampEnabled",        "location": 3 },
+            { "cppNamespace":   "Lighting",     "cppSymbol": "SSAOTex",             "glsl": "u_ssaoTex",                "location": 4 }
+        ],
+        "SSAO": 
+        [
+            { "glsl":           "a_pos",        "location": 0 },
+
+            { "cppNamespace":   "SSAO",         "cppSymbol": "NoiseTex",            "glsl": "u_texNoise",               "location": 0 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "Radius",              "glsl": "u_radius",                 "location": 1 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "Bias",                "glsl": "u_bias",                   "location": 2 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "NoiseScale",          "glsl": "u_noiseScale",             "location": 3 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "SampleCount",         "glsl": "u_sampleCount",            "location": 4 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "TopRight",            "glsl": "u_farTopRight",            "location": 5 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "TopLeft",             "glsl": "u_farTopLeft",             "location": 6 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "BottomLeft",          "glsl": "u_farBottomLeft",          "location": 7 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "BottomRight",         "glsl": "u_farBottomRight",         "location": 8 },
+            { "cppNamespace":   "SSAO",         "cppSymbol": "KernelSample",        "glsl": "u_samples",                "location": 9 }
+        ],
+        "SSAOBlur": 
+        [
+            { "cppNamespace":   "SSAOBlur",     "cppSymbol": "SSAOInput",           "glsl": "u_ssaoInput",              "location": 0 }
+        ],
+        "Ocean": 
+        [
+            { "glsl":           "a_Pos",        "location": 0 },
+            { "glsl":           "a_Normal",     "location": 1 },
+            { "glsl":           "a_TexCoords",  "location": 2 },
+
+            { "cppNamespace":   "Ocean",        "cppSymbol": "Model",               "glsl": "u_model",                  "location": 0 },
+            { "cppNamespace":   "Ocean",        "cppSymbol": "NormalMatrix",        "glsl": "u_normalMatrix",           "location": 1 },
+            { "cppNamespace":   "Ocean",        "cppSymbol": "Time",                "glsl": "u_time",                   "location": 2 },
+            { "cppNamespace":   "Ocean",        "cppSymbol": "NightAmbientFloor",   "glsl": "u_nightAmbientFloor",      "location": 3 }
+        ],
+        "Sky": []
+    }
 }

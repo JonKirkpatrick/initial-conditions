@@ -4,10 +4,10 @@
 #include "common/celestial.glsl"
 #include "common/fog.glsl"
 
-layout(location = X) uniform samplerCube skyCubemap;
-layout(location = X) uniform mat3        starRotationMatrix;
-layout(location = X) uniform bool        useSkyCubemap;
-layout(location = X) uniform sampler2D   moonTexture;
+layout(location = X) uniform samplerCube u_skyCubemap;
+layout(location = X) uniform mat3        u_starRotationMatrix;
+layout(location = X) uniform bool        u_useSkyCubemap;
+layout(location = X) uniform sampler2D   u_moonTexture;
 
 vec3 evaluateSkyColor(vec3 rayDir)
 {
@@ -61,10 +61,10 @@ vec3 evaluateSkyColor(vec3 rayDir)
     skyColor += golden * vec3(1.0, 0.65, 0.35);
 
     // ================== STARS / CUBEMAP ==================
-    if (useSkyCubemap) {
+    if (u_useSkyCubemap) {
         float cubemapFactor = 1.0 - smoothstep(-12.0, -3.0, sunElevation);
-        vec3 starDir = starRotationMatrix * rayDir;
-        vec3 stars   = texture(skyCubemap, starDir).rgb * u_skyExposure;
+        vec3 starDir = u_starRotationMatrix * rayDir;
+        vec3 stars   = texture(u_skyCubemap, starDir).rgb * u_skyExposure;
 
         float extinction = exp(-0.22 * (1.0 - height));
         stars *= mix(1.0, extinction, cubemapFactor);
@@ -89,7 +89,7 @@ vec3 evaluateSkyColor(vec3 rayDir)
         float uvY = (localY / MOON_ANGULAR_RADIUS) * 0.5 + 0.5;
         vec2  uv  = vec2(uvX, uvY);
 
-        vec4  moonSample = texture(moonTexture, uv);
+        vec4  moonSample = texture(u_moonTexture, uv);
         float boundsMask = step(0.0, uv.x) * step(0.0, uv.y) * step(uv.x, 1.0) * step(uv.y, 1.0);
         float discMask   = moonSample.a * boundsMask;
 
