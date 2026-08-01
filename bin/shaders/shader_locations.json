@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
   "shared": [
-    { "cppNamespace": "Sky", "cppSymbol": "Cubemap", "glsl": "skyCubemap", "location": 100 },
-    { "cppNamespace": "Sky", "cppSymbol": "StarRotationMatrix", "glsl": "starRotationMatrix", "location": 101 },
-    { "cppNamespace": "Sky", "cppSymbol": "UseSkyCubemap", "glsl": "useSkyCubemap", "location": 102 },
-    { "cppNamespace": "Sky", "cppSymbol": "MoonTexture", "glsl": "moonTexture", "location": 103 },
+    { "cppNamespace": "SkyShared", "cppSymbol": "Cubemap", "glsl": "skyCubemap", "location": 100 },
+    { "cppNamespace": "SkyShared", "cppSymbol": "StarRotationMatrix", "glsl": "starRotationMatrix", "location": 101 },
+    { "cppNamespace": "SkyShared", "cppSymbol": "UseSkyCubemap", "glsl": "useSkyCubemap", "location": 102 },
+    { "cppNamespace": "SkyShared", "cppSymbol": "MoonTexture", "glsl": "moonTexture", "location": 103 },
     { "cppNamespace": "Shadows", "cppSymbol": "LightViewProj", "glsl": "u_lightViewProj", "location": 200 },
     { "cppNamespace": "Shadows", "cppSymbol": "TexelWorldSize", "glsl": "u_texelWorldSize", "location": 205 },
     { "cppNamespace": "Shadows", "cppSymbol": "CascadeSplitDepths", "glsl": "u_cascadeSplitDepths", "location": 210 },
@@ -113,11 +113,6 @@
       { "cppNamespace": "Ocean", "cppSymbol": "Time", "glsl": "time", "location": 2 },
       { "cppNamespace": "Ocean", "cppSymbol": "NightAmbientFloor", "glsl": "u_nightAmbientFloor", "location": 3 }
     ],
-    "Sky": [
-        { "cppNamespace": "Sky", "cppSymbol": "Cubemap", "glsl": "skyCubemap", "location": 0 },
-        { "cppNamespace": "Sky", "cppSymbol": "StarRotationMatrix", "glsl": "starRotationMatrix", "location": 1 },
-        { "cppNamespace": "Sky", "cppSymbol": "UseSkyCubemap", "glsl": "useSkyCubemap", "location": 2 },
-        { "cppNamespace": "Sky", "cppSymbol": "MoonTexture", "glsl": "moonTexture", "location": 3 }
-    ]
+    "Sky": []
   }
 }

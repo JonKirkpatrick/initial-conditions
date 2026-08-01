@@ -1,4 +1,6 @@
-// common/sky.glsl
+#ifndef COMMON_SKY_GLSL
+#define COMMON_SKY_GLSL
+
 #include "common/celestial.glsl"
 #include "common/fog.glsl"
 
@@ -160,3 +162,5 @@ vec3 evaluateSkyColor(vec3 rayDir)
 
     return skyColor;
 }
+
+#endif // COMMON_SKY_GLSL

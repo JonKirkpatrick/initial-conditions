@@ -2284,17 +2284,17 @@ void Scene_IC_Camp::renderSky()
     glUseProgram(m_skyProgram);
 
     // 1. Send Remaining Celestial Structural Data
-    glUniform1i(Uniforms::Sky::UseSkyCubemap, m_skyCubemapReady);
-    glUniformMatrix3fv(Uniforms::Sky::StarRotationMatrix, 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
+    glUniform1i(Uniforms::SkyShared::UseSkyCubemap, m_skyCubemapReady);
+    glUniformMatrix3fv(Uniforms::SkyShared::StarRotationMatrix, 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
     
     // 2. Bind Texture Units Deterministically
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapReady ? m_skyCubemapHandle : 0);
-    glUniform1i(Uniforms::Sky::Cubemap, 0);
+    glUniform1i(Uniforms::SkyShared::Cubemap, 0);
 
     glActiveTexture(GL_TEXTURE1);
     sf::Texture::bind(&m_moonTexture);
-    glUniform1i(Uniforms::Sky::MoonTexture, 1);
+    glUniform1i(Uniforms::SkyShared::MoonTexture, 1);
 
     // 3. Procedural Draw Call
     glBindVertexArray(m_gridVAO); 
@@ -2362,14 +2362,14 @@ void Scene_IC_Camp::renderOceanGrid()
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyCubemapHandle);
-    glUniform1i(Uniforms::Sky::Cubemap, 2);
+    glUniform1i(Uniforms::SkyShared::Cubemap, 2);
 
-    glUniform1i(Uniforms::Sky::UseSkyCubemap, m_skyCubemapReady);
-    glUniformMatrix3fv(Uniforms::Sky::StarRotationMatrix, 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
+    glUniform1i(Uniforms::SkyShared::UseSkyCubemap, m_skyCubemapReady);
+    glUniformMatrix3fv(Uniforms::SkyShared::StarRotationMatrix, 1, GL_FALSE, &m_astroState.starRotationMatrix[0]);
     
     glActiveTexture(GL_TEXTURE3);
     sf::Texture::bind(&m_moonTexture);
-    glUniform1i(Uniforms::Sky::MoonTexture, 3);
+    glUniform1i(Uniforms::SkyShared::MoonTexture, 3);
 
 
     // =========================================================================

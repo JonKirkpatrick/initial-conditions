@@ -241,11 +241,11 @@ inline std::string rewriteShaderLayoutLocations(const std::string& source, const
 #define UNIFORM_LOCATION(namespaceName, symbolName) \
     inline const ::Uniforms::LocationRef symbolName{#namespaceName, #symbolName}
 
-namespace Sky {
-    UNIFORM_LOCATION(Sky, Cubemap);
-    UNIFORM_LOCATION(Sky, StarRotationMatrix);
-    UNIFORM_LOCATION(Sky, UseSkyCubemap);
-    UNIFORM_LOCATION(Sky, MoonTexture);
+namespace SkyShared {
+    UNIFORM_LOCATION(SkyShared, Cubemap);
+    UNIFORM_LOCATION(SkyShared, StarRotationMatrix);
+    UNIFORM_LOCATION(SkyShared, UseSkyCubemap);
+    UNIFORM_LOCATION(SkyShared, MoonTexture);
 }
 
 namespace Shadows {
