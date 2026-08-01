@@ -102,13 +102,6 @@ public:
     const TerrainManifest& getManifest() const { return m_manifest; }
 
     /**
-     * @brief Bilinearly samples height value at given world space coordinates.
-     * @param worldPos 2D coordinates in world space.
-     * @return Interpolated height value in meters.
-     */
-    float sampleHeightAt(sf::Vector2f worldPos) const;
-
-    /**
      * @brief Gets raw height data buffer for a specific tile coordinate.
      * @param coord Target tile coordinate.
      * @return Pointer to contiguous float height buffer, or `nullptr` if not cached.
@@ -224,13 +217,13 @@ private:
      * @param slotIndex Destination slot index.
      * @param newCoord Associated tile coordinate.
      */
-    void publishStagedTile(int slotIndex, TileCoord newCoord);
+    void publishStagedTile(int slotIndex, TileCoord newCoord, bool success);
 
     /** @brief Internal structure for asynchronous tile load requests. */
     struct LoadRequest  { int slotIndex; TileCoord coord; };
 
     /** @brief Internal structure for completed tile load results. */
-    struct LoadResult   { int slotIndex; bool success; };
+    struct LoadResult   { int slotIndex; TileCoord coord; bool success; };
 
     /**
      * @brief Main loop for asynchronous disk I/O worker thread.
@@ -302,8 +295,12 @@ private:
     std::queue<LoadRequest>  m_requestQueue;          ///< Queue of pending disk load requests.
     std::mutex               m_completionQueueMutex;  ///< Mutex guarding completion queue.
     std::queue<LoadResult>   m_completionQueue;       ///< Queue of finished tile load results.
+    std::mutex               m_stagingMutex;          ///< Mutex guarding staged tile buffers.
     std::condition_variable  m_workerWakeCV;          ///< Condition variable signaling worker thread.
+    std::condition_variable  m_completionAvailableCV; ///< Condition variable signaling a completed staged tile.
+    std::condition_variable  m_stagingConsumedCV;     ///< Condition variable signaling the staged tile was published.
     std::atomic<bool>        m_shutdownRequested{false}; ///< Flag requesting worker thread termination.
+    bool                     m_stagingConsumed = true; ///< `true` when the worker may reuse the staging buffers.
 
     std::array<GLint, 81> m_activeSliceUniforms{};     ///< Array uniform mapping 81 subgrid tiles to texture slices.
     

@@ -1,13 +1,13 @@
 # Terrain System Architecture Overhaul Roadmap
 
-This document outlines the multi-stage rollout plan to transition the engine's terrain system from a monolithic, CPU-unpacked RGB PNG asset to a highly performant, streaming 7x7 toroidal float-buffer on the CPU mapped dynamically to a 5x5 `sampler2DArray` viewport on the GPU.
+This document outlines the multi-stage rollout plan to transition the engine's terrain system from a monolithic, CPU-unpacked RGB PNG asset to a highly performant, streaming 7x7 toroidal float-buffer on the CPU mapped dynamically to a 9x9 `sampler2DArray` viewport on the GPU.
 
 ## Target Architecture Specifications
 * **Base Core Tile Resolution:** 256 x 256 texels
 * **Memory Allocation (with Apron):** 257 x 257 floats per tile
 * **World Space Resolution:** 1 texel = 4 meters
-* **CPU Memory Footprint:** 7x7 Grid (49 Tiles) with integrated 256 x 256 Spatial Partitioning Grid
-* **GPU Memory Footprint:** 5x5 Grid (25 Active Array Slices, size 256 x 256)
+* **CPU Memory Footprint:** 11x11 Grid (121 Tiles) with integrated 256 x 256 Spatial Partitioning Grid
+* **GPU Memory Footprint:** 9x9 Grid (81 Active Array Slices, size 256 x 256)
 
 ## Second Version of the Tileset Description Schema
 
@@ -66,9 +66,9 @@ The whole idea of tiling and streaming our terrain in this manner is to support 
 
 ### Stage 6: Fixed Multi-Tile Grid & Array Shaders
 * **Goal:** Transition from a monolithic mega-texture to modular slots.
-* [ ] Implement the `sampler2DArray` vertex shader logic on the GPU.
+* [x] Implement the `sampler2DArray` vertex shader logic on the GPU.
 * [x] Set up the static 7 x 7 array pointer layout on the CPU.
-* [ ] Implement the CPU-to-GPU Uniform Translation Map (`u_ActiveTileSlices[25]`) to feed the shader viewport.
+* [x] Implement the CPU-to-GPU Uniform Translation Map (`u_ActiveTileSlices[25]`) to feed the shader viewport.
 
 ### Stage 7.1: Synchronous Toroidal Indexing
 * **Goal:** Build the ring-buffer modulo mapping
@@ -82,19 +82,19 @@ The whole idea of tiling and streaming our terrain in this manner is to support 
 
 ### Stage 7.3:  Add A Staging Buffer
 * **Goal:** Separate the live slot from access contention.
-* [ ] Load the new tile into a scratch buffer
-* [ ] Publish as a distinct step
-* [ ] Test by crossing boundary threshholds repeatedly.  This should still cause a stutter as we are still blocking on the main thread.
+* [x] Load the new tile into a scratch buffer
+* [x] Publish as a distinct step
+* [x] Test by crossing boundary threshholds repeatedly.  This should still cause a stutter as we are still blocking on the main thread.
 
 ### Stage 7.4:  Move The Load Call Onto One Worker
 * **Goal:** Main thread pushes request to queue a tile load.  Worker pushes a completion status to a second queue
-* [ ] Request queue.  Load tile X into staging slot Y.
-* [ ] Completion queue.  Staging slot Y is ready.
-* [ ] Main thread pops it once per frame and does the actual copy/publish
-* [ ] Each queue will need a mutex around the push and pop, but in practice there shouldn't actually be any contention.
+* [x] Request queue.  Load tile X into staging slot Y.
+* [x] Completion queue.  Staging slot Y is ready.
+* [x] Main thread pops it once per frame and does the actual copy/publish
+* [x] Each queue will need a mutex around the push and pop, but in practice there shouldn't actually be any contention.
 
 ### Stage 7.5:  Profile Reactive Tile Loading
 * **Goal:** At this stage, the loading is being done on a worker thread and we should no longer have any stutter on boundary crossing.
-* [ ] Rapidly cross boundaries as in 7.3, empirically judge fluidity.
-* [ ] Wrap the buffer swap in a timer to determine actual latency.
-* [ ] Decide if the buffer swapping is performant enough under reactive tile loading.
+* [x] Rapidly cross boundaries as in 7.3, empirically judge fluidity.
+* [x] Wrap the buffer swap in a timer to determine actual latency.
+* [x] Decide if the buffer swapping is performant enough under reactive tile loading.

@@ -1,6 +1,7 @@
 #include "environment/TerrainStreamer.h"
 #include "core/WorldCoordinates.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -123,10 +124,22 @@ TerrainStreamer::TerrainStreamer(const std::filesystem::path& manifestPath)
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_roadPbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, totalSubgridBytes, nullptr, GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    m_workerThread = std::thread(&TerrainStreamer::workerThreadMain, this);
 }
 
 TerrainStreamer::~TerrainStreamer()
 {
+    m_shutdownRequested = true;
+    m_workerWakeCV.notify_all();
+    m_completionAvailableCV.notify_all();
+    m_stagingConsumedCV.notify_all();
+
+    if (m_workerThread.joinable())
+    {
+        m_workerThread.join();
+    }
+
     if (m_arrayTexture != 0)     glDeleteTextures(1, &m_arrayTexture);
     if (m_pbo != 0)              glDeleteBuffers(1, &m_pbo);
     if (m_roadArrayTexture != 0) glDeleteTextures(1, &m_roadArrayTexture);
@@ -139,6 +152,8 @@ TerrainStreamer::~TerrainStreamer()
 
 void TerrainStreamer::update(const sf::Vector2f& cameraWorldPos)
 {
+    drainCompletionQueue();
+
     if (m_slotValid.empty() || !m_gridInitialized)
     {
         initializeGrid(cameraWorldPos);
@@ -242,10 +257,15 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
 void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
 {
     const int slot = WorldCoordinates::Square::slotIndexForTile(coord);
-    const bool ok  = loadTileFromDisk(m_manifest, coord, slotData(slot), slotRoadData(slot));
+    requestTileLoad(slot, coord);
 
-    m_slotWorldCoord[slot] = coord;
-    m_slotValid[slot]      = ok;
+    std::unique_lock<std::mutex> completionLock(m_completionQueueMutex);
+    m_completionAvailableCV.wait(completionLock, [this] {
+        return !m_completionQueue.empty() || m_shutdownRequested.load();
+    });
+    completionLock.unlock();
+
+    drainCompletionQueue();
 }
 
 bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
@@ -259,6 +279,9 @@ bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
         static_cast<size_t>(kTileResolution + kApronTexels) *
         static_cast<size_t>(kTileResolution + kApronTexels);
     const size_t bytesPerTile = floatsPerTile * sizeof(float);
+
+    std::memset(outHeightBuffer, 0, bytesPerTile);
+    std::fill_n(outRoadBuffer, floatsPerTile, 1.0f);
 
     // -------------------------------------------------------------------------
     // 1. Read Height Tile (tile_r_c.bin)
@@ -336,6 +359,102 @@ const float* TerrainStreamer::getRoadData(TileCoord coord) const
 TileCoord TerrainStreamer::getOriginTile() const
 {
     return m_manifest.tileBoundsUpperLeft;
+}
+
+void TerrainStreamer::requestTileLoad(int slotIndex, TileCoord coord)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_requestQueueMutex);
+        m_requestQueue.push(LoadRequest{slotIndex, coord});
+    }
+    m_workerWakeCV.notify_one();
+}
+
+void TerrainStreamer::workerThreadMain()
+{
+    while (true)
+    {
+        LoadRequest request{};
+        {
+            std::unique_lock<std::mutex> lock(m_requestQueueMutex);
+            m_workerWakeCV.wait(lock, [this] {
+                return m_shutdownRequested.load() || !m_requestQueue.empty();
+            });
+
+            if (m_shutdownRequested.load() && m_requestQueue.empty())
+            {
+                return;
+            }
+
+            request = m_requestQueue.front();
+            m_requestQueue.pop();
+        }
+
+        {
+            std::lock_guard<std::mutex> stagingLock(m_stagingMutex);
+            m_stagingConsumed = false;
+        }
+
+        const bool success = loadTileFromDisk(m_manifest,
+                                              request.coord,
+                                              m_stagingBuffer.data(),
+                                              m_stagingRoadBuffer.data());
+
+        {
+            std::lock_guard<std::mutex> lock(m_completionQueueMutex);
+            m_completionQueue.push(LoadResult{request.slotIndex, request.coord, success});
+        }
+        m_completionAvailableCV.notify_one();
+
+        std::unique_lock<std::mutex> stagingLock(m_stagingMutex);
+        m_stagingConsumedCV.wait(stagingLock, [this] {
+            return m_stagingConsumed || m_shutdownRequested.load();
+        });
+
+        if (m_shutdownRequested.load())
+        {
+            return;
+        }
+    }
+}
+
+void TerrainStreamer::publishStagedTile(int slotIndex, TileCoord newCoord, bool success)
+{
+    const size_t floatsPerTile = tileAllocFloatCount();
+    const size_t bytesPerTile  = floatsPerTile * sizeof(float);
+
+    {
+        std::lock_guard<std::mutex> lock(m_stagingMutex);
+
+        std::memcpy(slotData(slotIndex), m_stagingBuffer.data(), bytesPerTile);
+        std::memcpy(slotRoadData(slotIndex), m_stagingRoadBuffer.data(), bytesPerTile);
+
+        m_slotWorldCoord[slotIndex] = newCoord;
+        m_slotValid[slotIndex]      = success;
+        m_stagingConsumed           = true;
+    }
+
+    m_stagingConsumedCV.notify_one();
+}
+
+void TerrainStreamer::drainCompletionQueue()
+{
+    while (true)
+    {
+        LoadResult result{};
+        {
+            std::lock_guard<std::mutex> lock(m_completionQueueMutex);
+            if (m_completionQueue.empty())
+            {
+                break;
+            }
+
+            result = m_completionQueue.front();
+            m_completionQueue.pop();
+        }
+
+        publishStagedTile(result.slotIndex, result.coord, result.success);
+    }
 }
 
 // ---------------------------------------------------------------------
