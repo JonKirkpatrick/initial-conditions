@@ -48,7 +48,6 @@
             { "glsl":           "outIndices",   "location": 2 },
             { "glsl":           "outRetro",     "location": 3 },
 
-            { "cppNamespace":   "Terrain",      "cppSymbol": "ReliefExaggeration",  "glsl": "u_reliefExaggeration",     "location": 0 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 1 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 2 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 3 },
@@ -67,7 +66,6 @@
             { "glsl":           "outIndices",   "location": 2 },
             { "glsl":           "outRetro",     "location": 3 },
 
-            { "cppNamespace":   "Terrain",      "cppSymbol": "ReliefExaggeration",  "glsl": "u_reliefExaggeration",     "location": 0 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 1 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 2 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 3 },
@@ -75,7 +73,7 @@
             { "cppNamespace":   "Terrain",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 5 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray",    "location": 6 },
             { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainNormalArray",  "glsl": "u_terrainNormalArray",     "location": 7 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",           	"location": 8 }
+            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",            "location": 8 }
         ],
         "TerrainShadow": 
         [
@@ -132,9 +130,8 @@
         ],
         "Ocean": 
         [
-            { "glsl":           "a_Pos",        "location": 0 },
-            { "glsl":           "a_Normal",     "location": 1 },
-            { "glsl":           "a_TexCoords",  "location": 2 },
+            { "glsl":           "a_pos",        "location": 0 },
+            { "glsl":           "a_texCoords",  "location": 1 },
 
             { "cppNamespace":   "Ocean",        "cppSymbol": "Model",               "glsl": "u_model",                  "location": 0 },
             { "cppNamespace":   "Ocean",        "cppSymbol": "NormalMatrix",        "glsl": "u_normalMatrix",           "location": 1 },

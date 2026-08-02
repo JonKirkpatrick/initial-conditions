@@ -7,7 +7,6 @@
 // ==============================================================================
 // == Uniforms ==================================================================
 // ==============================================================================
-layout(location = X) uniform float u_reliefExaggeration;
 layout(location = X) uniform bool  u_cursorMode;
 layout(location = X) uniform float u_hexSize;
 layout(location = X) uniform vec2  u_hoveredHex;
@@ -40,7 +39,6 @@ struct GeometrySample {
     vec3  pos;              // world-space position
     vec3  normal;           // world-space, after relief exaggeration + horizon damping
     float dist;             // distance from camera
-    float normHeight;       // height normalised to [0,1] against u_heightMax
 };
 
 struct MaterialSample {
@@ -245,14 +243,7 @@ GeometrySample resolveGeometry()
     float h = v_worldY;
     geo.pos = vec3(xz.x, h, xz.y);
     geo.dist = length(geo.pos - u_cameraPos);
-
-    vec3 rawNormal = computeNormal();
-    vec3 exagNormal = normalize(vec3(rawNormal.x * u_reliefExaggeration,
-                                     rawNormal.y,
-                                     rawNormal.z * u_reliefExaggeration));
-
-    geo.normal = exagNormal;
-    geo.normHeight = clamp(h / max(u_heightMax, 1.0), 0.0, 1.0);
+    geo.normal = computeNormal();
 
     return geo;
 }

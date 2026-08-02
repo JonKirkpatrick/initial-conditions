@@ -43,8 +43,8 @@ TerrainManifest TerrainManifest::loadFromFile(const std::filesystem::path& manif
     {
         throw std::runtime_error("Field 'worldOriginLatLon' must be a JSON array of 2 doubles.");
     }
-    manifest.worldOriginLatLon.x = latLonArr[0].get<double>(); // Latitude
-    manifest.worldOriginLatLon.y = latLonArr[1].get<double>(); // Longitude
+    manifest.worldOriginLatLon.x = latLonArr[0].get<double>();
+    manifest.worldOriginLatLon.y = latLonArr[1].get<double>();
 
     auto ul = data.at("tileBoundsUpperLeft");
     manifest.tileBoundsUpperLeft.row = ul.at("row").get<int>();
@@ -55,7 +55,6 @@ TerrainManifest TerrainManifest::loadFromFile(const std::filesystem::path& manif
     manifest.tileBoundsLowerRight.col = lr.at("col").get<int>();
 
     manifest.tileDirectory = std::filesystem::path(data.at("tileDirectory").get<std::string>());
-
     manifest.channels = data.at("channels").get<std::vector<std::string>>();
 
     return manifest;
@@ -72,24 +71,18 @@ TerrainStreamer::TerrainStreamer(const std::filesystem::path& manifestPath)
     const size_t slotCount     = WorldCoordinates::Square::kStreamerGridDim
                                 * WorldCoordinates::Square::kStreamerGridDim;
 
-    // Allocate height and road CPU slot storage
     m_tileStorage.assign(floatsPerTile * slotCount, 0.0f);
-    m_roadStorage.assign(floatsPerTile * slotCount, 1.0f); // Default to 1.0 (max distance / no roads)
+    m_roadStorage.assign(floatsPerTile * slotCount, 1.0f);
 
     m_slotWorldCoord.assign(slotCount, TileCoord{});
     m_slotValid.assign(slotCount, false);
-    
-    m_stagingBuffer.assign(floatsPerTile, 0.0f);
-    m_stagingRoadBuffer.assign(floatsPerTile, 1.0f);
 
     using namespace WorldCoordinates::Square;
     constexpr int kTexSide = kTileResolution + kApronTexels;
-    constexpr int kVisibleLayers = kVisibleGridDim * kVisibleGridDim; // 81
+    constexpr int kVisibleLayers = kVisibleGridDim * kVisibleGridDim;
     const size_t totalSubgridBytes = kVisibleLayers * floatsPerTile * sizeof(float);
 
-    // -------------------------------------------------------------------------
-    // 1. Setup Heightfield Texture Array & PBO (GL_R32F)
-    // -------------------------------------------------------------------------
+    // 1. Heightfield Texture Array & PBO
     glGenTextures(1, &m_arrayTexture);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
     glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_R32F, kTexSide, kTexSide, kVisibleLayers);
@@ -106,9 +99,7 @@ TerrainStreamer::TerrainStreamer(const std::filesystem::path& manifestPath)
     glBufferData(GL_PIXEL_UNPACK_BUFFER, totalSubgridBytes, nullptr, GL_STREAM_DRAW);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    // -------------------------------------------------------------------------
-    // 2. Setup Road SDF Texture Array & PBO (GL_R32F)
-    // -------------------------------------------------------------------------
+    // 2. Road SDF Texture Array & PBO
     glGenTextures(1, &m_roadArrayTexture);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_roadArrayTexture);
     glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_R32F, kTexSide, kTexSide, kVisibleLayers);
@@ -132,8 +123,6 @@ TerrainStreamer::~TerrainStreamer()
 {
     m_shutdownRequested = true;
     m_workerWakeCV.notify_all();
-    m_completionAvailableCV.notify_all();
-    m_stagingConsumedCV.notify_all();
 
     if (m_workerThread.joinable())
     {
@@ -147,47 +136,40 @@ TerrainStreamer::~TerrainStreamer()
 }
 
 // ---------------------------------------------------------------------
-// Per-frame entry point
+// Frame Update Loop
 // ---------------------------------------------------------------------
 
 void TerrainStreamer::update(const sf::Vector2f& cameraWorldPos)
 {
+    // Non-blocking consumption of queued load results from worker thread
     drainCompletionQueue();
 
     if (m_slotValid.empty() || !m_gridInitialized)
     {
         initializeGrid(cameraWorldPos);
-        std::cout << "[TerrainStreamer] Grid initialized at center tile: [" 
-                  << m_centerTileCoord.row << ", " << m_centerTileCoord.col << "]\n";
         return;
     }
 
     checkBoundaryCrossing(cameraWorldPos);
 }
 
-// ---------------------------------------------------------------------
-// Stage 7.1: synchronous toroidal indexing
-// ---------------------------------------------------------------------
-
 TileCoord TerrainStreamer::clampToWorldBounds(TileCoord coord) const
 {
     coord.row = std::clamp(coord.row,
-                            m_manifest.tileBoundsUpperLeft.row,
-                            m_manifest.tileBoundsLowerRight.row);
+                           m_manifest.tileBoundsUpperLeft.row,
+                           m_manifest.tileBoundsLowerRight.row);
     coord.col = std::clamp(coord.col,
-                            m_manifest.tileBoundsUpperLeft.col,
-                            m_manifest.tileBoundsLowerRight.col);
+                           m_manifest.tileBoundsUpperLeft.col,
+                           m_manifest.tileBoundsLowerRight.col);
     return coord;
 }
 
 TileCoord TerrainStreamer::worldPosToAbsoluteTileCoord(const sf::Vector2f& cameraWorldPos) const
 {
     TileCoord localTile = WorldCoordinates::Square::worldPosToTileCoord(cameraWorldPos);
-    
     TileCoord geoTile;
     geoTile.row = m_manifest.tileBoundsUpperLeft.row + localTile.row;
     geoTile.col = m_manifest.tileBoundsUpperLeft.col + localTile.col;
-    
     return geoTile;
 }
 
@@ -195,15 +177,31 @@ void TerrainStreamer::initializeGrid(const sf::Vector2f& cameraWorldPos)
 {
     m_centerTileCoord = clampToWorldBounds(worldPosToAbsoluteTileCoord(cameraWorldPos));
 
+    int expectedLoads = 0;
     for (int row = m_centerTileCoord.row - kHalfWindow;
          row <= m_centerTileCoord.row + kHalfWindow; ++row)
     {
         for (int col = m_centerTileCoord.col - kHalfWindow;
              col <= m_centerTileCoord.col + kHalfWindow; ++col)
         {
-            loadTileIntoSlot(TileCoord{row, col});
+            TileCoord target{row, col};
+            int slot = WorldCoordinates::Square::slotIndexForTile(target);
+            requestTileLoad(slot, target);
+            expectedLoads++;
         }
     }
+
+    // Wait until the worker thread has pushed all expected initial results into m_completionQueue
+    {
+        std::unique_lock<std::mutex> lock(m_completionQueueMutex);
+        m_initialLoadCV.wait(lock, [this, expectedLoads]() {
+            return static_cast<int>(m_completionQueue.size()) >= expectedLoads || m_shutdownRequested.load();
+        });
+    }
+
+    // Now drain all completed items into CPU memory on the main thread
+    drainCompletionQueue();
+
     m_gridInitialized  = true;
     m_subgridDirty     = true;
     m_roadSubgridDirty = true;
@@ -223,49 +221,27 @@ void TerrainStreamer::checkBoundaryCrossing(const sf::Vector2f& cameraWorldPos)
                std::abs(coord.col - center.col) <= kHalfWindow;
     };
 
-    std::vector<TileCoord> tilesToLoad;
-    float gridDim = WorldCoordinates::Square::kStreamerGridDim;
-    tilesToLoad.reserve(gridDim * gridDim);
+    m_centerTileCoord = newCenter;
 
     for (int row = newCenter.row - kHalfWindow; row <= newCenter.row + kHalfWindow; ++row)
     {
         for (int col = newCenter.col - kHalfWindow; col <= newCenter.col + kHalfWindow; ++col)
         {
             TileCoord target{row, col};
-            if (!isInWindow(target, m_centerTileCoord))
+            int slot = WorldCoordinates::Square::slotIndexForTile(target);
+
+            // Re-request tile if slot doesn't match new target coordinates
+            if (m_slotWorldCoord[slot] != target || !m_slotValid[slot])
             {
-                tilesToLoad.push_back(target);
+                m_slotValid[slot] = false;
+                requestTileLoad(slot, target);
             }
         }
-    }
-
-    m_centerTileCoord = newCenter;
-
-    for (const auto& tile : tilesToLoad)
-    {
-        loadTileIntoSlot(tile);
     }
 
     refreshActiveSliceUniforms();
     m_subgridDirty     = true;
     m_roadSubgridDirty = true;
-    
-    std::cout << "[TerrainStreamer] Center tile updated to [" << m_centerTileCoord.row
-              << ", " << m_centerTileCoord.col << "]\n";
-}
-
-void TerrainStreamer::loadTileIntoSlot(TileCoord coord)
-{
-    const int slot = WorldCoordinates::Square::slotIndexForTile(coord);
-    requestTileLoad(slot, coord);
-
-    std::unique_lock<std::mutex> completionLock(m_completionQueueMutex);
-    m_completionAvailableCV.wait(completionLock, [this] {
-        return !m_completionQueue.empty() || m_shutdownRequested.load();
-    });
-    completionLock.unlock();
-
-    drainCompletionQueue();
 }
 
 bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
@@ -283,9 +259,6 @@ bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
     std::memset(outHeightBuffer, 0, bytesPerTile);
     std::fill_n(outRoadBuffer, floatsPerTile, 1.0f);
 
-    // -------------------------------------------------------------------------
-    // 1. Read Height Tile (tile_r_c.bin)
-    // -------------------------------------------------------------------------
     std::string heightFileName = "tile_" + std::to_string(coord.row) + "_" + std::to_string(coord.col) + ".bin";
     std::filesystem::path heightPath = manifest.tileDirectory / heightFileName;
 
@@ -296,19 +269,8 @@ bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
         {
             file.read(reinterpret_cast<char*>(outHeightBuffer), bytesPerTile);
         }
-        else
-        {
-            std::memset(outHeightBuffer, 0, bytesPerTile);
-        }
-    }
-    else
-    {
-        std::memset(outHeightBuffer, 0, bytesPerTile);
     }
 
-    // -------------------------------------------------------------------------
-    // 2. Read Road SDF Tile (road_r_c.bin) if manifest supports "roads"
-    // -------------------------------------------------------------------------
     if (manifest.hasChannel("roads"))
     {
         std::string roadFileName = "road_" + std::to_string(coord.row) + "_" + std::to_string(coord.col) + ".bin";
@@ -321,20 +283,108 @@ bool TerrainStreamer::loadTileFromDisk(const TerrainManifest& manifest,
             {
                 file.read(reinterpret_cast<char*>(outRoadBuffer), bytesPerTile);
             }
-            else
-            {
-                // Default to 1.0f (no roads / max distance)
-                std::fill_n(outRoadBuffer, floatsPerTile, 1.0f);
-            }
-        }
-        else
-        {
-            std::fill_n(outRoadBuffer, floatsPerTile, 1.0f);
         }
     }
 
     return true;
 }
+
+// ---------------------------------------------------------------------
+// Threading & Queue Processing
+// ---------------------------------------------------------------------
+
+void TerrainStreamer::requestTileLoad(int slotIndex, TileCoord coord)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_requestQueueMutex);
+        m_requestQueue.push(LoadRequest{slotIndex, coord});
+    }
+    m_workerWakeCV.notify_one();
+}
+
+void TerrainStreamer::workerThreadMain()
+{
+    const size_t floatsPerTile = tileAllocFloatCount();
+
+    while (true)
+    {
+        LoadRequest request{};
+        {
+            std::unique_lock<std::mutex> lock(m_requestQueueMutex);
+            m_workerWakeCV.wait(lock, [this] {
+                return m_shutdownRequested.load() || !m_requestQueue.empty();
+            });
+
+            if (m_shutdownRequested.load() && m_requestQueue.empty())
+            {
+                return;
+            }
+
+            request = m_requestQueue.front();
+            m_requestQueue.pop();
+        }
+
+        LoadResult result;
+        result.slotIndex = request.slotIndex;
+        result.coord     = request.coord;
+        result.heightBuffer.resize(floatsPerTile);
+        result.roadBuffer.resize(floatsPerTile);
+
+        result.success = loadTileFromDisk(m_manifest,
+                                           request.coord,
+                                           result.heightBuffer.data(),
+                                           result.roadBuffer.data());
+
+        {
+            std::lock_guard<std::mutex> lock(m_completionQueueMutex);
+            m_completionQueue.push(std::move(result));
+        }
+        
+        // Signal the main thread (used during initializeGrid startup wait)
+        m_initialLoadCV.notify_one();
+    }
+}
+
+void TerrainStreamer::drainCompletionQueue()
+{
+    const size_t floatsPerTile = tileAllocFloatCount();
+    const size_t bytesPerTile  = floatsPerTile * sizeof(float);
+
+    bool processedAny = false;
+    while (true)
+    {
+        LoadResult result{};
+        {
+            std::lock_guard<std::mutex> lock(m_completionQueueMutex);
+            if (m_completionQueue.empty())
+            {
+                break;
+            }
+
+            result = std::move(m_completionQueue.front());
+            m_completionQueue.pop();
+        }
+
+        std::memcpy(slotData(result.slotIndex), result.heightBuffer.data(), bytesPerTile);
+        std::memcpy(slotRoadData(result.slotIndex), result.roadBuffer.data(), bytesPerTile);
+
+        m_slotWorldCoord[result.slotIndex] = result.coord;
+        m_slotValid[result.slotIndex]      = result.success;
+
+        m_subgridDirty     = true;
+        m_roadSubgridDirty = true;
+        processedAny       = true;
+    }
+
+    if (processedAny)
+    {
+        m_initialLoadCV.notify_all();
+    }
+}
+
+// ---------------------------------------------------------------------
+// Slot storage & Texture Helpers
+// ---------------------------------------------------------------------
 
 const float* TerrainStreamer::getTileData(TileCoord coord) const
 {
@@ -360,106 +410,6 @@ TileCoord TerrainStreamer::getOriginTile() const
 {
     return m_manifest.tileBoundsUpperLeft;
 }
-
-void TerrainStreamer::requestTileLoad(int slotIndex, TileCoord coord)
-{
-    {
-        std::lock_guard<std::mutex> lock(m_requestQueueMutex);
-        m_requestQueue.push(LoadRequest{slotIndex, coord});
-    }
-    m_workerWakeCV.notify_one();
-}
-
-void TerrainStreamer::workerThreadMain()
-{
-    while (true)
-    {
-        LoadRequest request{};
-        {
-            std::unique_lock<std::mutex> lock(m_requestQueueMutex);
-            m_workerWakeCV.wait(lock, [this] {
-                return m_shutdownRequested.load() || !m_requestQueue.empty();
-            });
-
-            if (m_shutdownRequested.load() && m_requestQueue.empty())
-            {
-                return;
-            }
-
-            request = m_requestQueue.front();
-            m_requestQueue.pop();
-        }
-
-        {
-            std::lock_guard<std::mutex> stagingLock(m_stagingMutex);
-            m_stagingConsumed = false;
-        }
-
-        const bool success = loadTileFromDisk(m_manifest,
-                                              request.coord,
-                                              m_stagingBuffer.data(),
-                                              m_stagingRoadBuffer.data());
-
-        {
-            std::lock_guard<std::mutex> lock(m_completionQueueMutex);
-            m_completionQueue.push(LoadResult{request.slotIndex, request.coord, success});
-        }
-        m_completionAvailableCV.notify_one();
-
-        std::unique_lock<std::mutex> stagingLock(m_stagingMutex);
-        m_stagingConsumedCV.wait(stagingLock, [this] {
-            return m_stagingConsumed || m_shutdownRequested.load();
-        });
-
-        if (m_shutdownRequested.load())
-        {
-            return;
-        }
-    }
-}
-
-void TerrainStreamer::publishStagedTile(int slotIndex, TileCoord newCoord, bool success)
-{
-    const size_t floatsPerTile = tileAllocFloatCount();
-    const size_t bytesPerTile  = floatsPerTile * sizeof(float);
-
-    {
-        std::lock_guard<std::mutex> lock(m_stagingMutex);
-
-        std::memcpy(slotData(slotIndex), m_stagingBuffer.data(), bytesPerTile);
-        std::memcpy(slotRoadData(slotIndex), m_stagingRoadBuffer.data(), bytesPerTile);
-
-        m_slotWorldCoord[slotIndex] = newCoord;
-        m_slotValid[slotIndex]      = success;
-        m_stagingConsumed           = true;
-    }
-
-    m_stagingConsumedCV.notify_one();
-}
-
-void TerrainStreamer::drainCompletionQueue()
-{
-    while (true)
-    {
-        LoadResult result{};
-        {
-            std::lock_guard<std::mutex> lock(m_completionQueueMutex);
-            if (m_completionQueue.empty())
-            {
-                break;
-            }
-
-            result = m_completionQueue.front();
-            m_completionQueue.pop();
-        }
-
-        publishStagedTile(result.slotIndex, result.coord, result.success);
-    }
-}
-
-// ---------------------------------------------------------------------
-// Slot storage helpers
-// ---------------------------------------------------------------------
 
 size_t TerrainStreamer::tileAllocFloatCount() const
 {
@@ -488,14 +438,10 @@ const float* TerrainStreamer::slotRoadData(int slotIndex) const
     return m_roadStorage.data() + static_cast<size_t>(slotIndex) * tileAllocFloatCount();
 }
 
-// ---------------------------------------------------------------------
-// Stage 7.1: Active subgrid and uniforms
-// ---------------------------------------------------------------------
-
 TerrainStreamer::ActiveSubgrid TerrainStreamer::getActiveSubgrid() const
 {
     using namespace WorldCoordinates::Square;
-    constexpr int kHalfVisible = kVisibleGridDim / 2; // 2
+    constexpr int kHalfVisible = kVisibleGridDim / 2;
 
     ActiveSubgrid subgrid{};
     int i = 0;
@@ -530,7 +476,7 @@ const std::array<GLint, 81>& TerrainStreamer::getActiveSliceUniforms() const
 void TerrainStreamer::refreshActiveSliceUniforms()
 {
     using namespace WorldCoordinates::Square;
-    constexpr int kHalfVisible = kVisibleGridDim / 2; // 2
+    constexpr int kHalfVisible = kVisibleGridDim / 2;
 
     int i = 0;
     for (int row = m_centerTileCoord.row - kHalfVisible;
@@ -572,8 +518,7 @@ GLuint TerrainStreamer::getOrUploadArrayTexture()
     }
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, m_packedSubgridData.size() * sizeof(float), nullptr, GL_STREAM_DRAW);
-    glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, m_packedSubgridData.size() * sizeof(float), m_packedSubgridData.data());
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, m_packedSubgridData.size() * sizeof(float), m_packedSubgridData.data(), GL_STREAM_DRAW);
 
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_arrayTexture);
     glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
@@ -599,7 +544,7 @@ GLuint TerrainStreamer::getOrUploadRoadArrayTexture()
     constexpr int kTexSide = kTileResolution + kApronTexels;
     const size_t floatsPerTile = tileAllocFloatCount();
     const size_t bytesPerTile  = floatsPerTile * sizeof(float);
-    static const std::vector<float> kDefaultRoadTile(floatsPerTile, 1.0f); // Default max distance
+    static const std::vector<float> kDefaultRoadTile(floatsPerTile, 1.0f);
 
     const ActiveSubgrid subgrid = getActiveSubgrid();
 
@@ -613,8 +558,7 @@ GLuint TerrainStreamer::getOrUploadRoadArrayTexture()
     }
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_roadPbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, m_packedRoadSubgridData.size() * sizeof(float), nullptr, GL_STREAM_DRAW);
-    glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, m_packedRoadSubgridData.size() * sizeof(float), m_packedRoadSubgridData.data());
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, m_packedRoadSubgridData.size() * sizeof(float), m_packedRoadSubgridData.data(), GL_STREAM_DRAW);
 
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_roadArrayTexture);
     glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0,
@@ -632,7 +576,7 @@ GLuint TerrainStreamer::getOrUploadRoadArrayTexture()
 sf::Vector2f TerrainStreamer::getVisibleGridWorldOrigin() const
 {
     using namespace WorldCoordinates::Square;
-    constexpr int kHalfVisible = kVisibleGridDim / 2; // 2
+    constexpr int kHalfVisible = kVisibleGridDim / 2;
 
     const TileCoord absoluteOrigin{ m_centerTileCoord.row - kHalfVisible,
                                      m_centerTileCoord.col - kHalfVisible };

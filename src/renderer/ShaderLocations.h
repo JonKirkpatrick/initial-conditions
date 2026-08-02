@@ -283,7 +283,6 @@ namespace MiniMap {
 }
 
 namespace Terrain {
-    UNIFORM_LOCATION(Terrain, ReliefExaggeration);
     UNIFORM_LOCATION(Terrain, CursorMode);
     UNIFORM_LOCATION(Terrain, HexSize);
     UNIFORM_LOCATION(Terrain, HoveredHex);

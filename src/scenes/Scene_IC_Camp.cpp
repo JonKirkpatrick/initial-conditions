@@ -1993,8 +1993,6 @@ void Scene_IC_Camp::runTerrainPass()
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
     // 3. Structural & Geometry Tweak Uniforms
-    glUniform1f(Uniforms::SharedTerrain::HeightMax, m_topdownMaxHeight);
-    glUniform1f(Uniforms::Terrain::ReliefExaggeration, 1.0f);
     glUniform1f(Uniforms::Terrain::SeaLevel, m_seaLevel);
 
     // 4. Cursor & Selection Grid Uniforms

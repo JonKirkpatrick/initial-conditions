@@ -3,9 +3,8 @@
 #include "ubos/camera.glsl"
 #include "ubos/environment.glsl"
 
-layout(location = X) in vec3 a_Pos;
-layout(location = X) in vec3 a_Normal;
-layout(location = X) in vec2 a_TexCoords;
+layout(location = X) in vec3 a_pos;
+layout(location = X) in vec2 a_texCoords;
 
 out vec3 FragPos;
 out vec3 Normal;
@@ -50,7 +49,7 @@ vec3 addGerstnerWave(vec3 pos, vec2 dir, float steepness, float waveLength, inou
 
 void main()
 {
-    vec4 worldPos = u_model * vec4(a_Pos, 1.0);
+    vec4 worldPos = u_model * vec4(a_pos, 1.0);
     vec3 gridPos  = worldPos.xyz;
 
     vec2 windDir   = length(u_windDirection) > 0.001 ? normalize(u_windDirection) : vec2(1.0, 0.0);
@@ -81,7 +80,7 @@ void main()
     Normal          = u_normalMatrix * waveNormal;
 
     FragPos   = worldPos.xyz;
-    TexCoords = a_TexCoords;
+    TexCoords = a_texCoords;
 
     gl_Position = u_proj * u_view * worldPos;
 }

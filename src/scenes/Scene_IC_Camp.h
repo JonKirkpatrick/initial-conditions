@@ -145,7 +145,7 @@ protected:
     GLuint              m_skyProgram            = Assets::Instance().getGLProgram("Sky");           ///< Shader program for skybox/celestial dome.
     GLuint              m_ssao                  = Assets::Instance().getGLProgram("SSAO");          ///< Shader program for SSAO screen-space evaluation.
     GLuint              m_ssao_blur             = Assets::Instance().getGLProgram("SSAOBlur");      ///< Shader program for SSAO spatial bilateral blur.
-    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("PaperTerrain");  ///< Shader program for terrain surface.
+    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("Terrain");       ///< Shader program for terrain surface.
     GLuint              m_OrbCreatureProgram    = Assets::Instance().getGLProgram("OrbCreature");   ///< Shader program for instanced orb creatures.
     GLuint              m_blitProgram           = Assets::Instance().getGLProgram("Blit");          ///< Shader program for full-screen texture blitting.
     GLuint              m_lightingProgram       = Assets::Instance().getGLProgram("Lighting");      ///< Shader program for deferred lighting accumulation.
