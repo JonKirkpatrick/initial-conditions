@@ -16,7 +16,7 @@
 #include <vector>
 
 /**
- * @brief Describes a terrain dataset on disk: its coordinate frame, tile
+ * @brief Describes a terrain dataset on disk, its coordinate frame, tile
  *        bounds, channel list, and where its tile files live.
  *
  * Manifests are loaded once via loadFromFile() and treated as immutable for
