@@ -451,7 +451,12 @@ public:
      * @param tag String tag identifier.
      * @return Const reference to tag-grouped entity vector.
      */
-    const EntityVec& getEntities(const std::string& tag) const { return m_entitiesByTag.at(tag); }
+    const EntityVec& getEntities(const std::string& tag) const 
+    { 
+        static const EntityVec empty;
+        auto it = m_entitiesByTag.find(tag);
+        return (it != m_entitiesByTag.end()) ? it->second : empty;
+     }
 
     /**
      * @brief Gets map of all active entities grouped by tag.

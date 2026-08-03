@@ -220,7 +220,7 @@ protected:
 
     GLuint                  m_shadowFBO                             = 0;    ///< Shadow map depth generation framebuffer.
     GLuint                  m_shadowDepthTexArray                   = 0;    ///< 2D Texture Array (`GL_TEXTURE_2D_ARRAY`) for CSM cascade depth maps.
-    unsigned int            m_shadowMapSize                         = 4096; ///< Resolution dimension per cascade shadow slice.
+    unsigned int            m_shadowMapSize                         = 2048; ///< Resolution dimension per cascade shadow slice.
     static constexpr int    NUM_CASCADES                            = 5;    ///< Total number of active shadow map cascades.
 
     float                   m_cascadeSplits[NUM_CASCADES] = {};             ///< Calculated view-space split distance thresholds.
@@ -228,12 +228,51 @@ protected:
     float                   m_lightDepthRange[NUM_CASCADES]         = {};   ///< Orthographic depth bounds per cascade.
     float                   m_texelWorldSize[NUM_CASCADES]          = {};   ///< Texel side length in world space per cascade.
     float                   m_cascadeSplitLambda                    = 0.25f;///< Logarithmic vs uniform split interpolation factor $[0, 1]$.
-    float                   m_shadowFrustumPadding                  = 30.0f;///< Frustum padding margin to prevent edge clipping artifacts.
+    float                   m_shadowFrustumPadding                  = 10.0f;///< Frustum padding margin to prevent edge clipping artifacts.
     float                   m_shadowMaxDistance                     = 500.0f;///< Maximum shadow rendering distance cut-off.
 
     bool                    m_debugShowShadowMap                    = false;///< Debug flag to display shadow map texture array on HUD.
     bool                    m_debugDisableTexelSnap                 = false;///< Debug flag disabling shadow matrix texel snapping.
     bool                    m_debugShowCascadeColors                = false;///< Debug flag tinting terrain fragments by cascade index.
+
+    enum RenderPass {
+        PASS_TERRAIN = 0,
+        PASS_ORB_CREATURE,
+        PASS_SHADOW,
+        PASS_SSAO,
+        PASS_SSAO_BLUR,
+        PASS_SKY,
+        PASS_DEFERRED_LIGHTING,
+        PASS_OCEAN,
+        PASS_HUD,
+        PASS_COUNT
+    };
+
+    GLuint m_gpuQueries[2][PASS_COUNT] = {};
+    bool     m_gpuQueriesInitialized  = false;
+    uint32_t m_queryFrameIdx          = 0;
+
+    // GPU Execution Timers (ms)
+    float m_profGpuTerrainMs          = 0.0f;
+    float m_profGpuOrbCreatureMs       = 0.0f;
+    float m_profGpuShadowMs           = 0.0f;
+    float m_profGpuSSAOMs             = 0.0f;
+    float m_profGpuSSAOBlurMs         = 0.0f;
+    float m_profGpuSkyMs              = 0.0f;
+    float m_profGpuDeferredLightingMs = 0.0f;
+    float m_profGpuOceanMs            = 0.0f;
+    float m_profGpuHUDMs              = 0.0f;
+
+    float m_profTerrainMs          = 0.0f;
+    float m_profOrbCreatureMs       = 0.0f;
+    float m_profShadowMs           = 0.0f;
+    float m_profSSAOMs             = 0.0f;
+    float m_profSSAOBlurMs         = 0.0f;
+    float m_profSkyMs              = 0.0f;
+    float m_profDeferredLightingMs = 0.0f;
+    float m_profOceanMs            = 0.0f;
+    float m_profHUDMs              = 0.0f;
+    float m_profMovementMs         = 0.0f;
 
     // =========================================================================
     // Rendering — Sky Cubemap
@@ -263,7 +302,6 @@ protected:
      * @brief Builds contiguous array of `OrbData` structures from ECS entity components.
      * @return Vector of formatted `OrbData` structs ready for GPU streaming.
      */
-    std::vector<OrbData>            buildOrbData() const;
     static constexpr std::size_t    MAX_ORB_CAPACITY = 256000;          ///< Maximum GPU capacity for orb creature instance buffer.
     OrbSSBO                         m_orbSSBO{MAX_ORB_CAPACITY};       ///< SSBO manager for orb instances.
     std::vector<OrbData>            m_orbStagingBuffer;                 ///< CPU staging vector for packing active orb instances.
@@ -303,6 +341,9 @@ protected:
     float m_debugSSAOBias           = 0.005f;   ///< Depth bias threshold offset preventing SSAO self-occlusion.
     int m_sampleCount               = 64;       ///< Number of kernel samples used in SSAO calculation.
     int m_ssaoKernelSize            = 64;       ///< Size of SSAO sample pattern array.
+    float m_orbUpdateMs             = 0.0f;     ///< Milliseconds spent updating orb SSBO data per frame.
+    float m_orbGatherMS             = 0.0f;     ///< Milliseconds spent gathering orb ECS data per frame.
+    float m_orbUploadMS             = 0.0f;     ///< Milliseconds spent uploading orb SSBO data per frame.
 
     // =========================================================================
     // Performance Tracking

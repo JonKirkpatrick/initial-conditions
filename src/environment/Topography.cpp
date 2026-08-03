@@ -8,15 +8,15 @@ namespace Topography {
         using namespace WorldCoordinates::Square;
 
         if (!ctx.streamer) {
-            return 0.0f;
+        return 0.0f;
         }
 
         TileCoord originTile = ctx.streamer->getOriginTile();
         TileCoord absoluteTile = worldPosToAbsoluteTile(worldPos, originTile);
-
         const float* tileBuffer = ctx.streamer->getTileData(absoluteTile);
+
         if (!tileBuffer) {
-            return 0.0f; 
+            return 0.0f;
         }
 
         constexpr float kTileSizeM = kTexelSizeM * kTileResolution;
@@ -51,6 +51,7 @@ namespace Topography {
         size_t idx01 = idx00 + kStride;
         size_t idx11 = idx01 + 1;
 
+        // Once tileBuffer pointer is obtained, math evaluation is pure read-only and thread-safe
         float h00 = tileBuffer[idx00];
         float h10 = tileBuffer[idx10];
         float h01 = tileBuffer[idx01];

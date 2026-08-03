@@ -48,14 +48,14 @@
             { "glsl":           "outIndices",   "location": 2 },
             { "glsl":           "outRetro",     "location": 3 },
 
-            { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 1 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 2 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 3 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "GridColour",          "glsl": "u_gridColour",             "location": 4 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 5 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray",    "location": 6 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainNormalArray",  "glsl": "u_terrainNormalArray",     "location": 7 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",            "location": 8 }
+            { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 0 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 1 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 2 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "GridColour",          "glsl": "u_gridColour",             "location": 3 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 4 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray",    "location": 5 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainNormalArray",  "glsl": "u_terrainNormalArray",     "location": 6 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",            "location": 7 }
         ],
         "PaperTerrain": 
         [
@@ -66,20 +66,20 @@
             { "glsl":           "outIndices",   "location": 2 },
             { "glsl":           "outRetro",     "location": 3 },
 
-            { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 1 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 2 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 3 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "GridColour",          "glsl": "u_gridColour",             "location": 4 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 5 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray",    "location": 6 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainNormalArray",  "glsl": "u_terrainNormalArray",     "location": 7 },
-            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",            "location": 8 }
+            { "cppNamespace":   "Terrain",      "cppSymbol": "CursorMode",          "glsl": "u_cursorMode",             "location": 0 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HexSize",             "glsl": "u_hexSize",                "location": 1 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "HoveredHex",          "glsl": "u_hoveredHex",             "location": 2 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "GridColour",          "glsl": "u_gridColour",             "location": 3 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "SeaLevel",            "glsl": "u_seaLevel",               "location": 4 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainDiffuseArray", "glsl": "u_terrainDiffuseArray",    "location": 5 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "TerrainNormalArray",  "glsl": "u_terrainNormalArray",     "location": 6 },
+            { "cppNamespace":   "Terrain",      "cppSymbol": "DrawHexGrid",         "glsl": "u_drawHexGrid",            "location": 7 }
         ],
         "TerrainShadow": 
         [
             { "glsl":           "a_uv",         "location": 0 },
 
-            { "cppNamespace":   "ShadowPass",   "cppSymbol": "LightViewProj",       "glsl": "u_lightViewProj",          "location": 0 }
+            { "cppNamespace":   "Shadowpass",   "cppSymbol": "LightViewProj",       "glsl": "u_lightViewProj",          "location": 0 }
         ],
         "OrbCreature": 
         [
@@ -97,7 +97,7 @@
         [
             { "glsl":           "a_cubePos",    "location": 0 },
 
-            { "cppNamespace":   "ShadowPass",   "cppSymbol": "LightViewProj",       "glsl": "u_lightViewProj",          "location": 0 }
+            { "cppNamespace":   "Shadowpass",   "cppSymbol": "LightViewProj",       "glsl": "u_lightViewProj",          "location": 0 }
         ],
         "Lighting": 
         [

@@ -116,7 +116,9 @@ void Scene_IC_Camp::update()
     updateCamera(dt);
     updateHUDData();
     updateAstronomySystem();
+    sf::Clock orbTimer;
     updateOrbShaderStorage();
+    m_orbUpdateMs = orbTimer.getElapsedTime().asMilliseconds();
     
     m_hud->update(m_game.window(), m_hudData);
     if (m_showGUI) {
@@ -280,7 +282,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(64000);
+    spawnDebugOrbs(256000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -378,6 +380,42 @@ void Scene_IC_Camp::cleanUpGraphicsResources()
 
 void Scene_IC_Camp::sRender() 
 {
+    // Initialize GPU queries once
+    if (!m_gpuQueriesInitialized)
+    {
+        for (int frame = 0; frame < 2; ++frame) {
+            glGenQueries(PASS_COUNT, m_gpuQueries[frame]);
+        }
+        m_gpuQueriesInitialized = true;
+    }
+
+    // 1. READ GPU RESULTS FROM PREVIOUS FRAME (Frame N - 1)
+    uint32_t readFrame  = 1 - m_queryFrameIdx;
+    uint32_t writeFrame = m_queryFrameIdx;
+
+    GLuint available = 0;
+    glGetQueryObjectuiv(m_gpuQueries[readFrame][PASS_TERRAIN], GL_QUERY_RESULT_AVAILABLE, &available);
+    if (available)
+    {
+        auto getGpuTimeMs = [&](RenderPass pass) -> float {
+            GLuint64 nanoseconds = 0;
+            glGetQueryObjectui64v(m_gpuQueries[readFrame][pass], GL_QUERY_RESULT, &nanoseconds);
+            return static_cast<float>(nanoseconds) / 1'000'000.0f;
+        };
+
+        m_profGpuTerrainMs          = getGpuTimeMs(PASS_TERRAIN);
+        m_profGpuOrbCreatureMs       = getGpuTimeMs(PASS_ORB_CREATURE);
+        m_profGpuShadowMs           = getGpuTimeMs(PASS_SHADOW);
+        m_profGpuSSAOMs             = getGpuTimeMs(PASS_SSAO);
+        m_profGpuSSAOBlurMs         = getGpuTimeMs(PASS_SSAO_BLUR);
+        m_profGpuSkyMs              = getGpuTimeMs(PASS_SKY);
+        m_profGpuDeferredLightingMs = getGpuTimeMs(PASS_DEFERRED_LIGHTING);
+        m_profGpuOceanMs            = getGpuTimeMs(PASS_OCEAN);
+        m_profGpuHUDMs              = getGpuTimeMs(PASS_HUD);
+    }
+
+    // 2. SETUP UNIFORM BUFFERS
+    sf::Clock passTimer;
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& camData = m_entityManager.getCamera(m_camera);
@@ -427,10 +465,10 @@ void Scene_IC_Camp::sRender()
 
     glBindBuffer(GL_UNIFORM_BUFFER, m_cameraUBO);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraBlock), &cb);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0); // safe unbind
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
     // ==========================================
-    // 3. EXECUTE YOUR RENDERING PASSES
+    // 3. EXECUTE & TIME RENDERING PASSES
     // ==========================================
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_gBufferFBO);
@@ -443,16 +481,55 @@ void Scene_IC_Camp::sRender()
     glDepthFunc(GL_LEQUAL);
     glDisable(GL_BLEND);
 
+    // --- Terrain ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_TERRAIN]);
+    passTimer.restart();
     runTerrainPass();
+    m_profTerrainMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- Orb Creature ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_ORB_CREATURE]);
+    passTimer.restart();
     renderOrbCreature();
+    m_profOrbCreatureMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- Shadow Pass ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SHADOW]);
+    passTimer.restart();
     runShadowPass();
+    m_profShadowMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- SSAO Pass ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SSAO]);
+    passTimer.restart();
     runSSAOPass();
+    m_profSSAOMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- SSAO Blur Pass ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SSAO_BLUR]);
+    passTimer.restart();
     runSSAOBlurPass();
+    m_profSSAOBlurMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- Sky Pass ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SKY]);
+    passTimer.restart();
     renderSky();
     window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
+    m_profSkyMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- Deferred Lighting Pass ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_DEFERRED_LIGHTING]);
+    passTimer.restart();
     if (m_debugShowSSAOBlur)
     {
         blitToScreen(m_ssaoPipeline.blurTex);
@@ -460,9 +537,26 @@ void Scene_IC_Camp::sRender()
     {
         deferredLighting();
     }
+    m_profDeferredLightingMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- Ocean Grid Pass ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_OCEAN]);
+    passTimer.restart();
     renderOceanGrid();
+    m_profOceanMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // --- HUD / UI Pass ---
+    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_HUD]);
+    passTimer.restart();
     window.resetGLStates();
     m_hud->render(window, false);
+    m_profHUDMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
+    glEndQuery(GL_TIME_ELAPSED);
+
+    // Swap query buffer for next frame
+    m_queryFrameIdx = readFrame;
 }
 
 // =========================================================================
@@ -471,43 +565,71 @@ void Scene_IC_Camp::sRender()
 
 void Scene_IC_Camp::sMovement(float dt)
 {
-    for (auto e : m_entityManager.getEntities())
+    sf::Clock movementTimer;
+
+    // 1. Process Player Input specifically (Single-threaded)
+    if (m_entityManager.hasTransform(m_player))
     {
-        if (!m_entityManager.hasTransform(e)) continue;
-        auto& t = m_entityManager.getTransform(e);
-
-        // 1. Player-specific input handling
-        if (m_entityManager.getTag(e) == "player")
-        {
-            handlePlayerMovement(e, dt);
-        }
-
-        // 2. Kinematic movement for entities without physics (orbs, etc.)
-        if (!m_entityManager.hasPhysics(e))
-        {
-            t.pos += t.velocity * dt;
-        }
-
-        // 3. Ground resolution + special cases
-        resolveEntityPosition(e, dt);
+        handlePlayerMovement(m_player, dt);
     }
 
-    // SoA-accelerated physics integration for entities with CPhysics
-    m_entityManager.forEachPhysics([this, dt](SoAEntityHandle e, CPhysics& p){
+    // 2. PARALLEL: Kinematic Orbs (Bulk processing)
+    // Pull the orb collection directly so we don't do string lookups in parallel
+    const auto& orbEntities = m_entityManager.getEntities("orb");
+    const int numOrbs = static_cast<int>(orbEntities.size());
+
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < numOrbs; ++i)
+    {
+        auto orb = orbEntities[i];
+        if (!m_entityManager.hasTransform(orb)) continue;
+
+        auto& t = m_entityManager.getTransform(orb);
+        
+        // Kinematic movement
+        t.pos += t.velocity * dt;
+
+        // Orb bobbing math
+        updateOrbBobbing(orb, dt);
+    }
+
+    // 3. PARALLEL: Physics Entities (SoA / CPhysics)
+    m_entityManager.forEachPhysics([this, dt](SoAEntityHandle e, CPhysics& p) {
         if (!m_entityManager.hasTransform(e)) return;
         auto& t = m_entityManager.getTransform(e);
 
-        // Gravity
         if (!p.onGround)
             t.velocity.y -= p.gravity * dt;
 
         t.pos += t.velocity * dt;
 
-        // Friction
         float friction = p.onGround ? p.groundFriction : p.airFriction;
         t.velocity.x *= std::max(0.0f, 1.0f - friction * dt);
         t.velocity.z *= std::max(0.0f, 1.0f - friction * dt);
+
+        float groundY = heightAt(t.pos.x, t.pos.z);
+        const float groundSkin = 0.1f;
+
+        if (t.pos.y < groundY)
+        {
+            t.pos.y = groundY;
+            if (t.velocity.y < 0.0f)
+            {
+                t.velocity.y = 0.0f;
+                p.onGround = true;
+            }
+        }
+        else if (t.pos.y <= groundY + groundSkin)
+        {
+            p.onGround = true;
+        }
+        else
+        {
+            p.onGround = false;
+        }
     });
+
+    m_profMovementMs = movementTimer.getElapsedTime().asMicroseconds() / 1000.0f;
 }
 
 void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
@@ -726,50 +848,6 @@ void Scene_IC_Camp::sGaitAndFootsteps(float dt)
             }
         }
     });
-}
-
-void Scene_IC_Camp::resolveEntityPosition(SoAEntityHandle e, float dt)
-{
-    if (!m_entityManager.hasTransform(e)) return;
-    auto& t = m_entityManager.getTransform(e);
-
-    if (m_entityManager.getTag(e) == "orb")
-    {
-        updateOrbBobbing(e, dt);
-        return;
-    }
-
-    // Player / other physics entities
-    float groundY = heightAt(t.pos.x, t.pos.z);
-
-    if (m_entityManager.hasPhysics(e))
-    {
-        auto& p = m_entityManager.getPhysics(e);
-
-        const float groundSkin = 0.1f;
-
-        if (t.pos.y < groundY)
-        {
-            t.pos.y = groundY;
-            if (t.velocity.y < 0.0f)
-            {
-                t.velocity.y = 0.0f;
-                p.onGround = true;
-            }
-        }
-        else if (t.pos.y <= groundY + groundSkin)
-        {
-            p.onGround = true;
-        }
-        else
-        {
-            p.onGround = false;
-        }
-    }
-    else
-    {
-        t.pos.y = groundY;
-    }
 }
 
 void Scene_IC_Camp::updateBob(SoAEntityHandle e, float dt, float horizSpeed=0.0f)
@@ -1507,12 +1585,28 @@ void Scene_IC_Camp::runShadowPass()
     computeCascadeSplits(camData.nearPlane, clampedFar);
 
     // 2. Setup Render State for Shadow Maps
+    glUseProgram(m_terrainShadowProgram);
     glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFBO);
     glViewport(0, 0, m_shadowMapSize, m_shadowMapSize);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
-    glDisable(GL_CULL_FACE); // Shared by both terrain and orbs here
+    glCullFace(GL_FRONT);
+
+    sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
+    glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin,
+                gridOrigin.x, gridOrigin.y);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
+    glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
+
+    constexpr float kTileWorldSize =
+        WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
+    glUniform1f(Uniforms::SharedTerrain::TerrainTileWorldSize, kTileWorldSize);
+
+    glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81,
+                m_terrainStreamer->getActiveSliceUniforms().data());
 
     float splitNear = camData.nearPlane;
 
@@ -1536,22 +1630,7 @@ void Scene_IC_Camp::runShadowPass()
 
         // --- 1. TERRAIN SHADOWS ---
         glUseProgram(m_terrainShadowProgram);
-        
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
-        glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
-
-        sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
-        glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin,
-                    gridOrigin.x, gridOrigin.y);
-
-        constexpr float kTileWorldSize =
-            WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
-        glUniform1f(Uniforms::SharedTerrain::TerrainTileWorldSize, kTileWorldSize);
-
-        glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81,
-                    m_terrainStreamer->getActiveSliceUniforms().data());
-        
+        glDisable(GL_CULL_FACE);
         glUniformMatrix4fv(Uniforms::ShadowPass::LightViewProj,
                            1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
         
@@ -1559,14 +1638,14 @@ void Scene_IC_Camp::runShadowPass()
         glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
 
-        // --- 2. ORB SHADOWS (Skip stable far bounds map layer if configured) ---
+        // --- 2. ORB SHADOWS ---
         if (cascade != NUM_CASCADES - 1)
         {
             glUseProgram(m_orbShadowProgram);
-            
+            glEnable(GL_CULL_FACE);
+
             glUniformMatrix4fv(Uniforms::ShadowPass::LightViewProj,
                             1, GL_FALSE, &m_lightViewProjCascades[cascade][0][0]);
-            
             m_orbSSBO.bind(0);
             glBindVertexArray(m_cubeVAO);
             glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, m_orbSSBO.count());
@@ -1576,6 +1655,7 @@ void Scene_IC_Camp::runShadowPass()
 
     // 3. Reset Global Pipeline State
     glUseProgram(0);
+    glDisable(GL_CULL_FACE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -1887,31 +1967,6 @@ void Scene_IC_Camp::destroyGBuffer()
     }
 }
 
-std::vector<OrbData> Scene_IC_Camp::buildOrbData() const
-{
-    std::vector<OrbData> orbData;
-    orbData.reserve(m_entityManager.getEntities("orb").size());
-
-    for (auto& orb : m_entityManager.getEntities("orb"))
-    {
-        auto& t    = m_entityManager.getTransform(orb);
-        auto& c    = m_entityManager.getOrb(orb);
-        auto& eyes = m_entityManager.getEyes(orb);
-        const auto& f = t.forward();
-        const auto& r = t.right();
-        const auto& u = t.up();
-
-        OrbData data;
-        data.centreAndSpeciesIdx                = { t.pos.x, t.pos.y, t.pos.z, static_cast<float>(c.speciesIdx) };
-        data.forwardAndRadius                   = { f.x, f.y, f.z, c.radius };
-        data.rightPadded                        = { r.x, r.y, r.z, 0.0f };
-        data.upPadded                           = { u.x, u.y, u.z, 0.0f };
-        data.gazeDirDilationAndEyelidClosure    = { eyes.gazeDirection.x, eyes.gazeDirection.y, eyes.pupilDilation, eyes.eyelidClosure };
-        orbData.push_back(data);
-    }
-    return orbData;
-}
-
 void Scene_IC_Camp::initializeOrbShaderStorage()
 {
     m_orbStagingBuffer.reserve(MAX_ORB_CAPACITY);
@@ -1920,6 +1975,18 @@ void Scene_IC_Camp::initializeOrbShaderStorage()
 
 void Scene_IC_Camp::updateOrbShaderStorage()
 {
+    static constexpr float  RADIUS           = 2560.0f; // 2.5 KiM radius
+    static constexpr float  OFFSET_DIST      = 1536.0f; // 1.5 KiM forward offset
+    static constexpr float  MAX_DIST_SQUARED = RADIUS * RADIUS;
+
+    const auto& playerTransform = m_entityManager.getTransform(m_player);
+    const sf::Vector3f playerPos = playerTransform.pos;
+    const sf::Vector3f playerFwd = playerTransform.forward();
+
+    // Offset sphere center 1.5 km forward along camera view vector
+    const sf::Vector3f sphereCenter = playerPos + (playerFwd * OFFSET_DIST);
+
+    sf::Clock gatherTimer;
     m_orbStagingBuffer.clear();
 
     const auto& orbEntities = m_entityManager.getEntities("orb");
@@ -1928,7 +1995,12 @@ void Scene_IC_Camp::updateOrbShaderStorage()
     {
         if (m_orbStagingBuffer.size() >= MAX_ORB_CAPACITY) break;
 
-        const auto& t    = m_entityManager.getTransform(orb);
+        const auto& t = m_entityManager.getTransform(orb);
+
+        // Distance check relative to the forward-offset center
+        const float distSquared = (t.pos - sphereCenter).lengthSquared();
+        if (distSquared > MAX_DIST_SQUARED) continue;
+
         const auto& c    = m_entityManager.getOrb(orb);
         const auto& eyes = m_entityManager.getEyes(orb);
         
@@ -1945,7 +2017,10 @@ void Scene_IC_Camp::updateOrbShaderStorage()
         });
     }
 
+    m_orbGatherMS = gatherTimer.getElapsedTime().asMicroseconds();
+    sf::Clock uploadTimer;
     m_orbSSBO.update(m_orbStagingBuffer.data(), m_orbStagingBuffer.size());
+    m_orbUploadMS = uploadTimer.getElapsedTime().asMicroseconds();
 }
 
 void Scene_IC_Camp::runTerrainPass() 
@@ -2192,13 +2267,14 @@ void Scene_IC_Camp::deferredLighting()
     glUniform1i(Uniforms::Lighting::SSAOTex, 6);
 
     // =========================================================================
-    // Forward Light Projection & Cascade Specifics (Still Loose Uniforms)
+    // Forward Light Projection & Cascade Specifics
     // =========================================================================
     glUniformMatrix4fv(Uniforms::Shadows::LightViewProj, NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
     glUniform1fv(Uniforms::Shadows::TexelWorldSize, NUM_CASCADES, m_texelWorldSize);
     glUniform1fv(Uniforms::Shadows::CascadeSplitDepths, NUM_CASCADES, m_cascadeSplits);
+
     // =========================================================================
-    // Bind SSBOs (Safely living up on non-conflicting slots 5 & 6)
+    // Bind SSBOs
     // =========================================================================
     Assets::Instance().getSpeciesSSBO().bind(5);
     Assets::Instance().getMaterialSSBO().bind(6);
@@ -2312,31 +2388,24 @@ void Scene_IC_Camp::renderSky()
 
 void Scene_IC_Camp::renderOceanGrid()
 {
-    // Save previous polygon mode state just to be completely safe
     GLint previousPolygonMode[2];
     glGetIntegerv(GL_POLYGON_MODE, previousPolygonMode);
 
-    // 1. Setup specific forward-rendering conditions
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     
-    // Switch to manual G-Buffer depth sampling: disable hardware depth discard
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE); 
 
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-    // 2. Safely activate program
     glUseProgram(m_oceanProgram);
     
-    // Calculate the exact world space distance between any two vertices
     float vertexSpacing = m_oceanSize / static_cast<float>(m_oceanResolution);
 
-    // Pull your camera's position out of its transform component
     auto& cameraTransform = m_entityManager.getTransform(m_camera);
     glm::vec3 camPos = toGLMVec3(cameraTransform.pos);
 
-    // Snap the mesh's world translation to perfectly line up with your vertex intervals
     float snappedX = std::floor(camPos.x / vertexSpacing) * vertexSpacing;
     float snappedZ = std::floor(camPos.z / vertexSpacing) * vertexSpacing;
 
@@ -2350,6 +2419,7 @@ void Scene_IC_Camp::renderOceanGrid()
     // =========================================================================
     // Bind Textures for Ocean Pass
     // =========================================================================
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_gDepthTex);
     glUniform1i(Uniforms::GBuffer::GDepthTex, 0);
@@ -2369,10 +2439,10 @@ void Scene_IC_Camp::renderOceanGrid()
     sf::Texture::bind(&m_moonTexture);
     glUniform1i(Uniforms::SkyShared::MoonTexture, 3);
 
-
     // =========================================================================
     // Feed Cascade Uniform Matrices and Configurations
     // =========================================================================
+
     glUniformMatrix4fv(Uniforms::Shadows::LightViewProj,
                         NUM_CASCADES, GL_FALSE, &m_lightViewProjCascades[0][0][0]);
     glUniform1fv(Uniforms::Shadows::TexelWorldSize, NUM_CASCADES, m_texelWorldSize);
@@ -2383,7 +2453,6 @@ void Scene_IC_Camp::renderOceanGrid()
     GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
     glDisable(GL_CULL_FACE);
 
-    // 3. Draw Mesh
     glBindVertexArray(m_oceanVAO);
     glDrawElements(GL_TRIANGLES, m_oceanIndexCount, GL_UNSIGNED_INT, 0);
     
@@ -2536,6 +2605,10 @@ void Scene_IC_Camp::sGUI()
     ImGui::Begin("Scene Properties##IC_Camp");
 
     ImGui::Text("FPS: %.1f", m_fps);
+    ImGui::Text("Orb Update: %.1f ms", m_orbUpdateMs);
+    ImGui::Text("Orb Gather: %.1f micro seconds", m_orbGatherMS);
+    ImGui::Text("Orb Upload: %.1f micro seconds", m_orbUploadMS);
+    ImGui::Text("Movement Update: %.1f ms", m_profMovementMs);
 
     if (ImGui::BeginTabBar("MyTabBar"))
     {
@@ -2690,6 +2763,35 @@ void Scene_IC_Camp::sGUI()
             if (changed) {
                 updateAstronomySystem();
             }
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Render Profiler"))
+        {
+            float totalCpuMs = m_profTerrainMs + m_profOrbCreatureMs + m_profShadowMs + 
+                               m_profSSAOMs + m_profSSAOBlurMs + m_profSkyMs + 
+                               m_profDeferredLightingMs + m_profOceanMs + m_profHUDMs;
+
+            float totalGpuMs = m_profGpuTerrainMs + m_profGpuOrbCreatureMs + m_profGpuShadowMs + 
+                               m_profGpuSSAOMs + m_profGpuSSAOBlurMs + m_profGpuSkyMs + 
+                               m_profGpuDeferredLightingMs + m_profGpuOceanMs + m_profGpuHUDMs;
+
+            ImGui::Text("Pass Name                CPU Dispatch      GPU Exec");
+            ImGui::Separator();
+
+            ImGui::Text("Terrain Pass:         %8.2f ms    %8.2f ms", m_profTerrainMs,          m_profGpuTerrainMs);
+            ImGui::Text("Orb Creature Pass:    %8.2f ms    %8.2f ms", m_profOrbCreatureMs,       m_profGpuOrbCreatureMs);
+            ImGui::Text("Shadow Pass:          %8.2f ms    %8.2f ms", m_profShadowMs,           m_profGpuShadowMs);
+            ImGui::Text("SSAO Pass:            %8.2f ms    %8.2f ms", m_profSSAOMs,             m_profGpuSSAOMs);
+            ImGui::Text("SSAO Blur Pass:       %8.2f ms    %8.2f ms", m_profSSAOBlurMs,         m_profGpuSSAOBlurMs);
+            ImGui::Text("Sky Pass:             %8.2f ms    %8.2f ms", m_profSkyMs,              m_profGpuSkyMs);
+            ImGui::Text("Deferred Lighting:    %8.2f ms    %8.2f ms", m_profDeferredLightingMs, m_profGpuDeferredLightingMs);
+            ImGui::Text("Ocean Grid Pass:      %8.2f ms    %8.2f ms", m_profOceanMs,            m_profGpuOceanMs);
+            ImGui::Text("HUD / UI Pass:        %8.2f ms    %8.2f ms", m_profHUDMs,              m_profGpuHUDMs);
+
+            ImGui::Separator();
+            ImGui::Text("Total Measured:       %8.2f ms    %8.2f ms", totalCpuMs, totalGpuMs);
+            ImGui::Text("Target Frame Time:    %8.2f ms (%.1f FPS)", 1000.0f / m_fps, m_fps);
+
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
