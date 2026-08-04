@@ -21,6 +21,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <omp.h>
 
 // =========================================================================
 // File-Local Static Helper Utilities
@@ -282,7 +283,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(256000);
+    spawnDebugOrbs(1024000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -1044,7 +1045,7 @@ void Scene_IC_Camp::spawnDebugOrbs(int count)
     };
 
     // Original distributions
-    std::uniform_int_distribution<int> hexDist(-4500, 4500);
+    std::uniform_int_distribution<int> hexDist(-7500, 7500);
     std::uniform_real_distribution<float> radiusDist(0.2f, 1.5f);
     std::uniform_real_distribution<float> bobRateDist(0.2f, 1.0f);
     std::uniform_real_distribution<float> bobMagDist(0.05f, 0.5f);
@@ -1975,49 +1976,72 @@ void Scene_IC_Camp::initializeOrbShaderStorage()
 
 void Scene_IC_Camp::updateOrbShaderStorage()
 {
-    static constexpr float  RADIUS           = 2560.0f; // 2.5 KiM radius
-    static constexpr float  OFFSET_DIST      = 1536.0f; // 1.5 KiM forward offset
+    static constexpr float  RADIUS           = 3072.0f;
+    static constexpr float  OFFSET_DIST      = 2048.0f;
     static constexpr float  MAX_DIST_SQUARED = RADIUS * RADIUS;
 
     const auto& playerTransform = m_entityManager.getTransform(m_player);
     const sf::Vector3f playerPos = playerTransform.pos;
     const sf::Vector3f playerFwd = playerTransform.forward();
-
-    // Offset sphere center 1.5 km forward along camera view vector
     const sf::Vector3f sphereCenter = playerPos + (playerFwd * OFFSET_DIST);
 
     sf::Clock gatherTimer;
     m_orbStagingBuffer.clear();
 
     const auto& orbEntities = m_entityManager.getEntities("orb");
+    const int numOrbs = static_cast<int>(orbEntities.size());
 
-    for (const auto& orb : orbEntities)
+    // Per-thread local buffers to avoid contention on the shared vector
+    std::vector<std::vector<OrbData>> threadLocalBuffers;
+
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            threadLocalBuffers.resize(omp_get_num_threads());
+        }
+
+        auto& localBuf = threadLocalBuffers[omp_get_thread_num()];
+        localBuf.reserve(numOrbs / omp_get_num_threads() / 4); // rough guess, avoids repeated reallocation
+
+        #pragma omp for schedule(static)
+        for (int i = 0; i < numOrbs; ++i)
+        {
+            const auto& orb = orbEntities[i];
+            const auto& t = m_entityManager.getTransform(orb);
+
+            const float distSquared = (t.pos - sphereCenter).lengthSquared();
+            if (distSquared > MAX_DIST_SQUARED) continue;
+
+            const auto& c    = m_entityManager.getOrb(orb);
+            const auto& eyes = m_entityManager.getEyes(orb);
+            const auto& f = t.forward();
+            const auto& r = t.right();
+            const auto& u = t.up();
+
+            localBuf.push_back(OrbData{
+                .centreAndSpeciesIdx = { t.pos.x, t.pos.y, t.pos.z, static_cast<float>(c.speciesIdx) },
+                .forwardAndRadius    = { f.x, f.y, f.z, c.radius },
+                .rightPadded         = { r.x, r.y, r.z, 0.0f },
+                .upPadded            = { u.x, u.y, u.z, 0.0f },
+                .gazeDirDilationAndEyelidClosure = { eyes.gazeDirection.x, eyes.gazeDirection.y, eyes.pupilDilation, eyes.eyelidClosure }
+            });
+        }
+    }
+
+    // Merge thread-local results into the shared staging buffer, respecting the cap
+    for (auto& buf : threadLocalBuffers)
     {
         if (m_orbStagingBuffer.size() >= MAX_ORB_CAPACITY) break;
 
-        const auto& t = m_entityManager.getTransform(orb);
+        size_t room = MAX_ORB_CAPACITY - m_orbStagingBuffer.size();
+        size_t toCopy = std::min(room, buf.size());
 
-        // Distance check relative to the forward-offset center
-        const float distSquared = (t.pos - sphereCenter).lengthSquared();
-        if (distSquared > MAX_DIST_SQUARED) continue;
-
-        const auto& c    = m_entityManager.getOrb(orb);
-        const auto& eyes = m_entityManager.getEyes(orb);
-        
-        const auto& f = t.forward();
-        const auto& r = t.right();
-        const auto& u = t.up();
-
-        m_orbStagingBuffer.push_back(OrbData{
-            .centreAndSpeciesIdx = { t.pos.x, t.pos.y, t.pos.z, static_cast<float>(c.speciesIdx) },
-            .forwardAndRadius    = { f.x, f.y, f.z, c.radius },
-            .rightPadded         = { r.x, r.y, r.z, 0.0f },
-            .upPadded            = { u.x, u.y, u.z, 0.0f },
-            .gazeDirDilationAndEyelidClosure = { eyes.gazeDirection.x, eyes.gazeDirection.y, eyes.pupilDilation, eyes.eyelidClosure }
-        });
+        m_orbStagingBuffer.insert(m_orbStagingBuffer.end(), buf.begin(), buf.begin() + toCopy);
     }
 
     m_orbGatherMS = gatherTimer.getElapsedTime().asMicroseconds();
+
     sf::Clock uploadTimer;
     m_orbSSBO.update(m_orbStagingBuffer.data(), m_orbStagingBuffer.size());
     m_orbUploadMS = uploadTimer.getElapsedTime().asMicroseconds();

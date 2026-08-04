@@ -302,7 +302,7 @@ protected:
      * @brief Builds contiguous array of `OrbData` structures from ECS entity components.
      * @return Vector of formatted `OrbData` structs ready for GPU streaming.
      */
-    static constexpr std::size_t    MAX_ORB_CAPACITY = 256000;          ///< Maximum GPU capacity for orb creature instance buffer.
+    static constexpr std::size_t    MAX_ORB_CAPACITY = 1024000;          ///< Maximum GPU capacity for orb creature instance buffer.
     OrbSSBO                         m_orbSSBO{MAX_ORB_CAPACITY};       ///< SSBO manager for orb instances.
     std::vector<OrbData>            m_orbStagingBuffer;                 ///< CPU staging vector for packing active orb instances.
 
