@@ -2002,7 +2002,7 @@ void Scene_IC_Camp::updateOrbShaderStorage()
         }
 
         auto& localBuf = threadLocalBuffers[omp_get_thread_num()];
-        localBuf.reserve(numOrbs / omp_get_num_threads() / 4); // rough guess, avoids repeated reallocation
+        localBuf.reserve(numOrbs / omp_get_num_threads() / 4);
 
         #pragma omp for schedule(static)
         for (int i = 0; i < numOrbs; ++i)

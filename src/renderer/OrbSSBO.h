@@ -84,18 +84,17 @@ public:
         m_activeCount = std::min(count, m_capacity);
 
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_ssbo);
-        
-        // Orphan existing GPU buffer memory block
-        glBufferData(GL_SHADER_STORAGE_BUFFER, 
-                    m_capacity * sizeof(OrbData), 
-                    nullptr, 
+
+        // Orphan only what we're about to write, not the full reserved capacity.
+        glBufferData(GL_SHADER_STORAGE_BUFFER,
+                    m_activeCount * sizeof(OrbData),
+                    nullptr,
                     GL_STREAM_DRAW);
 
-        // Write the active slice into the newly orphaned buffer
-        glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 
-                        m_activeCount * sizeof(OrbData), 
+        glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0,
+                        m_activeCount * sizeof(OrbData),
                         data);
-                        
+
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     }
 

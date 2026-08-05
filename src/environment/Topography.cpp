@@ -51,7 +51,6 @@ namespace Topography {
         size_t idx01 = idx00 + kStride;
         size_t idx11 = idx01 + 1;
 
-        // Once tileBuffer pointer is obtained, math evaluation is pure read-only and thread-safe
         float h00 = tileBuffer[idx00];
         float h10 = tileBuffer[idx10];
         float h01 = tileBuffer[idx01];
