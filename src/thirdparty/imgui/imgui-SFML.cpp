@@ -572,11 +572,8 @@ void Render(sf::RenderWindow& window)
            
 void Render(sf::RenderTarget& target)
 {
-    target.resetGLStates();
-    target.pushGLStates();
     ImGui::Render();
     RenderDrawLists(ImGui::GetDrawData());
-    target.popGLStates();
 }
            
 void Render()

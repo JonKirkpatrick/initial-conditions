@@ -3,9 +3,15 @@
 #include "core/Assets.h"
 #include "scenes/Scene_Menu.h"
 #include "core/InputBindings.h"
+#include <iostream>
 
 #include "thirdparty/imgui/imgui.h"
 #include "thirdparty/imgui/imgui-SFML.h"
+
+namespace
+{
+constexpr bool enableImGui = false;
+}
 
 GameEngine::GameEngine(const std::string & path)
 {
@@ -18,6 +24,10 @@ void GameEngine::init(const std::string & path)
     settings.antiAliasingLevel = 8;
     settings.depthBits = 24;
     settings.stencilBits = 8;
+    // The ImGui-SFML backend uses compatibility-profile matrix/client-state
+    // calls, while the engine's shaders require OpenGL 4.3.
+    settings.majorVersion = 4;
+    settings.minorVersion = 3;
 
     loadDefaultBindings();
     std::cout << "Loading sprite sheets..." << std::endl;
@@ -27,11 +37,20 @@ void GameEngine::init(const std::string & path)
         std::cerr << "No video modes available!" << std::endl;
         std::exit(1);
     }
-    m_window.create(modes[1], "Initial Conditions", sf::Style::None, sf::State::Fullscreen, settings);
+    auto desktop = sf::VideoMode::getDesktopMode();
+    std::cout << "desktop: " << desktop.size.x << "x" << desktop.size.y << "\n";
+
+    // SFML's graphics module (including ImGui-SFML) uses compatibility-profile
+    // OpenGL calls such as the matrix stack and client-state API. Requesting a
+    // debug context here can select a core profile on some drivers, causing
+    // those calls to generate GL_INVALID_OPERATION (1282) every frame.
+    settings.attributeFlags = sf::ContextSettings::Attribute::Default;
+
+    m_window.create(desktop, "Initial Conditions", sf::Style::None, sf::State::Fullscreen, settings);
     m_window.setVerticalSyncEnabled(false);
     m_window.setKeyRepeatEnabled(false);
     m_window.setPosition(sf::Vector2i(0, 0));
-    m_window.setSize(sf::Vector2u(modes[1].size.x, modes[1].size.y));
+    m_window.setSize(desktop.size);
     m_window.setView(sf::View(sf::FloatRect(
         {0.f, 0.f},
         {float(m_window.getSize().x), float(m_window.getSize().y)}
@@ -41,14 +60,27 @@ void GameEngine::init(const std::string & path)
     if (err != GLEW_OK) {
         std::cerr << "GLEW init failed: " << glewGetErrorString(err) << std::endl;
     }
+    // GLEW may probe unsupported entry points while initializing and leave a
+    // benign GL_INVALID_ENUM in the error queue. Clear that probe error before
+    // SFML starts checking subsequent OpenGL calls.
+    while (glGetError() != GL_NO_ERROR) {}
     std::cout << glGetString(GL_VERSION) << std::endl;
+
+    std::cout << "window: " << m_window.getSize().x << "x" << m_window.getSize().y << "\n";
+    GLint vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
+    std::cout << "viewport: " << vp[2] << "x" << vp[3] << "\n";
 
     Assets::Instance().loadFromFile(path);
     Assets::Instance().loadFromMaterialJSON("materials.json");
     Assets::Instance().loadFromSpeciesJSON("species.json");
     Assets::Instance().finalizeSpeciesBuffer();
 
-    if (!ImGui::SFML::Init(m_window)) {}
+    if constexpr (enableImGui)
+    {
+        if (!ImGui::SFML::Init(m_window))
+            std::cerr << "Failed to initialize ImGui-SFML" << std::endl;
+    }
 
     changeScene("MENU", std::make_shared<Scene_Menu>(*this));
 }
@@ -143,8 +175,8 @@ void GameEngine::sUserInput()
 {
     while (auto event = m_window.pollEvent())
     {
-        // pass the event to imgui to be parsed
-        ImGui::SFML::ProcessEvent(m_window, *event);
+        if constexpr (enableImGui)
+            ImGui::SFML::ProcessEvent(m_window, *event);
            
         // this event triggers when the window is closed
         if (event->is<sf::Event::Closed>())
@@ -176,8 +208,12 @@ void GameEngine::sUserInput()
             }
         }
 
-        // if the mouse is over an ImGui window, don't process this mouse event
-        if (ImGui::GetIO().WantCaptureMouse) { continue; }
+        // If the mouse is over an ImGui window, don't process this mouse event.
+        if constexpr (enableImGui)
+        {
+            if (ImGui::GetIO().WantCaptureMouse)
+                continue;
+        }
 
         // process mouse events
         if (const auto* mb = event->getIf<sf::Event::MouseButtonPressed>())
@@ -297,7 +333,8 @@ void GameEngine::changeScene(const std::string& sceneName,
 
 void GameEngine::update()
 {
-    ImGui::SFML::Update(m_window, m_deltaClock.restart());
+    if constexpr (enableImGui)
+        ImGui::SFML::Update(m_window, m_deltaClock.restart());
 
     if (!isRunning()) { return; }
     
@@ -306,7 +343,8 @@ void GameEngine::update()
     sUserInput();
     currentScene()->simulate(m_simulationSpeed);
     currentScene()->sRender();
-    ImGui::SFML::Render(m_window);
+    if constexpr (enableImGui)
+        ImGui::SFML::Render(m_window);
     m_window.display();
 }
 

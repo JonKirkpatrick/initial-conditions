@@ -29,12 +29,10 @@ void main() {
     float h = decodeHeightVertex(a_uv);
     v_worldY = h;
 
-    vec2 gridTexelSize = 1.0 / vec2(float(kVisibleGridDim * kTileResolution));
-
-    float hL = decodeHeightVertex(a_uv + vec2(-gridTexelSize.x, 0.0));
-    float hR = decodeHeightVertex(a_uv + vec2( gridTexelSize.x, 0.0));
-    float hD = decodeHeightVertex(a_uv + vec2(0.0, -gridTexelSize.y));
-    float hU = decodeHeightVertex(a_uv + vec2(0.0,  gridTexelSize.y));
+    float hL = decodeHeightVertex(a_uv + vec2(-kGridTexelSize.x, 0.0));
+    float hR = decodeHeightVertex(a_uv + vec2( kGridTexelSize.x, 0.0));
+    float hD = decodeHeightVertex(a_uv + vec2(0.0, -kGridTexelSize.y));
+    float hU = decodeHeightVertex(a_uv + vec2(0.0,  kGridTexelSize.y));
 
     vec2 worldTexelSize = vec2(u_terrainTileWorldSize / float(kTileResolution));
     vec3 n = normalize(vec3(hL - hR, 2.0 * worldTexelSize.x, hD - hU));

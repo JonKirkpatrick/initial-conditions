@@ -23,6 +23,11 @@
 #include <fstream>
 #include <omp.h>
 
+namespace
+{
+constexpr bool enableImGui = false;
+}
+
 // =========================================================================
 // File-Local Static Helper Utilities
 // =========================================================================
@@ -117,12 +122,10 @@ void Scene_IC_Camp::update()
     updateCamera(dt);
     updateHUDData();
     updateAstronomySystem();
-    sf::Clock orbTimer;
     updateOrbShaderStorage();
-    m_orbUpdateMs = orbTimer.getElapsedTime().asMilliseconds();
     
     m_hud->update(m_game.window(), m_hudData);
-    if (m_showGUI) {
+    if (m_showGUI && enableImGui) {
         sGUI();
     }
 
@@ -283,7 +286,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(1024000);
+    spawnDebugOrbs(256);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -381,42 +384,7 @@ void Scene_IC_Camp::cleanUpGraphicsResources()
 
 void Scene_IC_Camp::sRender() 
 {
-    // Initialize GPU queries once
-    if (!m_gpuQueriesInitialized)
-    {
-        for (int frame = 0; frame < 2; ++frame) {
-            glGenQueries(PASS_COUNT, m_gpuQueries[frame]);
-        }
-        m_gpuQueriesInitialized = true;
-    }
-
-    // 1. READ GPU RESULTS FROM PREVIOUS FRAME (Frame N - 1)
-    uint32_t readFrame  = 1 - m_queryFrameIdx;
-    uint32_t writeFrame = m_queryFrameIdx;
-
-    GLuint available = 0;
-    glGetQueryObjectuiv(m_gpuQueries[readFrame][PASS_TERRAIN], GL_QUERY_RESULT_AVAILABLE, &available);
-    if (available)
-    {
-        auto getGpuTimeMs = [&](RenderPass pass) -> float {
-            GLuint64 nanoseconds = 0;
-            glGetQueryObjectui64v(m_gpuQueries[readFrame][pass], GL_QUERY_RESULT, &nanoseconds);
-            return static_cast<float>(nanoseconds) / 1'000'000.0f;
-        };
-
-        m_profGpuTerrainMs          = getGpuTimeMs(PASS_TERRAIN);
-        m_profGpuOrbCreatureMs       = getGpuTimeMs(PASS_ORB_CREATURE);
-        m_profGpuShadowMs           = getGpuTimeMs(PASS_SHADOW);
-        m_profGpuSSAOMs             = getGpuTimeMs(PASS_SSAO);
-        m_profGpuSSAOBlurMs         = getGpuTimeMs(PASS_SSAO_BLUR);
-        m_profGpuSkyMs              = getGpuTimeMs(PASS_SKY);
-        m_profGpuDeferredLightingMs = getGpuTimeMs(PASS_DEFERRED_LIGHTING);
-        m_profGpuOceanMs            = getGpuTimeMs(PASS_OCEAN);
-        m_profGpuHUDMs              = getGpuTimeMs(PASS_HUD);
-    }
-
     // 2. SETUP UNIFORM BUFFERS
-    sf::Clock passTimer;
     auto& window = m_game.window();
     auto& transform = m_entityManager.getTransform(m_camera);
     auto& camData = m_entityManager.getCamera(m_camera);
@@ -483,54 +451,28 @@ void Scene_IC_Camp::sRender()
     glDisable(GL_BLEND);
 
     // --- Terrain ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_TERRAIN]);
-    passTimer.restart();
     runTerrainPass();
-    m_profTerrainMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- Orb Creature ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_ORB_CREATURE]);
-    passTimer.restart();
     renderOrbCreature();
-    m_profOrbCreatureMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- Shadow Pass ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SHADOW]);
-    passTimer.restart();
     runShadowPass();
-    m_profShadowMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- SSAO Pass ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SSAO]);
-    passTimer.restart();
     runSSAOPass();
-    m_profSSAOMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- SSAO Blur Pass ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SSAO_BLUR]);
-    passTimer.restart();
     runSSAOBlurPass();
-    m_profSSAOBlurMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- Sky Pass ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_SKY]);
-    passTimer.restart();
     renderSky();
     window.clear(sf::Color::Transparent);
     sf::Sprite backgroundSprite(m_skyTexture.getTexture());
     window.draw(backgroundSprite);
     window.setActive(true);
-    m_profSkyMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- Deferred Lighting Pass ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_DEFERRED_LIGHTING]);
-    passTimer.restart();
     if (m_debugShowSSAOBlur)
     {
         blitToScreen(m_ssaoPipeline.blurTex);
@@ -538,26 +480,13 @@ void Scene_IC_Camp::sRender()
     {
         deferredLighting();
     }
-    m_profDeferredLightingMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- Ocean Grid Pass ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_OCEAN]);
-    passTimer.restart();
     renderOceanGrid();
-    m_profOceanMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
 
     // --- HUD / UI Pass ---
-    glBeginQuery(GL_TIME_ELAPSED, m_gpuQueries[writeFrame][PASS_HUD]);
-    passTimer.restart();
     window.resetGLStates();
     m_hud->render(window, false);
-    m_profHUDMs = passTimer.getElapsedTime().asMicroseconds() / 1000.0f;
-    glEndQuery(GL_TIME_ELAPSED);
-
-    // Swap query buffer for next frame
-    m_queryFrameIdx = readFrame;
 }
 
 // =========================================================================
@@ -566,8 +495,6 @@ void Scene_IC_Camp::sRender()
 
 void Scene_IC_Camp::sMovement(float dt)
 {
-    sf::Clock movementTimer;
-
     // 1. Process Player Input specifically (Single-threaded)
     if (m_entityManager.hasTransform(m_player))
     {
@@ -629,8 +556,6 @@ void Scene_IC_Camp::sMovement(float dt)
             p.onGround = false;
         }
     });
-
-    m_profMovementMs = movementTimer.getElapsedTime().asMicroseconds() / 1000.0f;
 }
 
 void Scene_IC_Camp::handlePlayerMovement(SoAEntityHandle e, float dt)
@@ -1985,7 +1910,6 @@ void Scene_IC_Camp::updateOrbShaderStorage()
     const sf::Vector3f playerFwd = playerTransform.forward();
     const sf::Vector3f sphereCenter = playerPos + (playerFwd * OFFSET_DIST);
 
-    sf::Clock gatherTimer;
     m_orbStagingBuffer.clear();
 
     const auto& orbEntities = m_entityManager.getEntities("orb");
@@ -2040,11 +1964,7 @@ void Scene_IC_Camp::updateOrbShaderStorage()
         m_orbStagingBuffer.insert(m_orbStagingBuffer.end(), buf.begin(), buf.begin() + toCopy);
     }
 
-    m_orbGatherMS = gatherTimer.getElapsedTime().asMicroseconds();
-
-    sf::Clock uploadTimer;
     m_orbSSBO.update(m_orbStagingBuffer.data(), m_orbStagingBuffer.size());
-    m_orbUploadMS = uploadTimer.getElapsedTime().asMicroseconds();
 }
 
 void Scene_IC_Camp::runTerrainPass() 
@@ -2055,6 +1975,38 @@ void Scene_IC_Camp::runTerrainPass()
         hex = WCH::worldToHex(worldPos.x, worldPos.z);
     }
 
+    sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
+    constexpr float kTileWorldSize =
+        WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
+
+    glBindVertexArray(m_gridVAO);
+
+    // =========================================================================
+    // PASS 1: LIGHTWEIGHT DEPTH PRE-PASS
+    // =========================================================================
+    glUseProgram(m_terrainDepthProgram);
+
+    // Height Map Array required for vertex displacement
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadArrayTexture());
+    glUniform1i(Uniforms::SharedTerrain::TerrainHeightArray, 0);
+
+    // Terrain Streaming Uniforms
+    glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin, gridOrigin.x, gridOrigin.y);
+    glUniform1f(Uniforms::SharedTerrain::TerrainTileWorldSize, kTileWorldSize);
+    glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81,
+                m_terrainStreamer->getActiveSliceUniforms().data());
+
+    // Disable G-Buffer color writes, enable depth write
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LEQUAL);
+
+    glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
+
+    // =========================================================================
+    // PASS 2: FULL SHADING / G-BUFFER FILL
+    // =========================================================================
     glUseProgram(m_terrainProgram);
 
     // 1. Bind Material SSBO & Texture Arrays
@@ -2076,18 +2028,15 @@ void Scene_IC_Camp::runTerrainPass()
     glUniform1i(Uniforms::Terrain::TerrainNormalArray, 2);
 
     // Unit 3: Road SDF Distance Field Array (ADDED)
+    /*
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_terrainStreamer->getOrUploadRoadArrayTexture());
     glUniform1i(Uniforms::SharedTerrain::TerrainRoadArray, 3);
+    */
 
     // 2. Terrain Streaming Uniforms
-    sf::Vector2f gridOrigin = m_terrainStreamer->getVisibleGridWorldOrigin();
     glUniform2f(Uniforms::SharedTerrain::TerrainGridWorldOrigin, gridOrigin.x, gridOrigin.y);
-
-    constexpr float kTileWorldSize =
-        WorldCoordinates::Square::kTexelSizeM * WorldCoordinates::Square::kTileResolution;
     glUniform1f(Uniforms::SharedTerrain::TerrainTileWorldSize, kTileWorldSize);
-
     glUniform1iv(Uniforms::SharedTerrain::TerrainSliceValid, 81,
                 m_terrainStreamer->getActiveSliceUniforms().data());
 
@@ -2100,14 +2049,22 @@ void Scene_IC_Camp::runTerrainPass()
     glUniform2f(Uniforms::Terrain::HoveredHex, static_cast<float>(hex.x), static_cast<float>(hex.y));
     glUniform3f(Uniforms::Terrain::GridColour, m_gridColour.r / 255.f, m_gridColour.g / 255.f, m_gridColour.b / 255.f);
     glUniform1i(Uniforms::Terrain::DrawHexGrid, static_cast<int>(m_drawHexGrid));
-    
-    // 5. Render
-    glBindVertexArray(m_gridVAO);
+
+    // Enable G-Buffer writes, freeze depth buffer, test EQUAL to skip overdraw
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_FALSE);
+    glDepthFunc(GL_LEQUAL);
+
     glDrawElements(GL_TRIANGLES, m_gridIndexCount, GL_UNSIGNED_INT, 0);
 
-    // 6. Cleanup
+    // =========================================================================
+    // Cleanup / Restore Render State
+    // =========================================================================
+    glDepthMask(GL_TRUE);      // Restore default depth writing state
+    glDepthFunc(GL_LEQUAL);    // Restore default depth test function
+
     glBindVertexArray(0);
-    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D_ARRAY, 0); // Cleanup Unit 3
+    // glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D_ARRAY, 0); // Cleanup Unit 3
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
@@ -2166,7 +2123,6 @@ void Scene_IC_Camp::updateMinimapTexture()
     // Unbind shader and texture to clean up raw GL states
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     glUseProgram(0);
-
     // --- 2. RESTORE SFML STATES ---
     m_minimapTexture.popGLStates();
 
@@ -2629,10 +2585,6 @@ void Scene_IC_Camp::sGUI()
     ImGui::Begin("Scene Properties##IC_Camp");
 
     ImGui::Text("FPS: %.1f", m_fps);
-    ImGui::Text("Orb Update: %.1f ms", m_orbUpdateMs);
-    ImGui::Text("Orb Gather: %.1f micro seconds", m_orbGatherMS);
-    ImGui::Text("Orb Upload: %.1f micro seconds", m_orbUploadMS);
-    ImGui::Text("Movement Update: %.1f ms", m_profMovementMs);
 
     if (ImGui::BeginTabBar("MyTabBar"))
     {
@@ -2787,35 +2739,6 @@ void Scene_IC_Camp::sGUI()
             if (changed) {
                 updateAstronomySystem();
             }
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Render Profiler"))
-        {
-            float totalCpuMs = m_profTerrainMs + m_profOrbCreatureMs + m_profShadowMs + 
-                               m_profSSAOMs + m_profSSAOBlurMs + m_profSkyMs + 
-                               m_profDeferredLightingMs + m_profOceanMs + m_profHUDMs;
-
-            float totalGpuMs = m_profGpuTerrainMs + m_profGpuOrbCreatureMs + m_profGpuShadowMs + 
-                               m_profGpuSSAOMs + m_profGpuSSAOBlurMs + m_profGpuSkyMs + 
-                               m_profGpuDeferredLightingMs + m_profGpuOceanMs + m_profGpuHUDMs;
-
-            ImGui::Text("Pass Name                CPU Dispatch      GPU Exec");
-            ImGui::Separator();
-
-            ImGui::Text("Terrain Pass:         %8.2f ms    %8.2f ms", m_profTerrainMs,          m_profGpuTerrainMs);
-            ImGui::Text("Orb Creature Pass:    %8.2f ms    %8.2f ms", m_profOrbCreatureMs,       m_profGpuOrbCreatureMs);
-            ImGui::Text("Shadow Pass:          %8.2f ms    %8.2f ms", m_profShadowMs,           m_profGpuShadowMs);
-            ImGui::Text("SSAO Pass:            %8.2f ms    %8.2f ms", m_profSSAOMs,             m_profGpuSSAOMs);
-            ImGui::Text("SSAO Blur Pass:       %8.2f ms    %8.2f ms", m_profSSAOBlurMs,         m_profGpuSSAOBlurMs);
-            ImGui::Text("Sky Pass:             %8.2f ms    %8.2f ms", m_profSkyMs,              m_profGpuSkyMs);
-            ImGui::Text("Deferred Lighting:    %8.2f ms    %8.2f ms", m_profDeferredLightingMs, m_profGpuDeferredLightingMs);
-            ImGui::Text("Ocean Grid Pass:      %8.2f ms    %8.2f ms", m_profOceanMs,            m_profGpuOceanMs);
-            ImGui::Text("HUD / UI Pass:        %8.2f ms    %8.2f ms", m_profHUDMs,              m_profGpuHUDMs);
-
-            ImGui::Separator();
-            ImGui::Text("Total Measured:       %8.2f ms    %8.2f ms", totalCpuMs, totalGpuMs);
-            ImGui::Text("Target Frame Time:    %8.2f ms (%.1f FPS)", 1000.0f / m_fps, m_fps);
-
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

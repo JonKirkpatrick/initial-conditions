@@ -13,6 +13,7 @@ layout(location = X) uniform int            u_terrainSliceValid[81];
 const int kVisibleGridDim = 9;
 const int kTileResolution = 256; // core texels per side
 const int kTexSide        = 257; // texels per side with apron
+const vec2 kGridTexelSize = 1.0 / vec2(float(kVisibleGridDim * kTileResolution));
 
 // -----------------------------------------------------------------------------
 // Resolves a full 9x9 grid UV [0, 1] to a 2D array layer (0..80) and local tile UV.

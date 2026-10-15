@@ -18,7 +18,7 @@
 namespace soa {
 
     /** @brief Maximum capacity bound for total allocated entities in the system. */
-    static constexpr std::size_t MAX_ENTITIES = 1048576;
+    static constexpr std::size_t MAX_ENTITIES = 524288;
 
     /**
      * @brief Light 64-bit generational handle uniquely identifying an entity instance.

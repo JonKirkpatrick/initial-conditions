@@ -138,6 +138,9 @@
             { "cppNamespace":   "Ocean",        "cppSymbol": "Time",                "glsl": "u_time",                   "location": 2 },
             { "cppNamespace":   "Ocean",        "cppSymbol": "NightAmbientFloor",   "glsl": "u_nightAmbientFloor",      "location": 3 }
         ],
-        "Sky": []
+        "Sky": [],
+        "TerrainDepth": [
+            { "glsl":           "a_uv",         "location": 0 }
+        ]
     }
 }

@@ -265,13 +265,15 @@ MaterialSample resolveMaterial(inout GeometrySample geo)
         mat.blendFactor
     );
 
+    vec3 finalColor = rawTerrainColour;
+    float gridMask = 0.0;
     // ================== HEX GRID ==================
     float gridFade = pow(clamp(1.0 - (geo.dist / u_farPlane), 0.0, 1.0), 2.0);
     float visibilityDist = 20.0 + u_cameraHeight * 2.0;
     float distanceFade = clamp(1.0 - (geo.dist / visibilityDist), 0.0, 1.0);
-    float gridMask = hexGrid(geo.pos.xz);
+    gridMask = hexGrid(geo.pos.xz);
     float finalGridIntensity = gridMask * gridFade * distanceFade * 0.72;
-    vec3 finalColor = mix(rawTerrainColour, u_gridColour, finalGridIntensity);
+    finalColor = mix(rawTerrainColour, u_gridColour, finalGridIntensity);
 
     // ================== HEX HIGHLIGHT ==================
     if (u_cursorMode) {

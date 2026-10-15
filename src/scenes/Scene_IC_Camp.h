@@ -152,6 +152,7 @@ protected:
     GLuint              m_terrainShadowProgram  = Assets::Instance().getGLProgram("TerrainShadow"); ///< Shader program for terrain shadow map depth render.
     GLuint              m_orbShadowProgram      = Assets::Instance().getGLProgram("OrbShadow");     ///< Shader program for orb creature shadow depth render.
     GLuint              m_oceanProgram          = Assets::Instance().getGLProgram("Ocean");         ///< Shader program for dynamic ocean surface waves.
+    GLuint              m_terrainDepthProgram   = Assets::Instance().getGLProgram("TerrainDepth");  ///< Shader program for terrain depth pre-pass.
 
 
     // =========================================================================
@@ -235,45 +236,6 @@ protected:
     bool                    m_debugDisableTexelSnap                 = false;///< Debug flag disabling shadow matrix texel snapping.
     bool                    m_debugShowCascadeColors                = false;///< Debug flag tinting terrain fragments by cascade index.
 
-    enum RenderPass {
-        PASS_TERRAIN = 0,
-        PASS_ORB_CREATURE,
-        PASS_SHADOW,
-        PASS_SSAO,
-        PASS_SSAO_BLUR,
-        PASS_SKY,
-        PASS_DEFERRED_LIGHTING,
-        PASS_OCEAN,
-        PASS_HUD,
-        PASS_COUNT
-    };
-
-    GLuint m_gpuQueries[2][PASS_COUNT] = {};
-    bool     m_gpuQueriesInitialized  = false;
-    uint32_t m_queryFrameIdx          = 0;
-
-    // GPU Execution Timers (ms)
-    float m_profGpuTerrainMs          = 0.0f;
-    float m_profGpuOrbCreatureMs       = 0.0f;
-    float m_profGpuShadowMs           = 0.0f;
-    float m_profGpuSSAOMs             = 0.0f;
-    float m_profGpuSSAOBlurMs         = 0.0f;
-    float m_profGpuSkyMs              = 0.0f;
-    float m_profGpuDeferredLightingMs = 0.0f;
-    float m_profGpuOceanMs            = 0.0f;
-    float m_profGpuHUDMs              = 0.0f;
-
-    float m_profTerrainMs          = 0.0f;
-    float m_profOrbCreatureMs       = 0.0f;
-    float m_profShadowMs           = 0.0f;
-    float m_profSSAOMs             = 0.0f;
-    float m_profSSAOBlurMs         = 0.0f;
-    float m_profSkyMs              = 0.0f;
-    float m_profDeferredLightingMs = 0.0f;
-    float m_profOceanMs            = 0.0f;
-    float m_profHUDMs              = 0.0f;
-    float m_profMovementMs         = 0.0f;
-
     // =========================================================================
     // Rendering — Sky Cubemap
     // =========================================================================
@@ -341,9 +303,6 @@ protected:
     float m_debugSSAOBias           = 0.005f;   ///< Depth bias threshold offset preventing SSAO self-occlusion.
     int m_sampleCount               = 64;       ///< Number of kernel samples used in SSAO calculation.
     int m_ssaoKernelSize            = 64;       ///< Size of SSAO sample pattern array.
-    float m_orbUpdateMs             = 0.0f;     ///< Milliseconds spent updating orb SSBO data per frame.
-    float m_orbGatherMS             = 0.0f;     ///< Milliseconds spent gathering orb ECS data per frame.
-    float m_orbUploadMS             = 0.0f;     ///< Milliseconds spent uploading orb SSBO data per frame.
 
     // =========================================================================
     // Performance Tracking
