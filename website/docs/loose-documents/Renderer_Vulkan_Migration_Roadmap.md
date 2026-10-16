@@ -359,8 +359,8 @@ creating a second scene-specific interface.
 ## First detailed roadmap to write
 
 The first stage-specific roadmap should be **Stage 0: Baseline and
-constraints**. It should inventory the current render passes, resources, shader
-interfaces, window/UI integration, build assumptions, and repeatable visual
-checks. That information will make the Stage 1 OpenGL extraction smaller and
-less speculative.
-
+constraints**. The detailed [Phase 0
+roadmap](./Renderer_Vulkan_Phase_0_Roadmap.md) inventories the current render
+passes, resources, shader interfaces, window/UI integration, build assumptions,
+and repeatable visual checks. That information will make the Stage 1 OpenGL
+extraction smaller and less speculative.
