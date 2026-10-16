@@ -12,6 +12,7 @@ layout(location = X) uniform float u_hexSize;
 layout(location = X) uniform vec2  u_hoveredHex;
 layout(location = X) uniform vec3  u_gridColour;
 layout(location = X) uniform float u_seaLevel;
+layout(location = X) uniform bool  u_drawHexGrid;
 
 // Unified Terrain 2D Texture Arrays
 layout(location = X) uniform sampler2DArray u_terrainDiffuseArray;

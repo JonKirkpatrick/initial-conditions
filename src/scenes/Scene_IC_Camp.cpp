@@ -25,7 +25,7 @@
 
 namespace
 {
-constexpr bool enableImGui = false;
+constexpr bool enableImGui = true;
 }
 
 // =========================================================================
@@ -286,7 +286,7 @@ void Scene_IC_Camp::initLevelState()
     loadLevel(m_levelPath);
     spawnPlayer();
     spawnCamera();
-    spawnDebugOrbs(256);
+    spawnDebugOrbs(128000);
     m_entityManager.update();
     initializeOrbShaderStorage();
 
@@ -2364,6 +2364,7 @@ void Scene_IC_Camp::renderSky()
 
     m_skyTexture.setSmooth(true);
     m_skyTexture.display();
+    m_skyTexture.setActive(false);
 }
 
 void Scene_IC_Camp::renderOceanGrid()

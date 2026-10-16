@@ -10,7 +10,7 @@
 
 namespace
 {
-constexpr bool enableImGui = false;
+constexpr bool enableImGui = true;
 }
 
 GameEngine::GameEngine(const std::string & path)
@@ -47,7 +47,7 @@ void GameEngine::init(const std::string & path)
     settings.attributeFlags = sf::ContextSettings::Attribute::Default;
 
     m_window.create(desktop, "Initial Conditions", sf::Style::None, sf::State::Fullscreen, settings);
-    m_window.setVerticalSyncEnabled(false);
+    m_window.setVerticalSyncEnabled(true);
     m_window.setKeyRepeatEnabled(false);
     m_window.setPosition(sf::Vector2i(0, 0));
     m_window.setSize(desktop.size);
@@ -333,18 +333,22 @@ void GameEngine::changeScene(const std::string& sceneName,
 
 void GameEngine::update()
 {
-    if constexpr (enableImGui)
-        ImGui::SFML::Update(m_window, m_deltaClock.restart());
-
     if (!isRunning()) { return; }
     
     if (m_sceneMap.empty()) { return; }
     
     sUserInput();
+    if constexpr (enableImGui)
+        ImGui::SFML::Update(m_window, m_deltaClock.restart());
+
     currentScene()->simulate(m_simulationSpeed);
     currentScene()->sRender();
     if constexpr (enableImGui)
+    {
+        m_window.setActive(true);
+        m_window.resetGLStates();
         ImGui::SFML::Render(m_window);
+    }
     m_window.display();
 }
 
