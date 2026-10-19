@@ -228,9 +228,9 @@ protected:
     glm::mat4               m_lightViewProjCascades[NUM_CASCADES]   = {};   ///< Light View-Projection matrices per shadow cascade.
     float                   m_lightDepthRange[NUM_CASCADES]         = {};   ///< Orthographic depth bounds per cascade.
     float                   m_texelWorldSize[NUM_CASCADES]          = {};   ///< Texel side length in world space per cascade.
-    float                   m_cascadeSplitLambda                    = 0.25f;///< Logarithmic vs uniform split interpolation factor $[0, 1]$.
+    float                   m_cascadeSplitLambda                    = 0.1f;///< Logarithmic vs uniform split interpolation factor $[0, 1]$.
     float                   m_shadowFrustumPadding                  = 10.0f;///< Frustum padding margin to prevent edge clipping artifacts.
-    float                   m_shadowMaxDistance                     = 500.0f;///< Maximum shadow rendering distance cut-off.
+    float                   m_shadowMaxDistance                     = 800.0f;///< Maximum shadow rendering distance cut-off.
 
     bool                    m_debugShowShadowMap                    = false;///< Debug flag to display shadow map texture array on HUD.
     bool                    m_debugDisableTexelSnap                 = false;///< Debug flag disabling shadow matrix texel snapping.
@@ -264,8 +264,8 @@ protected:
      * @brief Builds contiguous array of `OrbData` structures from ECS entity components.
      * @return Vector of formatted `OrbData` structs ready for GPU streaming.
      */
-    static constexpr std::size_t    MAX_ORB_CAPACITY = 1024000;          ///< Maximum GPU capacity for orb creature instance buffer.
-    OrbSSBO                         m_orbSSBO{MAX_ORB_CAPACITY};       ///< SSBO manager for orb instances.
+    static constexpr std::size_t    MAX_ORB_CAPACITY = 256000;          ///< Maximum GPU capacity for orb creature instance buffer.
+    OrbSSBO                         m_orbSSBO{MAX_ORB_CAPACITY};        ///< SSBO manager for orb instances.
     std::vector<OrbData>            m_orbStagingBuffer;                 ///< CPU staging vector for packing active orb instances.
 
 

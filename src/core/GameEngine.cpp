@@ -46,15 +46,23 @@ void GameEngine::init(const std::string & path)
     // those calls to generate GL_INVALID_OPERATION (1282) every frame.
     settings.attributeFlags = sf::ContextSettings::Attribute::Default;
 
-    m_window.create(desktop, "Initial Conditions", sf::Style::None, sf::State::Fullscreen, settings);
+    m_window.create(desktop, "Initial Conditions", sf::Style::None,
+                sf::State::Windowed, settings);
+    m_window.setPosition({0, 0});
     m_window.setVerticalSyncEnabled(true);
     m_window.setKeyRepeatEnabled(false);
-    m_window.setPosition(sf::Vector2i(0, 0));
-    m_window.setSize(desktop.size);
-    m_window.setView(sf::View(sf::FloatRect(
-        {0.f, 0.f},
-        {float(m_window.getSize().x), float(m_window.getSize().y)}
-    )));
+
+    // Let the WM finish placing the window; SFML updates its size
+    // and the GL viewport when it processes the resize event.
+    while (auto ev = m_window.pollEvent()) {
+        if (ev->is<sf::Event::Resized>()) {
+            // size is now authoritative
+        }
+    }
+
+    sf::Vector2u fb = m_window.getSize();
+    glViewport(0, 0, fb.x, fb.y);
+
     glewExperimental = GL_TRUE;
     GLenum err = glewInit();
     if (err != GLEW_OK) {

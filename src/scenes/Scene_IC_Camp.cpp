@@ -437,7 +437,7 @@ void Scene_IC_Camp::sRender()
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
     // ==========================================
-    // 3. EXECUTE & TIME RENDERING PASSES
+    // 3. EXECUTE RENDERING PASSES
     // ==========================================
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_gBufferFBO);

@@ -34,9 +34,9 @@ class OrbSSBO {
 public:
     /**
      * @brief Constructs SSBO manager and pre-allocates fixed GPU capacity.
-     * @param maxCapacity Maximum number of `OrbData` instances allocated on the GPU. Defaults to 10,000.
+     * @param maxCapacity Maximum number of `OrbData` instances allocated on the GPU. Defaults to 256,000.
      */
-    explicit OrbSSBO(std::size_t maxCapacity = 10000)
+    explicit OrbSSBO(std::size_t maxCapacity = 256000)
         : m_capacity(maxCapacity) 
     {
         glGenBuffers(1, &m_ssbo);
