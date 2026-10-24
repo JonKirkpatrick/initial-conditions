@@ -9,11 +9,12 @@
 
 #pragma once
 #include <glm/glm.hpp>
+#include <cstddef>
 
 /**
  * @brief GPU camera parameters block aligned for std140 UBO layout.
  * 
- * Total size: 288 bytes (aligned to 16-byte boundaries).
+ * Total size: 336 bytes (aligned to 16-byte boundaries).
  */
 struct alignas(16) CameraBlock {
     glm::mat4 view;                 ///< 4x4 View matrix (64 bytes).
@@ -72,3 +73,12 @@ struct alignas(16) AtmosphereBlock {
     float     fogHeightFalloff;     ///< Vertical height density falloff rate parameter (4 bytes).
     float     _padding;             ///< Explicit 4-byte padding field for 16-byte alignment.
 };
+
+static_assert(sizeof(CameraBlock) == 336, "CameraBlock layout changed");
+static_assert(alignof(CameraBlock) == 16, "CameraBlock must be 16-byte aligned");
+
+static_assert(sizeof(EnvironmentBlock) == 64, "EnvironmentBlock layout changed");
+static_assert(alignof(EnvironmentBlock) == 16, "EnvironmentBlock must be 16-byte aligned");
+
+static_assert(sizeof(AtmosphereBlock) == 48, "AtmosphereBlock layout changed");
+static_assert(alignof(AtmosphereBlock) == 16, "AtmosphereBlock must be 16-byte aligned");

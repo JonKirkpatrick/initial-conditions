@@ -157,7 +157,7 @@ vec3 evaluateSkyColor(vec3 rayDir)
     );
 
     float dayLightFactor = dayLightingFactor(sunElevation);
-    vec3  fogColor       = mix(u_fogColorNight, u_fogColorDay, dayLightFactor);
+    vec3  fogColor       = mix(u_fogColorNight.rgb, u_fogColorDay.rgb, dayLightFactor);
     skyColor             = mix(skyColor, fogColor, fogAmount);
 
     return skyColor;

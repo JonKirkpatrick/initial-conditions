@@ -11,7 +11,7 @@
 #include <GL/glew.h>
 #include "scenes/Scene.h"
 #include "renderer/OrbSSBO.h"
-#include "renderer/RenderTypes.h"
+#include "renderer/gl/RenderTypes.h"
 #include "ui/HUD.h"
 #include "environment/Topography.h"
 #include "ecs/SoAEntityManager.hpp"
@@ -145,7 +145,7 @@ protected:
     GLuint              m_skyProgram            = Assets::Instance().getGLProgram("Sky");           ///< Shader program for skybox/celestial dome.
     GLuint              m_ssao                  = Assets::Instance().getGLProgram("SSAO");          ///< Shader program for SSAO screen-space evaluation.
     GLuint              m_ssao_blur             = Assets::Instance().getGLProgram("SSAOBlur");      ///< Shader program for SSAO spatial bilateral blur.
-    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("Terrain");       ///< Shader program for terrain surface.
+    GLuint              m_terrainProgram        = Assets::Instance().getGLProgram("PaperTerrain");       ///< Shader program for terrain surface.
     GLuint              m_OrbCreatureProgram    = Assets::Instance().getGLProgram("OrbCreature");   ///< Shader program for instanced orb creatures.
     GLuint              m_blitProgram           = Assets::Instance().getGLProgram("Blit");          ///< Shader program for full-screen texture blitting.
     GLuint              m_lightingProgram       = Assets::Instance().getGLProgram("Lighting");      ///< Shader program for deferred lighting accumulation.
@@ -219,18 +219,18 @@ protected:
     // Rendering — Shadow Map
     // =========================================================================
 
-    GLuint                  m_shadowFBO                             = 0;    ///< Shadow map depth generation framebuffer.
-    GLuint                  m_shadowDepthTexArray                   = 0;    ///< 2D Texture Array (`GL_TEXTURE_2D_ARRAY`) for CSM cascade depth maps.
-    unsigned int            m_shadowMapSize                         = 2048; ///< Resolution dimension per cascade shadow slice.
-    static constexpr int    NUM_CASCADES                            = 5;    ///< Total number of active shadow map cascades.
+    GLuint                  m_shadowFBO                             = 0;     ///< Shadow map depth generation framebuffer.
+    GLuint                  m_shadowDepthTexArray                   = 0;     ///< 2D Texture Array (`GL_TEXTURE_2D_ARRAY`) for CSM cascade depth maps.
+    unsigned int            m_shadowMapSize                         = 2048;  ///< Resolution dimension per cascade shadow slice.
+    static constexpr int    NUM_CASCADES                            = 5;     ///< Total number of active shadow map cascades.
 
-    float                   m_cascadeSplits[NUM_CASCADES] = {};             ///< Calculated view-space split distance thresholds.
-    glm::mat4               m_lightViewProjCascades[NUM_CASCADES]   = {};   ///< Light View-Projection matrices per shadow cascade.
-    float                   m_lightDepthRange[NUM_CASCADES]         = {};   ///< Orthographic depth bounds per cascade.
-    float                   m_texelWorldSize[NUM_CASCADES]          = {};   ///< Texel side length in world space per cascade.
-    float                   m_cascadeSplitLambda                    = 0.1f;///< Logarithmic vs uniform split interpolation factor $[0, 1]$.
-    float                   m_shadowFrustumPadding                  = 10.0f;///< Frustum padding margin to prevent edge clipping artifacts.
-    float                   m_shadowMaxDistance                     = 800.0f;///< Maximum shadow rendering distance cut-off.
+    float                   m_cascadeSplits[NUM_CASCADES] = {};              ///< Calculated view-space split distance thresholds.
+    glm::mat4               m_lightViewProjCascades[NUM_CASCADES]   = {};    ///< Light View-Projection matrices per shadow cascade.
+    float                   m_lightDepthRange[NUM_CASCADES]         = {};    ///< Orthographic depth bounds per cascade.
+    float                   m_texelWorldSize[NUM_CASCADES]          = {};    ///< Texel side length in world space per cascade.
+    float                   m_cascadeSplitLambda                    = 0.1f;  ///< Logarithmic vs uniform split interpolation factor $[0, 1]$.
+    float                   m_shadowFrustumPadding                  = 10.0f; ///< Frustum padding margin to prevent edge clipping artifacts.
+    float                   m_shadowMaxDistance                     = 500.0f;///< Maximum shadow rendering distance cut-off.
 
     bool                    m_debugShowShadowMap                    = false;///< Debug flag to display shadow map texture array on HUD.
     bool                    m_debugDisableTexelSnap                 = false;///< Debug flag disabling shadow matrix texel snapping.

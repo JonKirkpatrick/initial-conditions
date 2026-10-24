@@ -1,12 +1,10 @@
 // ==============================================================================
 // == Environment Data Uniform Buffer Block & Global Aliases ====================
 // ==============================================================================
-#define u_sunDir   u_sunDir_Block
-#define u_sunColor u_sunColor_Block
 
 layout (std140, binding = 1) uniform EnvironmentData {
-    vec4  u_sunColor_Block;
-    vec3  u_sunDir_Block;
+    vec4  u_sunColor;
+    vec3  u_sunDir;
     float u_ambientStrength;
     vec3  u_moonDir;
     float u_skyExposure;

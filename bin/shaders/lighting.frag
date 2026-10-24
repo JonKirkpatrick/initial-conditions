@@ -178,7 +178,7 @@ void main()
         u_fogHeightFalloff
     );
 
-    vec3 fogColor   = mix(u_fogColorNight, u_fogColorDay, dayLightingFactor);
+    vec3 fogColor   = mix(u_fogColorNight.rgb, u_fogColorDay.rgb, dayLightingFactor);
     vec3 finalColor = ambientLight + diffuseLight + retroContribution;
     finalColor      = mix(finalColor, fogColor, fogAmount);
 

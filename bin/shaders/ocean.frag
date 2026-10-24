@@ -89,7 +89,7 @@ void main()
         u_fogHeightFalloff
     );
 
-    vec3 fogColor   = mix(u_fogColorNight, u_fogColorDay, dayLightingFactor);
+    vec3 fogColor   = mix(u_fogColorNight.rgb, u_fogColorDay.rgb, dayLightingFactor);
     finalColor      = mix(finalColor, fogColor, fogAmount);
 
     FragColor = vec4(finalColor, 0.85 * shoreFade);
